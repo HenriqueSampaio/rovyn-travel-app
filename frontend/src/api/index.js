@@ -46,6 +46,8 @@ export const api = {
   joinTrip: (inviteCode) =>
     req('/trips/join', { method: 'POST', body: JSON.stringify({ invite_code: inviteCode }) }),
   tripStatus: (tripId) => req(`/trips/${tripId}`),
+  deleteTrip: (tripId) => req(`/trips/${tripId}`, { method: 'DELETE' }),
+  leaveTrip: (tripId) => req(`/trips/${tripId}/leave`, { method: 'POST' }),
 
   submitQuestionnaire: (tripId, data) =>
     req(`/trips/${tripId}/questionnaire`, { method: 'POST', body: JSON.stringify(data) }),

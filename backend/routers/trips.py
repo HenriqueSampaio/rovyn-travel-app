@@ -231,6 +231,42 @@ def trip_status(trip_id: str, user: dict = Depends(get_current_user)):
         return _status_payload(conn, trip, user["id"])
 
 
+_TRIP_CHILD_TABLES = (
+    "payments", "approvals", "category_progress", "stars",
+    "votes", "questionnaires", "trip_members",
+)
+
+
+@router.delete("/{trip_id}")
+def delete_trip(trip_id: str, user: dict = Depends(get_current_user)):
+    with get_conn() as conn:
+        trip = _load_trip(conn, trip_id)
+        _require_member(conn, trip_id, user["id"])
+        if user["id"] != trip["leader_id"]:
+            raise HTTPException(status_code=403, detail="Only the trip leader can delete a trip — you can leave it instead.")
+        for table in _TRIP_CHILD_TABLES:
+            conn.execute(f"DELETE FROM {table} WHERE trip_id = ?", (trip_id,))
+        conn.execute("DELETE FROM trips WHERE id = ?", (trip_id,))
+    return {"success": True}
+
+
+@router.post("/{trip_id}/leave")
+def leave_trip(trip_id: str, user: dict = Depends(get_current_user)):
+    with get_conn() as conn:
+        trip = _load_trip(conn, trip_id)
+        _require_member(conn, trip_id, user["id"])
+        if user["id"] == trip["leader_id"]:
+            raise HTTPException(status_code=400, detail="The leader can't leave — delete the trip instead.")
+        paid = conn.execute(
+            "SELECT 1 FROM payments WHERE trip_id = ? AND user_id = ?", (trip_id, user["id"])
+        ).fetchone()
+        if paid:
+            raise HTTPException(status_code=400, detail="You've already paid your share — the trip is locked in.")
+        for table in _TRIP_CHILD_TABLES:
+            conn.execute(f"DELETE FROM {table} WHERE trip_id = ? AND user_id = ?", (trip_id, user["id"]))
+    return {"success": True}
+
+
 # ---------------------------------------------------------------------------
 # Questionnaire
 # ---------------------------------------------------------------------------
