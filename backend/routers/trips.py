@@ -11,11 +11,12 @@ from backend.auth import get_current_user
 from backend.db import get_conn
 from backend.models import (
     CreateTripRequest, CurationRequest, EditRequest, JoinTripRequest,
-    QuestionnaireData, ReorderRequest, StarRequest, VoteRequest,
+    QuestionnaireData, ReorderRequest, SlotEditRequest, StarRequest, VoteRequest,
 )
 from backend.services.ai_service import (
     CATEGORIES, ai_available, generate_final_plan, generate_itinerary,
-    generate_trip_options, get_destination_recommendations, revise_final_plan,
+    generate_trip_options, get_destination_recommendations, recommended_picks,
+    recompute_plan_costs, revise_final_plan,
 )
 from backend.services import email_service
 
@@ -390,33 +391,49 @@ def read_options(trip_id: str, user: dict = Depends(get_current_user)):
         trip = _load_trip(conn, trip_id)
         _require_member(conn, trip_id, user["id"])
         stars = conn.execute(
-            "SELECT user_id, category, option_id FROM stars WHERE trip_id = ?", (trip_id,)
+            """SELECT s.user_id, s.category, s.option_id, u.name
+               FROM stars s JOIN users u ON u.id = s.user_id WHERE s.trip_id = ?""",
+            (trip_id,),
         ).fetchall()
         progress = conn.execute(
             "SELECT user_id, category, status FROM category_progress WHERE trip_id = ?", (trip_id,)
         ).fetchall()
-        my_city_row = conn.execute(
+        my_q_row = conn.execute(
             "SELECT data FROM questionnaires WHERE trip_id = ? AND user_id = ?", (trip_id, user["id"])
         ).fetchone()
 
     star_counts = Counter(s["option_id"] for s in stars)
+    star_names: dict[str, list] = {}
+    for s in stars:
+        star_names.setdefault(s["option_id"], []).append(s["name"])
     progress_map: dict[str, dict] = {}
     for r in progress:
         progress_map.setdefault(r["user_id"], {})[r["category"]] = r["status"]
 
-    my_city = ""
-    if my_city_row:
-        my_city = json.loads(my_city_row["data"]).get("departure_city", "").strip()
+    my_city, my_pace = "", "moderately"
+    if my_q_row:
+        my_q = json.loads(my_q_row["data"])
+        my_city = my_q.get("departure_city", "").strip()
+        my_pace = my_q.get("pace") or "moderately"
+
+    options = json.loads(trip["options"]) if trip["options"] else None
+    recommended = None
+    if options:
+        from backend.services.ai_service import _duration_days
+        recommended = recommended_picks(_duration_days(options.get("dates", {})), my_pace)
 
     return {
-        "options": json.loads(trip["options"]) if trip["options"] else None,
+        "options": options,
         "generating": bool(trip["options_generating"]),
         "ai_available": ai_available(),
         "categories": CATEGORIES,
         "star_counts": dict(star_counts),
+        "star_names": star_names,
         "my_stars": [s["option_id"] for s in stars if s["user_id"] == user["id"]],
         "progress": progress_map,
         "my_departure_city": my_city,
+        "my_pace": my_pace,
+        "recommended": recommended,
     }
 
 
@@ -618,7 +635,10 @@ def _member_checks(conn, trip) -> list[dict]:
             if (costs.get(key) or 0) > 0
         ]
         city = city_by_user.get(m["id"], "")
-        flight = round(flight_by_city.get(city, avg_flight), 2)
+        flight = next(
+            (round(v, 2) for k, v in flight_by_city.items() if k.casefold() == city.casefold()),
+            round(avg_flight, 2),
+        )
         if flight > 0:
             items.append({"label": f"Round-trip flight from {city or 'your city'} (estimate)", "amount": flight})
         total = round(sum(i["amount"] for i in items), 2)
@@ -654,7 +674,31 @@ def read_plan(trip_id: str, user: dict = Depends(get_current_user)):
         "status": trip["status"],
         "checks": checks,
         "trip": payload,
+        "replacement_pool": _replacement_pool(trip, plan) if plan else [],
     }
+
+
+def _replacement_pool(trip, plan: dict) -> list[dict]:
+    """Planning-board visits/events not currently in the plan — offered as
+    replacements when someone deletes an itinerary slot."""
+    if not trip["options"]:
+        return []
+    options = json.loads(trip["options"])
+    in_plan = {v.get("id") for v in plan.get("visits", []) + plan.get("events", [])}
+    pool = []
+    for cat in ("visits", "events"):
+        for o in options.get(cat, []):
+            if o.get("id") not in in_plan:
+                pool.append({
+                    "id": o["id"],
+                    "category": cat,
+                    "name": o.get("name"),
+                    "description": o.get("description", ""),
+                    "cost_per_person": o.get("cost_per_person", 0),
+                    "date_hint": o.get("date_hint", ""),
+                    "duration": o.get("duration", ""),
+                })
+    return pool
 
 
 @router.post("/{trip_id}/approve")
@@ -739,6 +783,80 @@ def reorder_days(trip_id: str, req: ReorderRequest, user: dict = Depends(get_cur
         plan["itinerary"]["days"] = reordered
         plan.setdefault("revision_notes", []).append(f"Days reordered by {user['name']}.")
 
+        conn.execute("DELETE FROM approvals WHERE trip_id = ?", (trip_id,))
+        conn.execute(
+            "UPDATE trips SET final_plan = ?, status = 'final_review' WHERE id = ?",
+            (json.dumps(plan), trip_id),
+        )
+    return {"plan": plan}
+
+
+_SLOT_ORDER = ["morning", "afternoon", "evening"]
+_FREE_SLOT = "Free time — recharge or wander."
+
+
+def _slot_item_name(plan: dict, slot_text: str):
+    """Find the plan visit/event whose name appears in a slot's text."""
+    for cat in ("visits", "events"):
+        for item in plan.get(cat, []):
+            name = item.get("name", "")
+            if name and name in (slot_text or ""):
+                return cat, item
+    return None, None
+
+
+@router.post("/{trip_id}/plan/slot")
+def edit_slot(trip_id: str, req: SlotEditRequest, user: dict = Depends(get_current_user)):
+    if req.slot not in _SLOT_ORDER:
+        raise HTTPException(status_code=400, detail="Slot must be morning, afternoon or evening.")
+    if req.action not in ("delete", "replace", "move_up", "move_down"):
+        raise HTTPException(status_code=400, detail="Unknown action.")
+    with get_conn() as conn:
+        trip = _load_trip(conn, trip_id)
+        _require_member(conn, trip_id, user["id"])
+        if not trip["final_plan"]:
+            raise HTTPException(status_code=400, detail="There is no final plan to edit yet.")
+        payments = conn.execute("SELECT COUNT(*) c FROM payments WHERE trip_id = ?", (trip_id,)).fetchone()["c"]
+        if payments > 0:
+            raise HTTPException(status_code=400, detail="Payments have started — the plan is locked.")
+
+        plan = json.loads(trip["final_plan"])
+        days = plan.get("itinerary", {}).get("days", [])
+        day = next((d for d in days if d.get("day") == req.day), None)
+        if day is None:
+            raise HTTPException(status_code=400, detail="That day doesn't exist in the plan.")
+
+        note = ""
+        if req.action in ("move_up", "move_down"):
+            idx = _SLOT_ORDER.index(req.slot)
+            other = idx - 1 if req.action == "move_up" else idx + 1
+            if other < 0 or other >= len(_SLOT_ORDER):
+                raise HTTPException(status_code=400, detail="Nothing to swap with in that direction.")
+            a, b = req.slot, _SLOT_ORDER[other]
+            day[a], day[b] = day.get(b, ""), day.get(a, "")
+            note = f"Day {req.day}: swapped {a} and {b} — {user['name']}."
+        else:
+            slot_text = day.get(req.slot, "")
+            cat, item = _slot_item_name(plan, slot_text)
+            if item is not None:
+                plan[cat] = [i for i in plan[cat] if i.get("id") != item.get("id") or i.get("name") != item.get("name")]
+            if req.action == "delete":
+                day[req.slot] = _FREE_SLOT
+                note = f"Day {req.day} {req.slot}: removed “{(item or {}).get('name', slot_text) or 'activity'}” — {user['name']}."
+            else:  # replace
+                pool = {o["id"]: o for o in _replacement_pool(trip, plan)}
+                repl = pool.get(req.replacement_id)
+                if repl is None:
+                    raise HTTPException(status_code=400, detail="That replacement isn't available.")
+                day[req.slot] = f"{repl['name']} — {repl['description']}".strip(" —")
+                plan.setdefault(repl["category"], []).append(repl)
+                note = (f"Day {req.day} {req.slot}: swapped in “{repl['name']}”"
+                        + (f" for “{item['name']}”" if item else "") + f" — {user['name']}.")
+
+        plan = recompute_plan_costs(plan)
+        plan.setdefault("revision_notes", []).append(note)
+
+        # Any change to the plan needs everyone's approval again
         conn.execute("DELETE FROM approvals WHERE trip_id = ?", (trip_id,))
         conn.execute(
             "UPDATE trips SET final_plan = ?, status = 'final_review' WHERE id = ?",

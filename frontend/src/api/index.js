@@ -78,6 +78,11 @@ export const api = {
     req(`/trips/${tripId}/edit`, { method: 'POST', body: JSON.stringify({ request }) }),
   reorderDays: (tripId, order) =>
     req(`/trips/${tripId}/reorder-days`, { method: 'POST', body: JSON.stringify({ order }) }),
+  editSlot: (tripId, day, slot, action, replacementId = '') =>
+    req(`/trips/${tripId}/plan/slot`, {
+      method: 'POST',
+      body: JSON.stringify({ day, slot, action, replacement_id: replacementId }),
+    }),
   getCheck: (tripId) => req(`/trips/${tripId}/check`),
   payShare: (tripId) => req(`/trips/${tripId}/pay`, { method: 'POST' }),
   getReceipt: (tripId) => req(`/trips/${tripId}/receipt`),

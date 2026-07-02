@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import {
   ArrowDown, ArrowUp, BedDouble, Check, CheckCircle2, CreditCard, Landmark,
   Lightbulb, Loader2, Mail, MoonStar, PartyPopper, Pencil, PlaneTakeoff,
-  Receipt, Scale, Send, Star, Sun, Sunset, Ticket, Users, Wallet,
+  Receipt, Scale, Send, Star, Sun, Sunset, Ticket, Users, Wallet, X,
 } from 'lucide-react';
 import { api, auth } from '../api/index.js';
 import { Page, Loading, ErrorText, HorizonArt, JourneyTracker } from '../ui.jsx';
@@ -38,6 +38,7 @@ export default function FinalPlan() {
   const [busy, setBusy] = useState(false);
   const [editText, setEditText] = useState('');
   const [editOpen, setEditOpen] = useState(false);
+  const [slotModal, setSlotModal] = useState(null); // { day, slot, label }
   const [receipt, setReceipt] = useState(null);
   const [emailInfo, setEmailInfo] = useState(null);
   const pollRef = useRef(null);
@@ -120,6 +121,12 @@ export default function FinalPlan() {
     if (j < 0 || j >= order.length) return;
     [order[index], order[j]] = [order[j], order[index]];
     act(api.reorderDays, tripId, order);
+  }
+
+  async function resolveSlot(action, replacementId = '') {
+    const m = slotModal;
+    setSlotModal(null);
+    if (m) await act(api.editSlot, tripId, m.day, m.slot, action, replacementId);
   }
 
   async function pay() {
@@ -223,7 +230,9 @@ export default function FinalPlan() {
       <Section eyebrow={`Day by day — “${plan.itinerary?.title || 'the plan'}”`} Icon={Sun}>
         {editable && (
           <p className="muted" style={{ fontSize: 13.5, marginBottom: 8, fontStyle: 'italic' }}>
-            Use the arrows to reorder days — any change asks the group to re-approve.
+            This itinerary is yours to shape: reorder whole days with the side arrows, nudge an
+            activity earlier/later within its day, or remove it (Rovyn will offer replacements).
+            Any change asks the group to re-approve.
           </p>
         )}
         {days.map((day, i) => (
@@ -234,11 +243,30 @@ export default function FinalPlan() {
             </div>
             <div>
               <h3 className="serif" style={{ fontSize: 19, fontStyle: 'italic', marginBottom: 10 }}>{day.theme}</h3>
-              {[['morning', Sun], ['afternoon', Sunset], ['evening', MoonStar]].map(([slot, Icon]) => (
+              {[['morning', Sun], ['afternoon', Sunset], ['evening', MoonStar]].map(([slot, Icon], si) => (
                 day[slot] ? (
-                  <div key={slot} style={{ display: 'flex', gap: 12, marginBottom: 8 }}>
+                  <div key={slot} style={{ display: 'flex', gap: 12, marginBottom: 8, alignItems: 'flex-start' }}>
                     <Icon size={15} strokeWidth={1.7} color="var(--clay)" style={{ marginTop: 4, flexShrink: 0 }} />
-                    <p style={{ fontSize: 14.5, color: 'var(--ink-soft)' }}>{day[slot]}</p>
+                    <p style={{ flex: 1, fontSize: 14.5, color: 'var(--ink-soft)' }}>{day[slot]}</p>
+                    {editable && (
+                      <span style={{ display: 'inline-flex', gap: 6, flexShrink: 0, marginTop: 2 }}>
+                        <button className="btn-quiet" title="Move earlier in the day" disabled={busy || si === 0}
+                                style={{ padding: 2 }}
+                                onClick={() => act(api.editSlot, tripId, day.day, slot, 'move_up')}>
+                          <ArrowUp size={13} />
+                        </button>
+                        <button className="btn-quiet" title="Move later in the day" disabled={busy || si === 2}
+                                style={{ padding: 2 }}
+                                onClick={() => act(api.editSlot, tripId, day.day, slot, 'move_down')}>
+                          <ArrowDown size={13} />
+                        </button>
+                        <button className="btn-quiet" title="Remove this" disabled={busy}
+                                style={{ padding: 2, color: 'var(--clay)' }}
+                                onClick={() => setSlotModal({ day: day.day, slot, label: day[slot] })}>
+                          <X size={13} />
+                        </button>
+                      </span>
+                    )}
                   </div>
                 ) : null
               ))}
@@ -446,6 +474,57 @@ export default function FinalPlan() {
             </div>
           </div>
         </Section>
+      )}
+
+      {/* Replace-or-free modal */}
+      {slotModal && (
+        <div
+          onClick={() => setSlotModal(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(35, 49, 43, 0.45)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+          }}
+        >
+          <motion.div
+            initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: 'var(--bg)', maxWidth: 540, width: '100%', maxHeight: '80vh',
+              overflowY: 'auto', padding: '36px 38px 30px', borderRadius: 4,
+              boxShadow: '0 24px 60px rgba(35, 49, 43, 0.35)',
+            }}
+          >
+            <p className="eyebrow">Day {slotModal.day} · {slotModal.slot}</p>
+            <h2 style={{ fontSize: 26, margin: '8px 0 6px' }}>Wish to replace this with something?</h2>
+            <p className="muted" style={{ fontSize: 14, marginBottom: 18 }}>
+              Removing “{slotModal.label}”. Pick something else from the group's board — or leave the slot free.
+            </p>
+
+            {(data.replacement_pool || []).map(o => (
+              <button key={o.id} className="opt-row" onClick={() => resolveSlot('replace', o.id)}>
+                <span style={{ flex: 1 }}>
+                  <span className="opt-title" style={{ display: 'block' }}>{o.name}</span>
+                  <span className="opt-desc">
+                    {o.description}{o.date_hint ? ` — ${o.date_hint}` : ''}{o.duration ? ` · ${o.duration}` : ''}
+                  </span>
+                </span>
+                <span className="muted" style={{ fontSize: 13, whiteSpace: 'nowrap' }}>
+                  {o.cost_per_person > 0 ? `$${o.cost_per_person} pp` : 'free'}
+                </span>
+              </button>
+            ))}
+            {(data.replacement_pool || []).length === 0 && (
+              <p className="serif muted" style={{ fontStyle: 'italic', fontSize: 15, marginBottom: 10 }}>
+                Nothing left on the board to swap in — the group starred everything!
+              </p>
+            )}
+
+            <div style={{ display: 'flex', gap: 22, marginTop: 24 }}>
+              <button className="btn" onClick={() => resolveSlot('delete')}>Just leave it free</button>
+              <button className="btn-quiet" onClick={() => setSlotModal(null)}>Cancel</button>
+            </div>
+          </motion.div>
+        </div>
       )}
     </Page>
   );
