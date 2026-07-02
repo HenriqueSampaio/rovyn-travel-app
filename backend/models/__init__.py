@@ -30,6 +30,7 @@ class QuestionnaireData(BaseModel):
     trip_style: str = "no-preference"  # "single-city" | "multi-city" | "no-preference"
     vibes: list[str]
     accommodation_type: str
+    pace: str = "moderately"  # "very" | "moderately" | "slightly" (busy)
     special_requirements: str = ""
 
 
@@ -54,6 +55,13 @@ class EditRequest(BaseModel):
 
 class ReorderRequest(BaseModel):
     order: list[int]  # new sequence of current day numbers, e.g. [2, 1, 3]
+
+
+class SlotEditRequest(BaseModel):
+    day: int
+    slot: str            # "morning" | "afternoon" | "evening"
+    action: str          # "delete" | "replace" | "move_up" | "move_down"
+    replacement_id: str = ""  # option id from the planning board pool, for "replace"
 
 
 class PostMediaItem(BaseModel):

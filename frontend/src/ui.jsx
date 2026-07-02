@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Check, Compass, LogOut, Loader2 } from 'lucide-react';
+import { ArrowLeft, Check, Compass, LogOut, Loader2 } from 'lucide-react';
 import { auth } from './api/index.js';
 
 export function Wordmark({ size = 26 }) {
@@ -33,15 +33,25 @@ function NavLink({ to, label }) {
 
 export function Nav() {
   const navigate = useNavigate();
+  const location = useLocation();
   const user = auth.user();
+  // Any page inside a specific trip gets a way back home
+  const insideTrip = /^\/trips\/.+/.test(location.pathname);
   return (
     <nav style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       padding: '28px 0 20px', borderBottom: '1px solid var(--line-soft)', marginBottom: 48,
     }}>
-      <button onClick={() => navigate('/trips')} style={{ padding: 0 }}>
-        <Wordmark />
-      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 26 }}>
+        <button onClick={() => navigate('/trips')} style={{ padding: 0 }}>
+          <Wordmark />
+        </button>
+        {insideTrip && (
+          <button className="btn-quiet" onClick={() => navigate('/trips')}>
+            <ArrowLeft size={15} strokeWidth={2} /> My trips
+          </button>
+        )}
+      </div>
       {user && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
           <NavLink to="/feed" label="Feed" />

@@ -46,6 +46,8 @@ export const api = {
   joinTrip: (inviteCode) =>
     req('/trips/join', { method: 'POST', body: JSON.stringify({ invite_code: inviteCode }) }),
   tripStatus: (tripId) => req(`/trips/${tripId}`),
+  deleteTrip: (tripId) => req(`/trips/${tripId}`, { method: 'DELETE' }),
+  leaveTrip: (tripId) => req(`/trips/${tripId}/leave`, { method: 'POST' }),
 
   submitQuestionnaire: (tripId, data) =>
     req(`/trips/${tripId}/questionnaire`, { method: 'POST', body: JSON.stringify(data) }),
@@ -78,6 +80,11 @@ export const api = {
     req(`/trips/${tripId}/edit`, { method: 'POST', body: JSON.stringify({ request }) }),
   reorderDays: (tripId, order) =>
     req(`/trips/${tripId}/reorder-days`, { method: 'POST', body: JSON.stringify({ order }) }),
+  editSlot: (tripId, day, slot, action, replacementId = '') =>
+    req(`/trips/${tripId}/plan/slot`, {
+      method: 'POST',
+      body: JSON.stringify({ day, slot, action, replacement_id: replacementId }),
+    }),
   getCheck: (tripId) => req(`/trips/${tripId}/check`),
   payShare: (tripId) => req(`/trips/${tripId}/pay`, { method: 'POST' }),
   getReceipt: (tripId) => req(`/trips/${tripId}/receipt`),

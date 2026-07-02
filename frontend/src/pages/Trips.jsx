@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowRight, Plus, Ticket, Crown, Users } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Compass, LogOut, Plus, Ticket, Trash2, Crown, Users } from 'lucide-react';
 import { api } from '../api/index.js';
 import { Page, Field, Loading, ErrorText } from '../ui.jsx';
 
@@ -23,10 +23,27 @@ export default function Trips() {
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [confirmId, setConfirmId] = useState(null);
 
   useEffect(() => {
     api.myTrips().then(d => setTrips(d.trips)).catch(err => setError(err.message));
   }, []);
+
+  async function removeTrip(t) {
+    setBusy(true);
+    setError('');
+    try {
+      if (t.is_leader) await api.deleteTrip(t.id);
+      else await api.leaveTrip(t.id);
+      setTrips(prev => prev.filter(x => x.id !== t.id));
+      setConfirmId(null);
+    } catch (err) {
+      setError(err.message);
+      setConfirmId(null);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function create(e) {
     e.preventDefault();
@@ -65,33 +82,64 @@ export default function Trips() {
 
       {trips.length > 0 && (
         <div style={{ marginBottom: 64 }}>
-          {trips.map((t, i) => (
-            <motion.button
-              key={t.id}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.06, duration: 0.4 }}
-              className="opt-row"
-              onClick={() => navigate(`/trips/${t.id}`)}
-            >
-              <div style={{ flex: 1 }}>
-                <div className="opt-title serif" style={{ fontSize: 22 }}>
-                  {t.selected_destination ? `${t.name} — ${t.selected_destination}` : t.name}
-                </div>
-                <div className="opt-desc" style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 4 }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                    <Users size={13} /> {t.member_count} traveler{t.member_count === 1 ? '' : 's'}
-                  </span>
-                  {t.is_leader && (
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                      <Crown size={13} /> You lead
+          {[
+            { key: 'planning', label: 'Organization in progress', Icon: Compass, list: trips.filter(t => t.status !== 'booked') },
+            { key: 'confirmed', label: 'Confirmed', Icon: CheckCircle2, list: trips.filter(t => t.status === 'booked') },
+          ].filter(section => section.list.length > 0).map(section => (
+            <div key={section.key} style={{ marginBottom: 40 }}>
+              <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <section.Icon size={13} strokeWidth={2.5} /> {section.label} · {section.list.length}
+              </p>
+              {section.list.map((t, i) => (
+                <motion.div
+                  key={t.id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.06, duration: 0.4 }}
+                  className="opt-row"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => navigate(`/trips/${t.id}`)}
+                >
+                  <div style={{ flex: 1 }}>
+                    <div className="opt-title serif" style={{ fontSize: 22 }}>
+                      {t.selected_destination ? `${t.name} — ${t.selected_destination}` : t.name}
+                    </div>
+                    <div className="opt-desc" style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 4 }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                        <Users size={13} /> {t.member_count} traveler{t.member_count === 1 ? '' : 's'}
+                      </span>
+                      {t.is_leader && (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                          <Crown size={13} /> You lead
+                        </span>
+                      )}
+                      <span>{STATUS_LABEL[t.status] || t.status}</span>
+                    </div>
+                  </div>
+                  {confirmId === t.id ? (
+                    <span style={{ display: 'inline-flex', gap: 14, alignItems: 'center' }} onClick={e => e.stopPropagation()}>
+                      <button
+                        disabled={busy}
+                        onClick={() => removeTrip(t)}
+                        style={{ color: 'var(--clay)', fontWeight: 700, fontSize: 13.5 }}
+                      >
+                        {t.is_leader ? 'Delete for everyone?' : 'Leave this trip?'}
+                      </button>
+                      <button className="muted" style={{ fontSize: 13.5 }} onClick={() => setConfirmId(null)}>cancel</button>
                     </span>
+                  ) : (
+                    <button
+                      title={t.is_leader ? 'Delete trip' : 'Leave trip'}
+                      onClick={e => { e.stopPropagation(); setConfirmId(t.id); }}
+                      style={{ color: 'var(--muted)', padding: 6, marginRight: 4 }}
+                    >
+                      {t.is_leader ? <Trash2 size={16} strokeWidth={1.8} /> : <LogOut size={16} strokeWidth={1.8} />}
+                    </button>
                   )}
-                  <span>{STATUS_LABEL[t.status] || t.status}</span>
-                </div>
-              </div>
-              <ArrowRight size={18} color="var(--pine)" />
-            </motion.button>
+                  <ArrowRight size={18} color="var(--pine)" />
+                </motion.div>
+              ))}
+            </div>
           ))}
         </div>
       )}

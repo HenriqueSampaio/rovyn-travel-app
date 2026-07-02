@@ -7,7 +7,21 @@ from backend.services import links
 
 _client = None
 
-CATEGORIES = ["flights", "stay", "itinerary", "visits", "events"]
+# "itinerary" is no longer a starrable category — Rovyn builds the itinerary
+# from the group's starred visits & events at their preferred pace.
+CATEGORIES = ["flights", "stay", "visits", "events"]
+
+PACES = ("very", "moderately", "slightly")  # how busy the trip should be
+
+
+def recommended_picks(duration_days: int, pace: str) -> dict:
+    """How many visits/events a traveler should aim to star, given their pace."""
+    per_day = {"very": 1.5, "moderately": 1.0, "slightly": 0.6}.get(pace, 1.0)
+    visits = max(2, round(duration_days * per_day))
+    events = {"very": max(2, round(duration_days / 2)),
+              "moderately": max(1, round(duration_days / 3)),
+              "slightly": 1}.get(pace, 2)
+    return {"visits": visits, "events": events}
 
 
 def _get_client():
@@ -34,8 +48,11 @@ def _aggregate_preferences(responses: list[dict]) -> dict:
     budgets_min, budgets_max = [], []
     dates_start, dates_end = [], []
     requirements: list[str] = []
+    paces: list[str] = []
 
     for r in responses:
+        if r.get("pace") in PACES:
+            paces.append(r["pace"])
         all_vibes.extend(r.get("vibes", []))
         all_accommodation.append(r.get("accommodation_type", ""))
         style = r.get("trip_style", "no-preference")
@@ -43,7 +60,9 @@ def _aggregate_preferences(responses: list[dict]) -> dict:
             trip_styles.append(style)
         city = r.get("departure_city", "").strip()
         if city:
-            departure_cities.append(city)
+            # "new york" and "New York" are the same place — keep first-seen casing
+            if not any(c.casefold() == city.casefold() for c in departure_cities):
+                departure_cities.append(city)
         budgets_min.append(r.get("budget_min", 0))
         budgets_max.append(r.get("budget_max", 0))
         if r.get("travel_dates_start"):
@@ -76,7 +95,11 @@ def _aggregate_preferences(responses: list[dict]) -> dict:
     style_counts = Counter(trip_styles)
     trip_style = style_counts.most_common(1)[0][0] if style_counts else "no-preference"
 
+    pace_counts = Counter(paces)
+    group_pace = pace_counts.most_common(1)[0][0] if pace_counts else "moderately"
+
     return {
+        "group_pace": group_pace,
         "group_size": len(responses),
         "budget_range": {"min": budget_min, "max": budget_max},
         "travel_dates": {"start": start, "end": end},
@@ -84,7 +107,7 @@ def _aggregate_preferences(responses: list[dict]) -> dict:
         "preferred_accommodation": top_accommodation,
         "accommodation_votes": dict(accommodation_counts),
         "trip_style": trip_style,
-        "departure_cities": sorted(set(departure_cities)),
+        "departure_cities": sorted(departure_cities),
         "special_requirements": requirements,
     }
 
@@ -265,7 +288,7 @@ def _city_slug(city: str) -> str:
 
 
 def _assign_option_ids(options: dict) -> dict:
-    for cat in ("stay", "itinerary", "visits", "events"):
+    for cat in ("stay", "visits", "events"):
         for i, opt in enumerate(options.get(cat, [])):
             opt["id"] = f"{cat}-{i + 1}"
     for city, flights in (options.get("flights") or {}).items():
@@ -299,28 +322,91 @@ def generate_trip_options(destination: str, responses: list[dict], trip_name: st
         options = _sample_trip_options(destination, prefs)
     options["destination"] = options.get("destination") or destination
     options.setdefault("dates", dict(prefs["travel_dates"]))
+    # Flights are personal: generated separately with a guaranteed entry for
+    # every departure city, keyed by the exact city each traveler typed.
+    options["flights"] = _flight_options(destination, prefs)
     options = _assign_option_ids(options)
     options = _attach_option_links(options, prefs, destination)
     return options
+
+
+def _flight_options(destination: str, prefs: dict) -> dict:
+    cities = prefs["departure_cities"] or ["Your city"]
+    dates = prefs["travel_dates"]
+    raw = {}
+    if ai_available():
+        try:
+            raw = _ai_flights(destination, cities, dates, prefs["group_size"])
+        except Exception:
+            raw = {}  # never let flight generation sink the whole board
+
+    # Normalize: every departure city gets options under ITS exact name,
+    # matching AI keys case-insensitively and filling gaps with samples.
+    def norm(s: str) -> str:
+        return "".join(ch for ch in s.lower() if ch.isalnum())
+
+    raw_by_norm = {norm(k): v for k, v in raw.items() if isinstance(v, list) and v}
+    flights = {}
+    for city in cities:
+        flights[city] = raw_by_norm.get(norm(city)) or _sample_flights_for_city(city, destination, dates)
+    return flights
+
+
+def _ai_flights(destination: str, cities: list[str], dates: dict, group_size: int) -> dict:
+    keys = ", ".join(f'"{c}"' for c in cities)
+    prompt = f"""You are a flight-search expert. For EACH departure city below, produce exactly 3 realistic round-trip flight options to {destination} for these dates: {dates['start']} to {dates['end']}. Use plausible airlines, routes (with real airport codes), times and prices for each specific origin.
+
+Departure cities: {', '.join(cities)}
+
+The three options per city should cover different trade-offs: fastest, cheapest, best times.
+
+Respond with ONLY valid JSON — an object whose keys are EXACTLY these strings: {keys}
+{{
+  "{cities[0]}": [
+    {{"airline": "string", "route": "JFK → SPU (via VIE)", "depart": "{dates['start']} 09:40",
+      "return": "{dates['end']} 17:10", "stops": 1, "duration": "11h 20m",
+      "est_price_per_person": 640, "why": "one line on the trade-off"}}
+  ]
+}}"""
+    result = _ask_claude(prompt, max_tokens=4096)
+    return result if isinstance(result, dict) else {}
+
+
+def _sample_flights_for_city(city: str, destination: str, dates: dict) -> list[dict]:
+    return [
+        {"airline": "Lufthansa", "route": f"{city} → {destination} (1 stop)",
+         "depart": f"{dates['start']} 08:30", "return": f"{dates['end']} 18:45",
+         "stops": 1, "duration": "9h 10m", "est_price_per_person": 620,
+         "why": "Best balance of price and schedule"},
+        {"airline": "Budget carrier combo", "route": f"{city} → {destination} (2 stops)",
+         "depart": f"{dates['start']} 06:05", "return": f"{dates['end']} 22:30",
+         "stops": 2, "duration": "13h 40m", "est_price_per_person": 380,
+         "why": "Cheapest — early start, long day"},
+        {"airline": "Turkish Airlines", "route": f"{city} → {destination} (1 stop)",
+         "depart": f"{dates['start']} 11:20", "return": f"{dates['end']} 15:10",
+         "stops": 1, "duration": "8h 05m", "est_price_per_person": 760,
+         "why": "Most comfortable times, checked bag included"},
+    ]
+
+
+def _option_pool_sizes(duration: int) -> tuple[int, int]:
+    """How many visit/event options to offer, scaled to the stay length so even
+    a very-busy group has enough to choose from."""
+    visits = min(12, max(6, round(duration * 1.5) + 2))
+    events = min(6, max(4, duration // 2 + 2))
+    return visits, events
 
 
 def _ai_trip_options(destination: str, prefs: dict, trip_name: str) -> dict:
     budget = prefs["budget_range"]
     dates = prefs["travel_dates"]
     duration = _duration_days(dates)
+    n_visits, n_events = _option_pool_sizes(duration)
     vibes = ", ".join(prefs["top_vibes"]) if prefs["top_vibes"] else "any"
     requirements = "; ".join(prefs["special_requirements"]) if prefs["special_requirements"] else "none"
-    departures = prefs["departure_cities"] or ["Unknown"]
     acc_votes = ", ".join(f"{k}: {v} vote(s)" for k, v in prefs["accommodation_votes"].items()) or "no data"
 
-    flights_shape = ",\n".join(
-        f'    "{city}": [{{"airline": "string", "route": "JFK → SPU (via VIE)", "depart": "{dates["start"]} 09:40", '
-        f'"return": "{dates["end"]} 17:10", "stops": 1, "duration": "11h 20m", "est_price_per_person": 640, '
-        f'"why": "one line on the trade-off (fastest / cheapest / best times)"}}]'
-        for city in departures
-    )
-
-    prompt = f"""You are an expert travel planner assembling a menu of concrete options for a group trip to {destination}. The group will STAR the options they like, so every option must be distinct and real (real hotel names, real sights, plausible airlines and prices).
+    prompt = f"""You are an expert travel planner assembling a menu of concrete options for a group trip to {destination}. The group will STAR the options they like — Rovyn then builds the day-by-day itinerary from their starred picks — so every option must be distinct, real and independently doable (real hotel names, real sights).
 
 Trip: "{trip_name or destination}"
 Group profile:
@@ -330,14 +416,11 @@ Group profile:
 - Vibes (most voted first): {vibes}
 - Accommodation votes across the group: {acc_votes} — offer options spanning the styles people asked for
 - Special requirements: {requirements}
-- Departure cities: {', '.join(departures)}
 
-Produce options in FIVE categories:
+Produce options in THREE categories:
 1. "stay" — exactly 4 accommodation options covering different styles/price points that match the group's votes.
-2. "itinerary" — exactly 3 day-by-day itinerary variants with clearly different personalities (e.g. relaxed pace / packed explorer / culture-and-food first). Each covers all {duration} days.
-3. "flights" — for EACH departure city, exactly 3 realistic round-trip options (fastest / cheapest / best-times trade-offs).
-4. "visits" — exactly 6 sights/attractions/day-trips worth visiting (each independently bookable or free).
-5. "events" — exactly 4 time-specific experiences during the dates (concerts, festivals, food tours, boat parties, classes…). If nothing specific is verifiable, propose typical seasonal events and mark date_hint accordingly.
+2. "visits" — exactly {n_visits} sights/attractions/day-trips worth visiting (each independently bookable or free). Cover different interests and durations so both packed and relaxed travelers find matches.
+3. "events" — exactly {n_events} time-specific experiences during the dates (concerts, festivals, food tours, boat parties, classes…). If nothing specific is verifiable, propose typical seasonal events and mark date_hint accordingly.
 
 Respond with ONLY valid JSON (no markdown):
 {{
@@ -349,15 +432,6 @@ Respond with ONLY valid JSON (no markdown):
       "total_per_person": 450, "rating": 4.6, "amenities": ["...", "..."],
       "why": "one sentence on who this suits"}}
   ],
-  "itinerary": [
-    {{"title": "Relaxed coastal pace", "personality": "one-line pitch",
-      "est_activities_cost_per_person": 220,
-      "days": [{{"day": 1, "date": "YYYY-MM-DD", "theme": "Arrival & old town",
-                 "morning": "string", "afternoon": "string", "evening": "string"}}]}}
-  ],
-  "flights": {{
-{flights_shape}
-  }},
   "visits": [
     {{"name": "string", "description": "1-2 sentences", "duration": "2h", "cost_per_person": 25, "category": "culture"}}
   ],
@@ -366,55 +440,38 @@ Respond with ONLY valid JSON (no markdown):
   ]
 }}"""
 
-    return _ask_claude(prompt, max_tokens=16000)
+    return _ask_claude(prompt, max_tokens=12000)
 
 
 def _sample_trip_options(destination: str, prefs: dict) -> dict:
     """Deterministic demo options used when ANTHROPIC_API_KEY is not configured."""
     dates = prefs["travel_dates"]
     duration = min(_duration_days(dates), 7)
-    try:
-        start = dt.strptime(dates["start"], "%Y-%m-%d")
-    except (ValueError, TypeError):
-        start = dt.now()
+    n_visits, n_events = _option_pool_sizes(duration)
+    town = destination.split(",")[0].strip()
 
-    def day_list(flavor: str):
-        themes = {
-            "relaxed": ["Arrival & slow start", "Beach & long lunch", "Old town wander", "Boat day",
-                        "Spa & sunset", "Market morning", "Farewell brunch"],
-            "packed": ["Arrival & first hike", "Full-day excursion", "Two-town day", "Water sports",
-                       "Sunrise viewpoint & museums", "Cycling & nightlife", "Last sprint & departure"],
-            "culture": ["Arrival & aperitivo", "Museums & landmarks", "Food tour", "Historic day trip",
-                        "Gallery & concert", "Cooking class", "Slow goodbye"],
-        }[flavor]
-        return [
-            {
-                "day": i + 1,
-                "date": (start + timedelta(days=i)).strftime("%Y-%m-%d"),
-                "theme": themes[i % len(themes)],
-                "morning": "Café breakfast & neighborhood stroll",
-                "afternoon": f"Explore {destination} — {themes[i % len(themes)].lower()}",
-                "evening": "Group dinner" if i % 2 == 0 else "Sunset drinks",
-            }
-            for i in range(duration)
-        ]
-
-    flights = {}
-    for city in (prefs["departure_cities"] or ["Your city"]):
-        flights[city] = [
-            {"airline": "Lufthansa", "route": f"{city} → {destination} (1 stop)",
-             "depart": f"{dates['start']} 08:30", "return": f"{dates['end']} 18:45",
-             "stops": 1, "duration": "9h 10m", "est_price_per_person": 620,
-             "why": "Best balance of price and schedule"},
-            {"airline": "Ryanair + local", "route": f"{city} → {destination} (2 stops)",
-             "depart": f"{dates['start']} 06:05", "return": f"{dates['end']} 22:30",
-             "stops": 2, "duration": "13h 40m", "est_price_per_person": 380,
-             "why": "Cheapest — early start, long day"},
-            {"airline": "Turkish Airlines", "route": f"{city} → {destination} (direct-ish)",
-             "depart": f"{dates['start']} 11:20", "return": f"{dates['end']} 15:10",
-             "stops": 1, "duration": "8h 05m", "est_price_per_person": 760,
-             "why": "Most comfortable times, checked bag included"},
-        ]
+    visit_pool = [
+        {"name": f"Old town walking tour of {town}", "description": "Two hours with a local guide through the historic core.", "duration": "2h", "cost_per_person": 25, "category": "culture"},
+        {"name": "Boat trip to nearby islands", "description": "Full-day hop with swim stops and lunch aboard.", "duration": "7h", "cost_per_person": 85, "category": "nature"},
+        {"name": "Hilltop fortress at sunset", "description": "Short climb, the best panorama in town.", "duration": "1.5h", "cost_per_person": 10, "category": "views"},
+        {"name": "Local wine & olive tasting", "description": "Family-run estate just outside town.", "duration": "3h", "cost_per_person": 45, "category": "food"},
+        {"name": "Hidden beaches by kayak", "description": "Guided paddle to coves you can't reach on foot.", "duration": "4h", "cost_per_person": 55, "category": "adventure"},
+        {"name": "Market morning & food stalls", "description": "Graze the farmers' market like a local.", "duration": "2h", "cost_per_person": 15, "category": "food"},
+        {"name": f"{town} museum of local history", "description": "Compact and well-curated — an hour well spent.", "duration": "1.5h", "cost_per_person": 12, "category": "culture"},
+        {"name": "Sunrise viewpoint hike", "description": "Early start, unforgettable light, coffee after.", "duration": "3h", "cost_per_person": 0, "category": "nature"},
+        {"name": "Bike loop along the coast", "description": "Easy riding, plenty of swim stops.", "duration": "4h", "cost_per_person": 30, "category": "adventure"},
+        {"name": "Artisan quarter & workshops", "description": "Meet the makers, take something home.", "duration": "2h", "cost_per_person": 0, "category": "shopping"},
+        {"name": "Cooking class with a local family", "description": "Shop the market, cook the classics, eat together.", "duration": "4h", "cost_per_person": 65, "category": "food"},
+        {"name": "Cliff-jumping cove", "description": "For the brave — locals show you the safe spots.", "duration": "2h", "cost_per_person": 0, "category": "adventure"},
+    ]
+    event_pool = [
+        {"name": "Open-air summer concert", "description": "Live music in the main square.", "date_hint": "most evenings in season", "cost_per_person": 30},
+        {"name": "Full-moon beach party", "description": "DJs on the sand until late.", "date_hint": "check local listings", "cost_per_person": 25},
+        {"name": "Traditional festival night", "description": "Folklore, food stalls and fireworks.", "date_hint": "weekend during your stay", "cost_per_person": 0},
+        {"name": "Sunset sailing with drinks", "description": "Two-hour catamaran cruise, drinks included.", "date_hint": "daily at 18:30", "cost_per_person": 60},
+        {"name": "Night food market", "description": "Street food, live bands, local crowd.", "date_hint": "Fridays & Saturdays", "cost_per_person": 15},
+        {"name": "Open-air cinema under the stars", "description": "Classics with subtitles, beanbags and wine.", "date_hint": "Tuesdays at 21:00", "cost_per_person": 10},
+    ]
 
     return {
         "destination": destination,
@@ -422,42 +479,21 @@ def _sample_trip_options(destination: str, prefs: dict) -> dict:
         "dates": {"start": dates["start"], "end": dates["end"]},
         "source": "sample",
         "stay": [
-            {"name": f"Boutique Hotel {destination.split(',')[0].strip()}", "type": "boutique hotel", "area": "Old town",
+            {"name": f"Boutique Hotel {town}", "type": "boutique hotel", "area": "Old town",
              "price_per_night": 190, "total_per_person": 190 * duration // 2, "rating": 4.7,
              "amenities": ["Rooftop terrace", "Breakfast included"], "why": "Charming and central — for the design lovers."},
             {"name": "Seaside Villa with Pool", "type": "airbnb/vacation rental", "area": "Waterfront",
              "price_per_night": 420, "total_per_person": 420 * duration // max(prefs["group_size"], 1), "rating": 4.9,
              "amenities": ["Private pool", "Full kitchen", "Sea view"], "why": "The whole group under one roof."},
-            {"name": "Central 4★ Hotel", "type": "4-star hotel", "area": "Center",
+            {"name": "Central 4-star Hotel", "type": "4-star hotel", "area": "Center",
              "price_per_night": 150, "total_per_person": 150 * duration // 2, "rating": 4.4,
              "amenities": ["Pool", "Gym", "AC"], "why": "Reliable comfort, easy logistics."},
             {"name": "Old Town Hostel — private rooms", "type": "hostel", "area": "Old town",
              "price_per_night": 55, "total_per_person": 55 * duration, "rating": 4.2,
              "amenities": ["Social bar", "Kitchen"], "why": "Cheapest way to stay central."},
         ],
-        "itinerary": [
-            {"title": "Relaxed coastal pace", "personality": "Slow mornings, beaches, long dinners.",
-             "est_activities_cost_per_person": 160, "days": day_list("relaxed")},
-            {"title": "Packed explorer", "personality": "See everything, sleep later.",
-             "est_activities_cost_per_person": 320, "days": day_list("packed")},
-            {"title": "Culture & food first", "personality": "Museums, markets and every local dish.",
-             "est_activities_cost_per_person": 240, "days": day_list("culture")},
-        ],
-        "flights": flights,
-        "visits": [
-            {"name": f"Old town walking tour of {destination.split(',')[0].strip()}", "description": "Two hours with a local guide through the historic core.", "duration": "2h", "cost_per_person": 25, "category": "culture"},
-            {"name": "Boat trip to nearby islands", "description": "Full-day hop with swim stops and lunch aboard.", "duration": "7h", "cost_per_person": 85, "category": "nature"},
-            {"name": "Hilltop fortress at sunset", "description": "Short climb, the best panorama in town.", "duration": "1.5h", "cost_per_person": 10, "category": "views"},
-            {"name": "Local wine & olive tasting", "description": "Family-run estate just outside town.", "duration": "3h", "cost_per_person": 45, "category": "food"},
-            {"name": "Hidden beaches by kayak", "description": "Guided paddle to coves you can't reach on foot.", "duration": "4h", "cost_per_person": 55, "category": "adventure"},
-            {"name": "Market morning & food stalls", "description": "Graze the farmers' market like a local.", "duration": "2h", "cost_per_person": 15, "category": "food"},
-        ],
-        "events": [
-            {"name": "Open-air summer concert", "description": "Live music in the main square.", "date_hint": "most evenings in season", "cost_per_person": 30},
-            {"name": "Full-moon beach party", "description": "DJs on the sand until late.", "date_hint": "check local listings", "cost_per_person": 25},
-            {"name": "Traditional festival night", "description": "Folklore, food stalls and fireworks.", "date_hint": "weekend during your stay", "cost_per_person": 0},
-            {"name": "Sunset sailing with drinks", "description": "Two-hour catamaran cruise, drinks included.", "date_hint": "daily at 18:30", "cost_per_person": 60},
-        ],
+        "visits": visit_pool[:n_visits],
+        "events": event_pool[:n_events],
     }
 
 
@@ -491,12 +527,13 @@ def _pick_winner(option_list: list[dict], counts: dict) -> tuple[dict, int]:
     return best, counts.get(best.get("id"), 0)
 
 
-def select_winners(options: dict, tallies: dict) -> tuple[dict, list[dict]]:
+def select_winners(options: dict, tallies: dict, prefs: dict | None = None) -> tuple[dict, list[dict]]:
     """Deterministic majority-rule resolution of the group's stars.
 
     Returns (selection, decisions). Selection holds the chosen option objects;
     decisions hold the human-readable 'why' for each category.
     """
+    prefs = prefs or {}
     decisions = []
 
     stay_counts = tallies.get("stay", {}).get("counts", {})
@@ -505,14 +542,6 @@ def select_winners(options: dict, tallies: dict) -> tuple[dict, list[dict]]:
         "category": "stay",
         "choice": stay.get("name", "—"),
         "rationale": _rationale(f"“{stay.get('name')}” ({stay.get('type')})", stay_stars, tallies.get("stay", {}), "stay"),
-    })
-
-    itin_counts = tallies.get("itinerary", {}).get("counts", {})
-    itinerary, itin_stars = _pick_winner(options.get("itinerary", []), itin_counts)
-    decisions.append({
-        "category": "itinerary",
-        "choice": itinerary.get("title", "—"),
-        "rationale": _rationale(f"the “{itinerary.get('title')}” itinerary", itin_stars, tallies.get("itinerary", {}), "itinerary"),
     })
 
     flight_counts = tallies.get("flights", {}).get("counts", {})
@@ -528,12 +557,17 @@ def select_winners(options: dict, tallies: dict) -> tuple[dict, list[dict]]:
     decisions.append({
         "category": "flights",
         "choice": "One flight per departure city",
-        "rationale": "Most-starred option from each departure city: " + "; ".join(flight_notes) + ".",
+        "rationale": "Flights are personal — each city's travelers picked their own. Most-starred per city: "
+                     + "; ".join(flight_notes) + ". Your check reflects your own city's flight.",
     })
 
     # Visits & events are additive: everything starred makes the plan,
     # most-loved first (capped so the trip stays feasible).
-    for cat, cap, label in (("visits", 5, "visit"), ("events", 3, "event")):
+    duration = _duration_days(options.get("dates", {}))
+    group_pace = prefs.get("group_pace", "moderately")
+    caps = recommended_picks(duration, group_pace)
+    for cat, label in (("visits", "visit"), ("events", "event")):
+        cap = max(caps[cat], 3)
         counts = tallies.get(cat, {}).get("counts", {})
         pool = options.get(cat, [])
         starred = sorted(
@@ -552,9 +586,16 @@ def select_winners(options: dict, tallies: dict) -> tuple[dict, list[dict]]:
         else:
             events = starred
 
+    pace_label = {"very": "very busy", "moderately": "moderately busy", "slightly": "slightly busy"}.get(group_pace, "moderately busy")
+    decisions.append({
+        "category": "itinerary",
+        "choice": "Built from your picks",
+        "rationale": f"Rovyn assembled the day-by-day schedule from the group's starred visits and events at a {pace_label} pace "
+                     f"(the group's most common answer). Every slot can still be edited before approval.",
+    })
+
     selection = {
         "stay": stay,
-        "itinerary": itinerary,
         "flights": chosen_flights,
         "visits": visits,
         "events": events,
@@ -565,15 +606,13 @@ def select_winners(options: dict, tallies: dict) -> tuple[dict, list[dict]]:
 def compute_costs(selection: dict, prefs: dict, duration: int) -> tuple[dict, dict]:
     """Deterministic per-person cost math shared by the plan and the check."""
     stay_cost = round(selection.get("stay", {}).get("total_per_person") or 0)
-    itinerary_cost = round(selection.get("itinerary", {}).get("est_activities_cost_per_person") or 0)
     visits_cost = round(sum(v.get("cost_per_person") or 0 for v in selection.get("visits", [])))
     events_cost = round(sum(e.get("cost_per_person") or 0 for e in selection.get("events", [])))
     meals = 50 * duration
     transport = 80
-    shared_total = stay_cost + itinerary_cost + visits_cost + events_cost + meals + transport
+    shared_total = stay_cost + visits_cost + events_cost + meals + transport
     cost_per_person = {
         "stay": stay_cost,
-        "itinerary_activities": itinerary_cost,
         "visits": visits_cost,
         "events": events_cost,
         "meals_estimate": meals,
@@ -587,29 +626,45 @@ def compute_costs(selection: dict, prefs: dict, duration: int) -> tuple[dict, di
     return cost_per_person, flight_cost_by_city
 
 
+def recompute_plan_costs(plan: dict) -> dict:
+    """Re-derive cost_per_person after slot edits change visits/events."""
+    selection = {
+        "stay": plan.get("stay", {}),
+        "flights": plan.get("flights", {}),
+        "visits": plan.get("visits", []),
+        "events": plan.get("events", []),
+    }
+    duration = plan.get("duration_days") or len(plan.get("itinerary", {}).get("days", [])) or 5
+    cost_per_person, flight_cost_by_city = compute_costs(selection, {}, duration)
+    plan["cost_per_person"] = cost_per_person
+    plan["flight_cost_by_city"] = flight_cost_by_city
+    return plan
+
+
 def generate_final_plan(destination: str, responses: list[dict], options: dict, tallies: dict) -> dict:
     prefs = _aggregate_preferences(responses)
     duration = _duration_days(options.get("dates", prefs["travel_dates"]))
-    selection, decisions = select_winners(options, tallies)
+    selection, decisions = select_winners(options, tallies, prefs)
     cost_per_person, flight_cost_by_city = compute_costs(selection, prefs, duration)
+    dates = options.get("dates", prefs["travel_dates"])
 
     if ai_available():
-        woven = _ai_weave_plan(destination, prefs, selection, decisions)
+        woven = _ai_weave_plan(destination, prefs, selection, dates, duration)
     else:
-        woven = _sample_weave_plan(destination, selection)
+        woven = _sample_weave_plan(destination, prefs, selection, dates, duration)
 
     return {
         "destination": destination,
         "country": options.get("country", ""),
-        "dates": options.get("dates", prefs["travel_dates"]),
+        "dates": dates,
         "duration_days": duration,
         "summary": woven.get("summary", f"The group's plan for {destination}."),
         "decisions": decisions,
         "stay": selection["stay"],
         "flights": selection["flights"],
         "itinerary": {
-            "title": selection["itinerary"].get("title", "The plan"),
-            "days": woven.get("days") or selection["itinerary"].get("days", []),
+            "title": woven.get("title") or f"Your days in {destination.split(',')[0].strip()}",
+            "days": woven.get("days", []),
         },
         "visits": selection["visits"],
         "events": selection["events"],
@@ -621,29 +676,36 @@ def generate_final_plan(destination: str, responses: list[dict], options: dict, 
     }
 
 
-def _ai_weave_plan(destination: str, prefs: dict, selection: dict, decisions: list[dict]) -> dict:
-    base_days = selection["itinerary"].get("days", [])
+def _pace_note(pace: str) -> str:
+    return {
+        "very": "The group wants to be VERY busy: fill mornings, afternoons and most evenings; free time is the exception.",
+        "moderately": "The group wants a MODERATE pace: one or two anchors per day, keep some slots easy or free.",
+        "slightly": "The group wants a RELAXED trip: at most one anchor per day, plenty of free time, slow mornings.",
+    }.get(pace, "Keep a moderate pace.")
+
+
+def _ai_weave_plan(destination: str, prefs: dict, selection: dict, dates: dict, duration: int) -> dict:
     visits = selection["visits"]
     events = selection["events"]
     requirements = "; ".join(prefs["special_requirements"]) if prefs["special_requirements"] else "none"
 
-    prompt = f"""You are finalizing a group trip to {destination}. The group voted; these choices are LOCKED — do not swap them, only weave them together well.
+    prompt = f"""You are building the day-by-day itinerary for a group trip to {destination}, {dates.get('start')} to {dates.get('end')} ({duration} days). The group starred these picks; they are LOCKED — every single one must appear exactly once. Fill remaining slots with light, fitting suggestions (breakfast spots, strolls, beach time) or "Free time".
 
-Chosen itinerary skeleton ("{selection['itinerary'].get('title')}"):
-{json.dumps(base_days, indent=1)}
+Pace: {_pace_note(prefs.get('group_pace', 'moderately'))}
 
-Must-include visits the group starred:
+Must-include visits:
 {json.dumps([{k: v.get(k) for k in ('name', 'duration', 'cost_per_person')} for v in visits], indent=1)}
 
-Must-include events the group starred (respect their date_hint when placing them):
+Must-include events (respect their date_hint when placing them; evening-flavored events go in evening slots):
 {json.dumps([{k: e.get(k) for k in ('name', 'date_hint', 'cost_per_person')} for e in events], indent=1)}
 
 Special requirements: {requirements}
 
-Rework the day-by-day schedule so every starred visit and event has a sensible slot (don't overpack any single day; keep the skeleton's overall personality). Also write a warm 2-3 sentence summary of the trip that mentions how the group's votes shaped it, and 3 practical local tips.
+Rules: day 1 is arrival (keep it light), the last day is departure (morning only). Don't overpack any day. Give the itinerary a short evocative title. Also write a warm 2-3 sentence summary mentioning how the group's votes shaped the trip, and 3 practical local tips.
 
 Respond with ONLY valid JSON:
 {{
+  "title": "string",
   "summary": "string",
   "days": [{{"day": 1, "date": "YYYY-MM-DD", "theme": "string", "morning": "string", "afternoon": "string", "evening": "string"}}],
   "tips": ["tip 1", "tip 2", "tip 3"]
@@ -652,19 +714,42 @@ Respond with ONLY valid JSON:
     return _ask_claude(prompt, max_tokens=8192)
 
 
-def _sample_weave_plan(destination: str, selection: dict) -> dict:
-    days = [dict(d) for d in selection["itinerary"].get("days", [])]
-    slots = [(i, period) for i in range(len(days)) for period in ("afternoon", "morning")]
+def _sample_weave_plan(destination: str, prefs: dict, selection: dict, dates: dict, duration: int) -> dict:
+    try:
+        start = dt.strptime(dates.get("start", ""), "%Y-%m-%d")
+    except (ValueError, TypeError):
+        start = dt.now()
+
+    town = destination.split(",")[0].strip()
+    days = [{
+        "day": i + 1,
+        "date": (start + timedelta(days=i)).strftime("%Y-%m-%d"),
+        "theme": "Arrival & first stroll" if i == 0 else ("Departure day" if i == duration - 1 else f"Exploring {town}"),
+        "morning": "Arrive, drop bags, get your bearings" if i == 0 else "Café breakfast & slow start",
+        "afternoon": "Neighborhood wander" if i == 0 else "Free time",
+        "evening": "Welcome dinner" if i == 0 else "Free evening",
+    } for i in range(max(duration, 1))]
+
+    # Distribute starred visits into morning/afternoon slots (skip arrival day),
+    # and events into evenings — density follows the group's pace.
+    slots = []
+    for i in range(1, len(days)):
+        if i == len(days) - 1:
+            continue  # departure day stays light
+        slots.extend([(i, "afternoon"), (i, "morning")])
     for j, visit in enumerate(selection["visits"]):
         if j < len(slots):
             i, period = slots[j]
             days[i][period] = f"{visit['name']} — {visit.get('description', '')}"
+    evening_days = list(range(1, max(len(days) - 1, 1)))
     for j, event in enumerate(selection["events"]):
-        if j < len(days):
-            days[j]["evening"] = f"{event['name']} — {event.get('description', '')}"
+        if j < len(evening_days):
+            days[evening_days[j]]["evening"] = f"{event['name']} — {event.get('description', '')}"
+
     return {
-        "summary": f"Your group's votes are in: {selection['itinerary'].get('title', 'the plan')} in {destination}, "
-                   f"staying at {selection['stay'].get('name', 'your chosen stay')}, with every starred visit and event on the schedule.",
+        "title": f"Your days in {town}",
+        "summary": f"Rovyn built this schedule from the group's starred picks in {town}, "
+                   f"staying at {selection['stay'].get('name', 'your chosen stay')} — every starred visit and event has a slot.",
         "days": days,
         "tips": [
             "This plan was assembled in sample mode — add ANTHROPIC_API_KEY to Rovyn/.env for a smarter weave.",
@@ -672,7 +757,6 @@ def _sample_weave_plan(destination: str, selection: dict) -> dict:
             "Keep one afternoon free — the best group memories are unplanned.",
         ],
     }
-
 
 # ---------------------------------------------------------------------------
 # Final plan revision (free-text change requests)
