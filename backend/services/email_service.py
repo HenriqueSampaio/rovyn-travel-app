@@ -6,8 +6,14 @@ says so, so the UI can tell the user honestly.
 """
 import json
 import os
+import ssl
 import urllib.error
 import urllib.request
+
+import certifi
+
+# macOS system Pythons often lack root CAs; certifi's bundle works everywhere
+_SSL_CTX = ssl.create_default_context(cafile=certifi.where())
 
 
 def email_available() -> bool:
@@ -33,7 +39,7 @@ def send_email(to: str, subject: str, html: str) -> dict:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=15) as res:
+        with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as res:
             body = json.loads(res.read().decode() or "{}")
         return {"sent": True, "simulated": False, "id": body.get("id")}
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
