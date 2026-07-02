@@ -54,3 +54,36 @@ class EditRequest(BaseModel):
 
 class ReorderRequest(BaseModel):
     order: list[int]  # new sequence of current day numbers, e.g. [2, 1, 3]
+
+
+class PostMediaItem(BaseModel):
+    url: str          # /media/... path returned by the upload endpoint
+    media_type: str   # "image" | "video"
+
+
+class CreatePostRequest(BaseModel):
+    caption: str = ""
+    media: list[PostMediaItem]
+    trip_id: str = ""      # optional — associate a Rovyn trip with the post
+    vibes: list[str] = []  # feed-matching tags; defaults from the trip if empty
+
+
+class CommentRequest(BaseModel):
+    text: str
+
+
+class LikeRequest(BaseModel):
+    liked: bool
+
+
+class CopyCheckRequest(BaseModel):
+    start_date: str  # YYYY-MM-DD — when the copier wants to travel
+    end_date: str
+
+
+class CopyTripRequest(BaseModel):
+    name: str = ""
+    start_date: str
+    end_date: str
+    # The adapted plan returned by copy-check; the copier reviewed and accepted it.
+    adapted_plan: dict

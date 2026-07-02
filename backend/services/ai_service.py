@@ -709,6 +709,193 @@ Respond with ONLY the complete updated plan as valid JSON."""
 
 
 # ---------------------------------------------------------------------------
+# Copied-trip adaptation (social feed: "make this trip mine")
+# ---------------------------------------------------------------------------
+
+def _legacy_day_to_text(day: dict) -> dict:
+    """Legacy itinerary days hold {activity, description} objects; final-plan days hold strings."""
+    def txt(period):
+        slot = day.get(period)
+        if isinstance(slot, dict):
+            return slot.get("activity", "") or ""
+        return slot or ""
+    return {
+        "day": day.get("day"),
+        "date": day.get("date"),
+        "theme": day.get("theme", ""),
+        "morning": txt("morning"),
+        "afternoon": txt("afternoon"),
+        "evening": txt("evening"),
+    }
+
+
+def normalize_snapshot(snapshot: dict) -> dict:
+    """Coerce either snapshot kind (final_plan or legacy itinerary) into the final-plan shape."""
+    kind = snapshot.get("kind", "final_plan")
+    plan = snapshot.get("plan", {})
+    if kind == "final_plan":
+        return plan
+    # Legacy single-shot itinerary → minimal final-plan shape
+    days = [_legacy_day_to_text(d) for d in plan.get("days", [])]
+    return {
+        "destination": plan.get("destination", ""),
+        "country": plan.get("country", ""),
+        "dates": plan.get("dates", {}),
+        "duration_days": plan.get("duration_days", len(days)),
+        "summary": f"A trip to {plan.get('destination', '')}.",
+        "decisions": [],
+        "stay": plan.get("hotel", {}),
+        "flights": {},
+        "itinerary": {"title": f"{plan.get('destination', 'Trip')} itinerary", "days": days},
+        "visits": [],
+        "events": [],
+        "cost_per_person": plan.get("cost_breakdown", {}),
+        "flight_cost_by_city": {},
+        "tips": plan.get("tips", []),
+        "revision_notes": [],
+    }
+
+
+def _redate_days(days: list[dict], start: str) -> list[dict]:
+    """Deterministic re-dating — never trust the model with calendar math."""
+    try:
+        first = dt.strptime(start, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return days
+    out = []
+    for i, day in enumerate(days):
+        day = dict(day)
+        day["day"] = i + 1
+        day["date"] = (first + timedelta(days=i)).strftime("%Y-%m-%d")
+        out.append(day)
+    return out
+
+
+def adapt_copied_plan(snapshot: dict, start_date: str, end_date: str,
+                      original_author: str = "a traveler") -> dict:
+    """Check whether a copied itinerary works on the copier's dates and adapt it.
+
+    Returns {"report": {...}, "plan": {...}} where plan is final_plan-shaped and
+    report explains day-count changes, per-event availability, and warnings.
+    """
+    original = normalize_snapshot(snapshot)
+    new_duration = _duration_days({"start": start_date, "end": end_date})
+    original_days = original.get("itinerary", {}).get("days", [])
+    original_duration = original.get("duration_days") or len(original_days) or new_duration
+
+    if ai_available():
+        result = _ai_adapt_plan(original, start_date, end_date, new_duration, original_duration)
+    else:
+        result = _sample_adapt_plan(original, start_date, end_date, new_duration, original_duration)
+
+    plan = result.get("plan", {})
+    plan["dates"] = {"start": start_date, "end": end_date}
+    plan["duration_days"] = new_duration
+    plan.setdefault("itinerary", {})["days"] = _redate_days(
+        (plan.get("itinerary") or {}).get("days", []) or original_days, start_date
+    )[:new_duration]
+    notes = plan.setdefault("revision_notes", [])
+    notes.append(
+        f"Copied from {original_author}'s trip on the Rovyn feed and adapted to "
+        f"{start_date} – {end_date} ({new_duration} days; the original ran {original_duration})."
+    )
+
+    report = result.get("report", {})
+    report.setdefault("feasible", True)
+    report["day_count"] = {"original": original_duration, "new": new_duration}
+    return {"report": report, "plan": plan}
+
+
+def _ai_adapt_plan(original: dict, start_date: str, end_date: str,
+                   new_duration: int, original_duration: int) -> dict:
+    prompt = f"""A traveler found this trip plan on a travel social feed and wants to copy it for their own dates. Your job is to CHECK feasibility and ADAPT the plan.
+
+Original plan (ran {original.get('dates', {}).get('start')} to {original.get('dates', {}).get('end')}, {original_duration} days):
+{json.dumps(original, indent=1)}
+
+The copier's dates: {start_date} to {end_date} ({new_duration} days).
+
+Do all of the following:
+1. EVENTS — the original may include time-specific events (festivals, concerts, seasonal parties). For EACH item in "events", judge whether it plausibly runs during the new dates: "likely_available" (recurring/daily), "seasonal" (runs only part of the year — say which), "date_specific" (tied to the original dates, almost certainly NOT on), or "unknown". Drop date_specific events from the adapted plan and, where natural, suggest a comparable alternative in the day schedule.
+2. DURATION — the new trip is {new_duration} days vs the original {original_duration}. If shorter, cut the least essential days/activities while keeping the plan's personality and must-sees. If longer, add well-paced extra days in the same spirit (don't pad with filler repetition).
+3. SEASON — if the new dates fall in a clearly different season, adjust weather-dependent activities (beach days, snow, open-air venues) and note it in warnings.
+4. STAY & COSTS — keep the same stay; recompute cost_per_person fields (including shared_total) for the new duration (meals ≈ $50/day; keep other unit costs).
+5. Keep the exact same JSON schema for the plan as the original (same keys). Set "summary" to 2-3 warm sentences about the adapted trip.
+
+Respond with ONLY valid JSON:
+{{
+  "report": {{
+    "feasible": true,
+    "duration_note": "one sentence on how the day count was handled",
+    "events": [{{"name": "string", "status": "likely_available|seasonal|date_specific|unknown", "note": "one short sentence"}}],
+    "changes": ["short bullet describing each meaningful change you made"],
+    "warnings": ["anything the copier should verify or watch out for"]
+  }},
+  "plan": {{ ...the complete adapted plan, same schema as the original... }}
+}}"""
+    result = _ask_claude(prompt, max_tokens=16000)
+    if not isinstance(result, dict) or "plan" not in result:
+        raise RuntimeError("The adaptation came back malformed — please try again.")
+    return result
+
+
+def _sample_adapt_plan(original: dict, start_date: str, end_date: str,
+                       new_duration: int, original_duration: int) -> dict:
+    """Deterministic adaptation used when ANTHROPIC_API_KEY is not configured."""
+    plan = json.loads(json.dumps(original))  # deep copy
+    days = plan.get("itinerary", {}).get("days", [])
+
+    changes = []
+    if new_duration < len(days):
+        days = days[:new_duration]
+        changes.append(f"Trimmed the last {original_duration - new_duration} day(s) to fit your shorter trip.")
+    elif new_duration > len(days) and days:
+        while len(days) < new_duration:
+            days.append({
+                "theme": "Free day",
+                "morning": "Slow morning — revisit a favorite spot",
+                "afternoon": "Open afternoon at your own pace",
+                "evening": "Dinner somewhere you spotted earlier in the trip",
+            })
+        changes.append(f"Added {new_duration - original_duration} open day(s) — the original trip was shorter.")
+    plan.setdefault("itinerary", {})["days"] = days
+
+    event_reports = []
+    kept_events = []
+    for e in plan.get("events", []):
+        hint = (e.get("date_hint") or "").lower()
+        recurring = any(w in hint for w in ("daily", "every", "most", "evenings", "weekend"))
+        status = "likely_available" if recurring else "unknown"
+        event_reports.append({
+            "name": e.get("name", "Event"),
+            "status": status,
+            "note": "Appears to run regularly." if recurring
+                    else "Tied to specific dates in the original trip — verify local listings for yours.",
+        })
+        kept_events.append(e)
+    plan["events"] = kept_events
+
+    costs = plan.get("cost_per_person") or {}
+    if "meals_estimate" in costs:
+        costs["meals_estimate"] = 50 * new_duration
+        costs["shared_total"] = sum(v for k, v in costs.items() if k != "shared_total" and isinstance(v, (int, float)))
+
+    return {
+        "report": {
+            "feasible": True,
+            "duration_note": changes[0] if changes else "Same length as the original — the schedule maps over directly.",
+            "events": event_reports,
+            "changes": changes or ["No structural changes needed."],
+            "warnings": [
+                "Adapted in sample mode — add ANTHROPIC_API_KEY to Rovyn/.env for a real availability check.",
+                "Event dates and seasonal activities were not verified against your travel window.",
+            ],
+        },
+        "plan": plan,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Legacy single-shot itinerary (kept for the old flow/endpoint)
 # ---------------------------------------------------------------------------
 

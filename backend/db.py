@@ -93,6 +93,40 @@ CREATE TABLE IF NOT EXISTS payments (
     paid_at      TEXT NOT NULL,
     PRIMARY KEY (trip_id, user_id)
 );
+
+CREATE TABLE IF NOT EXISTS posts (
+    id            TEXT PRIMARY KEY,
+    user_id       TEXT NOT NULL REFERENCES users(id),
+    trip_id       TEXT REFERENCES trips(id),
+    trip_snapshot TEXT,
+    caption       TEXT NOT NULL DEFAULT '',
+    destination   TEXT,
+    vibes         TEXT NOT NULL DEFAULT '[]',
+    created_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS post_media (
+    id         TEXT PRIMARY KEY,
+    post_id    TEXT NOT NULL REFERENCES posts(id),
+    position   INTEGER NOT NULL,
+    media_type TEXT NOT NULL,
+    url        TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS post_likes (
+    post_id  TEXT NOT NULL REFERENCES posts(id),
+    user_id  TEXT NOT NULL REFERENCES users(id),
+    liked_at TEXT NOT NULL,
+    PRIMARY KEY (post_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS post_comments (
+    id         TEXT PRIMARY KEY,
+    post_id    TEXT NOT NULL REFERENCES posts(id),
+    user_id    TEXT NOT NULL REFERENCES users(id),
+    text       TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 # Columns added after the first release; applied to pre-existing databases.
