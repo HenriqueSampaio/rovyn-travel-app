@@ -27,6 +27,7 @@ cp .env.example .env
 |---|---|---|
 | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) → API keys | App falls back to clearly-labeled **sample data**: generic destinations (this is why "Summer in Hvar" once suggested Lisbon), generic planning-board options, and no AI plan revisions. |
 | `RESEND_API_KEY` | [resend.com](https://resend.com) → API keys | Payment receipt emails are **simulated** (receipt still stored in-app; UI says no email was sent). |
+| `PEXELS_API_KEY` | [pexels.com/api](https://www.pexels.com/api/) → "Get Started" → generate key | No photos: destination cards, planning-board options and the final plan render text-only (the UI hides image slots gracefully). |
 | `EMAIL_FROM` | See §3 | Falls back to Resend's shared test sender `onboarding@resend.dev`. |
 
 Restart the backend after editing `.env` — it is read once at startup.
@@ -41,6 +42,15 @@ Restart the backend after editing `.env` — it is read once at startup.
    `EMAIL_FROM="Rovyn <receipts@yourdomain.com>"`.
 4. Code seam: `backend/services/email_service.py` (stdlib HTTP call, no SDK). Swapping to
    another provider (Postmark, SES) means changing one function.
+
+## 3½. Place photos (Pexels)
+
+1. Sign up at [pexels.com](https://www.pexels.com) → [pexels.com/api](https://www.pexels.com/api/) → generate an API key (instant, free: 200 requests/hour, 20k/month).
+2. Put it in `.env` as `PEXELS_API_KEY` and restart the backend.
+3. How it works: photos are fetched **server-side once at generation time** and stored inside the trip's options/plan JSON — the browser never calls Pexels, the key stays private, and polling costs no image requests. A whole planning board uses roughly 20–25 image lookups (destination hero + each stay/visit/event), well within the free tier.
+4. Licensing: Pexels photos are free for commercial use, no attribution required — Rovyn credits photographers anyway (small overlay on heroes, hover tooltip on thumbnails).
+5. Trips generated **before** the key was added have no stored images — create a new trip (or regenerate the board) to see photos.
+6. Code seam: `backend/services/image_service.py` (stdlib-only). Swapping to Unsplash later means changing one function — note Unsplash additionally requires visible attribution links and hotlinked URLs in production.
 
 ## 4. Payment architecture (future — how it will work)
 

@@ -8,7 +8,7 @@ import {
   Users, Wallet, X,
 } from 'lucide-react';
 import { api, auth } from '../api/index.js';
-import { Page, Loading, ErrorText, JourneyTracker } from '../ui.jsx';
+import { Page, Loading, ErrorText, JourneyTracker, Hero, Thumb } from '../ui.jsx';
 
 const COST_LABELS = {
   stay: 'Accommodation (your share)',
@@ -333,6 +333,7 @@ export default function FinalPlan() {
 
         {plan.stay?.name && (
           <Section eyebrow="Where you'll rest" Icon={BedDouble}>
+            <Hero image={plan.stay.image} height={180} style={{ marginBottom: 16 }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 16 }}>
               <div>
                 <h2 style={{ fontSize: 24, marginBottom: 4 }}>{plan.stay.name}</h2>
@@ -355,8 +356,9 @@ export default function FinalPlan() {
         {(plan.visits || []).length > 0 && (
           <Section eyebrow="Visits the group starred" Icon={Landmark}>
             {plan.visits.map(v => (
-              <div key={v.id || v.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, padding: '11px 0', borderTop: '1px solid var(--line-soft)' }}>
-                <div>
+              <div key={v.id || v.name} style={{ display: 'flex', gap: 14, padding: '11px 0', borderTop: '1px solid var(--line-soft)', alignItems: 'flex-start' }}>
+                <Thumb image={v.image} size={54} />
+                <div style={{ flex: 1 }}>
                   <p style={{ fontWeight: 600, fontSize: 14.5 }}>{v.name}</p>
                   <p className="muted" style={{ fontSize: 13 }}>{v.description}</p>
                 </div>
@@ -369,8 +371,9 @@ export default function FinalPlan() {
         {(plan.events || []).length > 0 && (
           <Section eyebrow="Events on the calendar" Icon={Ticket}>
             {plan.events.map(e => (
-              <div key={e.id || e.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, padding: '11px 0', borderTop: '1px solid var(--line-soft)' }}>
-                <div>
+              <div key={e.id || e.name} style={{ display: 'flex', gap: 14, padding: '11px 0', borderTop: '1px solid var(--line-soft)', alignItems: 'flex-start' }}>
+                <Thumb image={e.image} size={54} />
+                <div style={{ flex: 1 }}>
                   <p style={{ fontWeight: 600, fontSize: 14.5 }}>{e.name}</p>
                   <p className="muted" style={{ fontSize: 13 }}>{e.description}{e.date_hint ? ` — ${e.date_hint}` : ''}</p>
                 </div>
@@ -485,6 +488,8 @@ export default function FinalPlan() {
         </p>
       )}
 
+      <Hero image={plan.image} height={210} style={{ marginTop: 18 }} />
+
       <JourneyTracker status={status} style={{ marginTop: 26, marginBottom: 0 }} />
 
       <ActionStrip />
@@ -567,6 +572,7 @@ export default function FinalPlan() {
 
             {(data.replacement_pool || []).map(o => (
               <button key={o.id} className="opt-row" onClick={() => resolveSlot('replace', o.id)}>
+                <Thumb image={o.image} size={46} />
                 <span style={{ flex: 1 }}>
                   <span className="opt-title" style={{ display: 'block' }}>{o.name}</span>
                   <span className="opt-desc">

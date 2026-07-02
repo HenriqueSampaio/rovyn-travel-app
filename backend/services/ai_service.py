@@ -4,6 +4,7 @@ from collections import Counter
 from datetime import datetime as dt, timedelta
 
 from backend.services import links
+from backend.services.image_service import first_image, image_for
 
 _client = None
 
@@ -181,6 +182,11 @@ def get_destination_recommendations(responses: list[dict], trip_name: str = "") 
     else:
         recommendations = _sample_recommendations(prefs)
 
+    for rec in recommendations:
+        rec["image"] = first_image(
+            f"{rec.get('name', '')} {rec.get('country', '')} travel",
+            rec.get("name", ""),
+        )
     return [_attach_links(rec, prefs) for rec in recommendations]
 
 
@@ -327,6 +333,34 @@ def generate_trip_options(destination: str, responses: list[dict], trip_name: st
     options["flights"] = _flight_options(destination, prefs)
     options = _assign_option_ids(options)
     options = _attach_option_links(options, prefs, destination)
+    options = _attach_images(options, destination)
+    return options
+
+
+def _attach_images(options: dict, destination: str) -> dict:
+    """Photos for the destination and every stay/visit/event option.
+
+    Fetched once here and stored with the options, so the UI never queries
+    the image API. All lookups are best-effort — None just means no photo.
+    """
+    town = destination.split(",")[0].strip()
+    options["image"] = first_image(f"{destination} travel", town)
+    for opt in options.get("stay", []):
+        opt["image"] = first_image(
+            f"{opt.get('type', 'hotel')} {town}",
+            f"{opt.get('type', 'hotel')} interior",
+        )
+    for opt in options.get("visits", []):
+        opt["image"] = first_image(
+            f"{opt.get('name', '')} {town}",
+            f"{town} {opt.get('category', '')}".strip(),
+            town,
+        )
+    for opt in options.get("events", []):
+        opt["image"] = first_image(
+            f"{opt.get('name', '')}",
+            f"{town} evening",
+        )
     return options
 
 
@@ -656,6 +690,7 @@ def generate_final_plan(destination: str, responses: list[dict], options: dict, 
     return {
         "destination": destination,
         "country": options.get("country", ""),
+        "image": options.get("image"),
         "dates": dates,
         "duration_days": duration,
         "summary": woven.get("summary", f"The group's plan for {destination}."),

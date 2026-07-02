@@ -735,6 +735,7 @@ def _replacement_pool(trip, plan: dict) -> list[dict]:
                     "cost_per_person": o.get("cost_per_person", 0),
                     "date_hint": o.get("date_hint", ""),
                     "duration": o.get("duration", ""),
+                    "image": o.get("image"),
                 })
     return pool
 

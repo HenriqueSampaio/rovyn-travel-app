@@ -6,7 +6,7 @@ import {
   Loader2, MapPin, PlaneTakeoff, Sparkles, Star, Ticket, Users,
 } from 'lucide-react';
 import { api, auth } from '../api/index.js';
-import { Page, Loading, ErrorText, JourneyTracker } from '../ui.jsx';
+import { Page, Loading, ErrorText, JourneyTracker, Hero, Thumb } from '../ui.jsx';
 
 const TABS = [
   { key: 'overview', label: 'Overview', Icon: Compass },
@@ -181,6 +181,7 @@ export default function Plan() {
       const buddies = (board.star_names?.[opt.id] || []).filter(n => n !== me?.name);
       return (
       <div key={opt.id} style={{ display: 'flex', gap: 16, padding: '22px 0', borderTop: '1px solid var(--line-soft)', alignItems: 'flex-start' }}>
+        {category !== 'flights' && <Thumb image={opt.image} size={category === 'stay' ? 96 : 76} />}
         <div style={{ flex: 1 }}>
           {category === 'flights' ? (
             <>
@@ -382,6 +383,8 @@ export default function Plan() {
           Sample options — add ANTHROPIC_API_KEY to Rovyn/.env for real, group-tailored suggestions.
         </p>
       )}
+
+      <Hero image={options.image} height={200} style={{ marginTop: 18 }} />
 
       <JourneyTracker status={trip.status} style={{ marginTop: 26 }} />
 
