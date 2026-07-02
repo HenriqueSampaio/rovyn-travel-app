@@ -10,9 +10,15 @@ Get a free key at https://www.pexels.com/api/ (200 requests/hour).
 """
 import json
 import os
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
+
+import certifi
+
+# macOS system Pythons often lack root CAs; certifi's bundle works everywhere
+_SSL_CTX = ssl.create_default_context(cafile=certifi.where())
 
 _cache: dict = {}
 
@@ -34,11 +40,15 @@ def image_for(query: str, orientation: str = "landscape") -> dict | None:
     params = urllib.parse.urlencode({"query": query, "per_page": 1, "orientation": orientation})
     req = urllib.request.Request(
         f"https://api.pexels.com/v1/search?{params}",
-        headers={"Authorization": key},
+        headers={
+            "Authorization": key,
+            # Cloudflare rejects urllib's default agent with 403 (code 1010)
+            "User-Agent": "Rovyn/1.0 (group trip planner)",
+        },
     )
     result = None
     try:
-        with urllib.request.urlopen(req, timeout=10) as res:
+        with urllib.request.urlopen(req, timeout=10, context=_SSL_CTX) as res:
             data = json.loads(res.read().decode())
         photos = data.get("photos") or []
         if photos:
