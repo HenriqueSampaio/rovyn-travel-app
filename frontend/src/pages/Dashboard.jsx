@@ -2,10 +2,19 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  ArrowRight, Check, ClipboardList, Copy, Crown, Link2, Loader2, Sparkles, Users,
+  ArrowRight, Check, ClipboardList, Copy, Crown, Link2, Loader2, MapPin, Sparkles, Users,
 } from 'lucide-react';
 import { api } from '../api/index.js';
-import { Page, Field, Loading, ErrorText } from '../ui.jsx';
+import { Page, Loading, ErrorText, JourneyTracker } from '../ui.jsx';
+
+/* Sends each trip status to the page that owns that phase. */
+export function phaseRoute(trip, tripId) {
+  if (trip.has_final_plan || trip.final_plan_generating ||
+      ['final_review', 'approved', 'booked'].includes(trip.status)) return `/trips/${tripId}/final`;
+  if (trip.has_options || trip.status === 'curating') return `/trips/${tripId}/plan`;
+  if (trip.has_recommendations || trip.status === 'voting') return `/trips/${tripId}/vote`;
+  return null;
+}
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -21,9 +30,10 @@ export default function Dashboard() {
       try {
         const data = await api.tripStatus(tripId);
         setTrip(data);
-        if (data.has_recommendations) {
+        const dest = phaseRoute(data, tripId);
+        if (dest) {
           clearInterval(pollRef.current);
-          navigate(`/trips/${tripId}/vote`);
+          navigate(dest);
         }
       } catch (err) {
         if (err.status === 401) navigate('/');
@@ -39,6 +49,7 @@ export default function Dashboard() {
 
   const inviteLink = `${window.location.origin}/join/${trip.invite_code}`;
   const progress = trip.total_members ? trip.submitted_count / trip.total_members : 0;
+  const fixed = trip.destination_fixed;
 
   function copy(text, which) {
     navigator.clipboard.writeText(text);
@@ -50,8 +61,13 @@ export default function Dashboard() {
     setGenerating(true);
     setError('');
     try {
-      await api.generateRecommendations(tripId);
-      navigate(`/trips/${tripId}/vote`);
+      if (fixed) {
+        await api.generateOptions(tripId);
+        navigate(`/trips/${tripId}/plan`);
+      } else {
+        await api.generateRecommendations(tripId);
+        navigate(`/trips/${tripId}/vote`);
+      }
     } catch (err) {
       setError(err.message);
       setGenerating(false);
@@ -62,9 +78,16 @@ export default function Dashboard() {
     <Page>
       <p className="eyebrow">{trip.is_leader ? 'You lead this trip' : 'You are traveling on'}</p>
       <h1 style={{ fontSize: 44, margin: '10px 0 6px' }}>{trip.name}</h1>
-      <p className="muted" style={{ marginBottom: 52 }}>
-        {trip.total_members} traveler{trip.total_members === 1 ? '' : 's'} · {trip.submitted_count} of {trip.total_members} preferences shared
+      <p className="muted" style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+        {fixed && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--pine)', fontWeight: 600 }}>
+            <MapPin size={14} /> {trip.decided_destination}
+          </span>
+        )}
+        <span>{trip.total_members} traveler{trip.total_members === 1 ? '' : 's'} · {trip.submitted_count} of {trip.total_members} preferences shared</span>
       </p>
+
+      <JourneyTracker status={trip.status} style={{ marginTop: 26 }} />
 
       {/* Progress line */}
       <div style={{ height: 2, background: 'var(--line-soft)', marginBottom: 44 }}>
@@ -85,7 +108,6 @@ export default function Dashboard() {
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10 }}>
               <span className="opt-title">{m.name}</span>
               {m.is_leader && <Crown size={14} color="var(--clay)" />}
-              {m.user_id === trip.leader_id && trip.is_leader && null}
             </div>
             {m.submitted ? (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--pine)', fontSize: 14, fontWeight: 600 }}>
@@ -136,32 +158,35 @@ export default function Dashboard() {
 
       <hr className="rule" style={{ marginBottom: 44 }} />
 
-      {/* Destination matching */}
+      {/* Next step: destination matching or the planning board */}
       <section>
         <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-          <Sparkles size={13} strokeWidth={2.5} /> Destination matching
+          <Sparkles size={13} strokeWidth={2.5} /> {fixed ? 'Planning board' : 'Destination matching'}
         </p>
-        {trip.recommendations_generating || generating ? (
+        {trip.recommendations_generating || trip.options_generating || generating ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             <Loader2 className="spin" size={22} strokeWidth={1.8} color="var(--pine)" />
             <p className="serif muted" style={{ fontStyle: 'italic', fontSize: 17 }}>
-              Reading everyone's answers and scouting destinations…
+              {fixed
+                ? `Assembling flights, stays and experiences for ${trip.decided_destination}…`
+                : "Reading everyone's answers and scouting destinations…"}
             </p>
           </div>
         ) : trip.all_submitted ? (
           trip.is_leader ? (
             <>
               <p className="muted" style={{ marginBottom: 20, maxWidth: 460 }}>
-                Everyone's preferences are in. Rovyn will propose five destinations
-                tuned to the whole group, ready for a vote.
+                {fixed
+                  ? `Everyone's preferences are in. Rovyn will lay out flights, stays, itineraries, visits and events for ${trip.decided_destination} — then everyone stars what they love.`
+                  : 'Everyone\'s preferences are in. Rovyn will propose five destinations tuned to the whole group, ready for a vote.'}
               </p>
               <button className="btn" onClick={generate}>
-                Reveal our destinations <ArrowRight size={16} />
+                {fixed ? 'Open the planning board' : 'Reveal our destinations'} <ArrowRight size={16} />
               </button>
             </>
           ) : (
             <p className="serif muted" style={{ fontStyle: 'italic', fontSize: 17 }}>
-              Everyone's in — waiting for the trip leader to reveal the destinations.
+              Everyone's in — waiting for the trip leader to {fixed ? 'open the planning board' : 'reveal the destinations'}.
             </p>
           )
         ) : (

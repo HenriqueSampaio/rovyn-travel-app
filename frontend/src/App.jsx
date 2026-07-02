@@ -7,6 +7,8 @@ import Dashboard from './pages/Dashboard.jsx';
 import Questionnaire from './pages/Questionnaire.jsx';
 import Vote from './pages/Vote.jsx';
 import Itinerary from './pages/Itinerary.jsx';
+import Plan from './pages/Plan.jsx';
+import FinalPlan from './pages/FinalPlan.jsx';
 
 function Protected({ children }) {
   const location = useLocation();
@@ -26,6 +28,8 @@ export default function App() {
       <Route path="/trips/:tripId/questionnaire" element={<Protected><Questionnaire /></Protected>} />
       <Route path="/trips/:tripId/vote" element={<Protected><Vote /></Protected>} />
       <Route path="/trips/:tripId/itinerary" element={<Protected><Itinerary /></Protected>} />
+      <Route path="/trips/:tripId/plan" element={<Protected><Plan /></Protected>} />
+      <Route path="/trips/:tripId/final" element={<Protected><FinalPlan /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

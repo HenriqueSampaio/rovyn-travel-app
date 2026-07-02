@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Compass, LogOut, Loader2 } from 'lucide-react';
+import { Check, Compass, LogOut, Loader2 } from 'lucide-react';
 import { auth } from './api/index.js';
 
 export function Wordmark({ size = 26 }) {
@@ -72,6 +72,65 @@ export function Loading({ text = 'One moment…' }) {
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '120px 0' }}>
       <Loader2 className="spin" size={30} strokeWidth={1.5} color="var(--pine)" />
       <p className="muted serif" style={{ fontStyle: 'italic', fontSize: 17 }}>{text}</p>
+    </div>
+  );
+}
+
+/* Journey tracker — where the group is in the planning process */
+const JOURNEY_STEPS = [
+  { key: 'preferences', label: 'Preferences' },
+  { key: 'destination', label: 'Destination' },
+  { key: 'curate', label: 'Star favorites' },
+  { key: 'plan', label: 'Final plan' },
+  { key: 'pay', label: 'Approve & pay' },
+];
+
+export function journeyIndex(status) {
+  switch (status) {
+    case 'waiting': return 0;
+    case 'voting': return 1;
+    case 'selected':
+    case 'curating': return 2;
+    case 'final_review': return 3;
+    case 'approved': return 4;
+    case 'booked': return 5; // everything done
+    default: return 0;
+  }
+}
+
+export function JourneyTracker({ status, style }) {
+  const current = journeyIndex(status);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 0, margin: '0 0 44px', flexWrap: 'wrap', rowGap: 12, ...style }}>
+      {JOURNEY_STEPS.map((step, i) => {
+        const done = i < current;
+        const active = i === current;
+        return (
+          <div key={step.key} style={{ display: 'flex', alignItems: 'center' }}>
+            {i > 0 && (
+              <div style={{
+                width: 26, height: 1, margin: '0 8px',
+                background: done || active ? 'var(--pine)' : 'var(--line)',
+              }} />
+            )}
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              fontSize: 11.5, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase',
+              color: done ? 'var(--pine)' : active ? 'var(--clay)' : 'var(--muted)',
+              whiteSpace: 'nowrap',
+            }}>
+              {done
+                ? <Check size={13} strokeWidth={3} />
+                : <span style={{
+                    width: 7, height: 7, borderRadius: '50%',
+                    background: active ? 'var(--clay)' : 'var(--line)',
+                    display: 'inline-block',
+                  }} />}
+              {step.label}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }

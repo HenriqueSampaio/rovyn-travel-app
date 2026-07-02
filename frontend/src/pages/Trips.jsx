@@ -9,12 +9,17 @@ const STATUS_LABEL = {
   waiting: 'Gathering preferences',
   voting: 'Voting on destinations',
   selected: 'Destination chosen',
+  curating: 'Starring favorites',
+  final_review: 'Final plan ready',
+  approved: 'Approved — payment open',
+  booked: 'Booked ✓',
 };
 
 export default function Trips() {
   const navigate = useNavigate();
   const [trips, setTrips] = useState(null);
   const [name, setName] = useState('');
+  const [destination, setDestination] = useState('');
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -29,7 +34,7 @@ export default function Trips() {
     setBusy(true);
     setError('');
     try {
-      const t = await api.createTrip(name.trim());
+      const t = await api.createTrip(name.trim(), destination.trim());
       navigate(`/trips/${t.id}`);
     } catch (err) {
       setError(err.message);
@@ -99,6 +104,14 @@ export default function Trips() {
           <Field label="Trip name">
             <input placeholder="Summer in the Algarve" value={name} onChange={e => setName(e.target.value)} />
           </Field>
+          <Field label="Destination — optional">
+            <input placeholder="Hvar, Croatia" value={destination} onChange={e => setDestination(e.target.value)} />
+          </Field>
+          <p className="muted" style={{ fontSize: 13, marginTop: -16, marginBottom: 24 }}>
+            {destination.trim()
+              ? 'The group will plan around this destination — no destination vote.'
+              : 'Leave blank and Rovyn will propose destinations for the group to vote on.'}
+          </p>
           <button className="btn" disabled={busy || !name.trim()}>
             Create <ArrowRight size={16} />
           </button>

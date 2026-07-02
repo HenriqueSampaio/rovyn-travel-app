@@ -28,9 +28,9 @@ export default function Vote() {
       try {
         const data = await api.tripStatus(tripId);
         setTrip(data);
-        if (data.has_itinerary) {
+        if (data.has_options) {
           clearInterval(pollRef.current);
-          navigate(`/trips/${tripId}/itinerary`);
+          navigate(`/trips/${tripId}/plan`);
         }
       } catch {
         /* transient */
@@ -56,8 +56,8 @@ export default function Vote() {
     setBuilding(true);
     setError('');
     try {
-      await api.generateItinerary(tripId);
-      navigate(`/trips/${tripId}/itinerary`);
+      await api.generateOptions(tripId);
+      navigate(`/trips/${tripId}/plan`);
     } catch (err) {
       setError(err.message);
       setBuilding(false);
@@ -90,20 +90,20 @@ export default function Vote() {
 
       {winner && (
         <div style={{ margin: '0 0 48px' }}>
-          {trip.itinerary_generating || building ? (
+          {trip.options_generating || building ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
               <Loader2 className="spin" size={22} strokeWidth={1.8} color="var(--pine)" />
               <p className="serif muted" style={{ fontStyle: 'italic', fontSize: 17 }}>
-                Sketching your days in {winner}…
+                Assembling flights, stays and experiences for {winner}…
               </p>
             </div>
           ) : trip.is_leader ? (
             <button className="btn" onClick={build}>
-              Build the itinerary <ArrowRight size={16} />
+              Open the planning board <ArrowRight size={16} />
             </button>
           ) : (
             <p className="serif muted" style={{ fontStyle: 'italic', fontSize: 17 }}>
-              Waiting for the trip leader to build the itinerary…
+              Waiting for the trip leader to open the planning board…
             </p>
           )}
         </div>

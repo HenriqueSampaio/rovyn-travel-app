@@ -41,7 +41,8 @@ export const api = {
     req('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
 
   myTrips: () => req('/trips'),
-  createTrip: (name) => req('/trips', { method: 'POST', body: JSON.stringify({ name }) }),
+  createTrip: (name, destination = '') =>
+    req('/trips', { method: 'POST', body: JSON.stringify({ name, destination }) }),
   joinTrip: (inviteCode) =>
     req('/trips/join', { method: 'POST', body: JSON.stringify({ invite_code: inviteCode }) }),
   tripStatus: (tripId) => req(`/trips/${tripId}`),
@@ -60,4 +61,24 @@ export const api = {
   generateItinerary: (tripId) => req(`/trips/${tripId}/itinerary`, { method: 'POST' }),
 
   getBookingHub: (tripId) => req(`/trips/${tripId}/hub`),
+
+  // Planning board
+  getOptions: (tripId) => req(`/trips/${tripId}/options`),
+  generateOptions: (tripId) => req(`/trips/${tripId}/options`, { method: 'POST' }),
+  toggleStar: (tripId, category, optionId, starred) =>
+    req(`/trips/${tripId}/star`, { method: 'POST', body: JSON.stringify({ category, option_id: optionId, starred }) }),
+  setCuration: (tripId, category, status) =>
+    req(`/trips/${tripId}/curation`, { method: 'POST', body: JSON.stringify({ category, status }) }),
+
+  // Final plan, approval, payment
+  finalizePlan: (tripId) => req(`/trips/${tripId}/finalize`, { method: 'POST' }),
+  getPlan: (tripId) => req(`/trips/${tripId}/plan`),
+  approvePlan: (tripId) => req(`/trips/${tripId}/approve`, { method: 'POST' }),
+  editPlan: (tripId, request) =>
+    req(`/trips/${tripId}/edit`, { method: 'POST', body: JSON.stringify({ request }) }),
+  reorderDays: (tripId, order) =>
+    req(`/trips/${tripId}/reorder-days`, { method: 'POST', body: JSON.stringify({ order }) }),
+  getCheck: (tripId) => req(`/trips/${tripId}/check`),
+  payShare: (tripId) => req(`/trips/${tripId}/pay`, { method: 'POST' }),
+  getReceipt: (tripId) => req(`/trips/${tripId}/receipt`),
 };
