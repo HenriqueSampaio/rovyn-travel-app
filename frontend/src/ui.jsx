@@ -169,6 +169,42 @@ export function ErrorText({ children }) {
   return <p style={{ color: 'var(--clay)', fontSize: 14, marginTop: 14 }}>{children}</p>;
 }
 
+/* Wide place photo with photographer credit (renders nothing without an image) */
+export function Hero({ image, height = 230, style }) {
+  if (!image?.url) return null;
+  return (
+    <figure style={{ margin: 0, position: 'relative', ...style }}>
+      <img
+        src={image.url} alt={image.alt || ''} loading="lazy"
+        style={{ width: '100%', height, objectFit: 'cover', borderRadius: 4, display: 'block' }}
+      />
+      {image.credit && (
+        <figcaption style={{
+          position: 'absolute', right: 10, bottom: 8, fontSize: 11,
+          color: 'rgba(246, 242, 232, 0.9)', textShadow: '0 1px 4px rgba(0, 0, 0, 0.55)',
+        }}>
+          Photo: {image.credit} · Pexels
+        </figcaption>
+      )}
+    </figure>
+  );
+}
+
+/* Small list thumbnail (renders nothing without an image) */
+export function Thumb({ image, size = 84, style }) {
+  if (!image?.thumb) return null;
+  return (
+    <img
+      src={image.thumb} alt={image.alt || ''} loading="lazy"
+      title={image.credit ? `Photo: ${image.credit} · Pexels` : undefined}
+      style={{
+        width: Math.round(size * 1.4), height: size, objectFit: 'cover',
+        borderRadius: 3, flexShrink: 0, ...style,
+      }}
+    />
+  );
+}
+
 /* Abstract horizon — sun over ridgelines, in-line so it inherits the palette */
 export function HorizonArt({ height = 190 }) {
   return (

@@ -5,7 +5,7 @@ import {
   ArrowRight, BedDouble, Check, Loader2, MapPin, PlaneTakeoff, Route, Ticket, Trophy, Vote as VoteIcon,
 } from 'lucide-react';
 import { api } from '../api/index.js';
-import { Page, Loading, ErrorText } from '../ui.jsx';
+import { Page, Loading, ErrorText, Hero } from '../ui.jsx';
 
 export default function Vote() {
   const navigate = useNavigate();
@@ -143,6 +143,8 @@ export default function Vote() {
                 </span>
               )}
             </div>
+
+            <Hero image={dest.image} height={220} style={{ margin: '16px 0 4px' }} />
 
             <p className="serif" style={{ fontSize: 19, fontStyle: 'italic', color: 'var(--ink-soft)', margin: '14px 0 18px' }}>
               “{dest.tagline}”
