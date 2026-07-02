@@ -2,9 +2,9 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ArrowLeft, ArrowRight, Backpack, Building2, Check, Home, Hotel, Landmark,
-  Mountain, Music, Palmtree, PlaneTakeoff, ShoppingBag, Shuffle, TrainFront,
-  TreePine, UtensilsCrossed, Waves, Flower2,
+  ArrowLeft, ArrowRight, Backpack, Building2, Check, Coffee, Gauge, Home, Hotel,
+  Landmark, Mountain, Music, Palmtree, PlaneTakeoff, ShoppingBag, Shuffle,
+  TrainFront, TreePine, UtensilsCrossed, Waves, Flower2, Zap,
 } from 'lucide-react';
 import { api } from '../api/index.js';
 import { Page, Field, ErrorText } from '../ui.jsx';
@@ -34,7 +34,13 @@ const ACCOMMODATIONS = [
   { id: 'airbnb/vacation rental', label: 'Airbnb or villa', desc: 'Home-like and spacious', Icon: Home },
 ];
 
-const TOTAL = 7;
+const PACES = [
+  { id: 'very', label: 'Very busy', desc: 'Pack the days — see and do everything', Icon: Zap },
+  { id: 'moderately', label: 'Moderately busy', desc: 'A couple of anchors a day, room to breathe', Icon: Gauge },
+  { id: 'slightly', label: 'Slightly busy', desc: 'One thing a day, the rest is vacation', Icon: Coffee },
+];
+
+const TOTAL = 8;
 
 function OptionRow({ selected, onClick, Icon, title, desc }) {
   return (
@@ -74,7 +80,7 @@ export default function Questionnaire() {
   const [form, setForm] = useState({
     dateStart: '', dateEnd: '', departureCity: '',
     budgetMin: 500, budgetMax: 2000,
-    tripStyle: '', vibes: [], accommodation: '', specialRequirements: '',
+    tripStyle: '', vibes: [], accommodation: '', pace: '', specialRequirements: '',
   });
 
   function toggleVibe(id) {
@@ -91,6 +97,7 @@ export default function Questionnaire() {
     if (step === 4 && !form.tripStyle) return 'Pick a travel style — "no preference" counts.';
     if (step === 5 && form.vibes.length === 0) return 'Choose at least one.';
     if (step === 6 && !form.accommodation) return 'Choose where you would like to stay.';
+    if (step === 7 && !form.pace) return 'Pick a pace — it shapes how full your days are.';
     return null;
   }
 
@@ -117,6 +124,7 @@ export default function Questionnaire() {
         trip_style: form.tripStyle || 'no-preference',
         vibes: form.vibes,
         accommodation_type: form.accommodation,
+        pace: form.pace || 'moderately',
         special_requirements: form.specialRequirements,
       });
       navigate(`/trips/${tripId}`);
@@ -199,6 +207,19 @@ export default function Questionnaire() {
       </>
     ),
     7: (
+      <>
+        <h1 style={{ fontSize: 36, marginBottom: 10 }}>How busy do you want to be?</h1>
+        <p className="muted" style={{ marginBottom: 28 }}>
+          This sets the rhythm of your days — and how many activities Rovyn will suggest you pick.
+        </p>
+        {PACES.map(p => (
+          <OptionRow key={p.id} selected={form.pace === p.id} Icon={p.Icon}
+                     title={p.label} desc={p.desc}
+                     onClick={() => setForm(f => ({ ...f, pace: p.id }))} />
+        ))}
+      </>
+    ),
+    8: (
       <>
         <h1 style={{ fontSize: 36, marginBottom: 10 }}>Anything the group should know?</h1>
         <p className="muted" style={{ marginBottom: 40 }}>Dietary needs, accessibility, anything that matters. Optional.</p>
