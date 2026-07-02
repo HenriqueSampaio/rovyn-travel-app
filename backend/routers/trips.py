@@ -246,6 +246,8 @@ def delete_trip(trip_id: str, user: dict = Depends(get_current_user)):
             raise HTTPException(status_code=403, detail="Only the trip leader can delete a trip — you can leave it instead.")
         for table in _TRIP_CHILD_TABLES:
             conn.execute(f"DELETE FROM {table} WHERE trip_id = ?", (trip_id,))
+        # Feed posts keep working off their frozen snapshot; only the live link goes
+        conn.execute("UPDATE posts SET trip_id = NULL WHERE trip_id = ?", (trip_id,))
         conn.execute("DELETE FROM trips WHERE id = ?", (trip_id,))
     return {"success": True}
 

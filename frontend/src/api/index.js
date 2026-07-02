@@ -1,4 +1,4 @@
-const BASE = 'http://localhost:8000';
+const BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 
 function token() {
   return localStorage.getItem('rovyn_token');
@@ -88,4 +88,40 @@ export const api = {
   getCheck: (tripId) => req(`/trips/${tripId}/check`),
   payShare: (tripId) => req(`/trips/${tripId}/pay`, { method: 'POST' }),
   getReceipt: (tripId) => req(`/trips/${tripId}/receipt`),
+
+  // Social feed
+  mediaUrl: (path) => `${BASE}${path}`,
+  uploadMedia: async (file) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${BASE}/social/media`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token()}` },
+      body: form,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Upload failed');
+    return data;
+  },
+  getFeed: (limit = 20, offset = 0) => req(`/social/feed?limit=${limit}&offset=${offset}`),
+  createPost: (caption, media, tripId = '', vibes = []) =>
+    req('/social/posts', { method: 'POST', body: JSON.stringify({ caption, media, trip_id: tripId, vibes }) }),
+  deletePost: (postId) => req(`/social/posts/${postId}`, { method: 'DELETE' }),
+  likePost: (postId, liked) =>
+    req(`/social/posts/${postId}/like`, { method: 'POST', body: JSON.stringify({ liked }) }),
+  getComments: (postId) => req(`/social/posts/${postId}/comments`),
+  addComment: (postId, text) =>
+    req(`/social/posts/${postId}/comments`, { method: 'POST', body: JSON.stringify({ text }) }),
+  deleteComment: (postId, commentId) =>
+    req(`/social/posts/${postId}/comments/${commentId}`, { method: 'DELETE' }),
+  getSharedTrip: (postId) => req(`/social/posts/${postId}/trip`),
+  copyCheck: (postId, startDate, endDate) =>
+    req(`/social/posts/${postId}/copy-check`, {
+      method: 'POST', body: JSON.stringify({ start_date: startDate, end_date: endDate }),
+    }),
+  copyTrip: (postId, name, startDate, endDate, adaptedPlan) =>
+    req(`/social/posts/${postId}/copy`, {
+      method: 'POST',
+      body: JSON.stringify({ name, start_date: startDate, end_date: endDate, adapted_plan: adaptedPlan }),
+    }),
 };

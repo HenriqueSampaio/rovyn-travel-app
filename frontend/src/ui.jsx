@@ -14,6 +14,23 @@ export function Wordmark({ size = 26 }) {
   );
 }
 
+function NavLink({ to, label }) {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const active = pathname === to || pathname.startsWith(`${to}/`);
+  return (
+    <button
+      onClick={() => navigate(to)}
+      style={{
+        fontSize: 13, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase',
+        color: active ? 'var(--clay)' : 'var(--pine)', padding: '4px 0',
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
 export function Nav() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -37,6 +54,8 @@ export function Nav() {
       </div>
       {user && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+          <NavLink to="/feed" label="Feed" />
+          <NavLink to="/trips" label="Trips" />
           <span className="muted" style={{ fontSize: 14 }}>{user.name}</span>
           <button
             className="btn-quiet"

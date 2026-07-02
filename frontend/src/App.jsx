@@ -9,6 +9,9 @@ import Vote from './pages/Vote.jsx';
 import Itinerary from './pages/Itinerary.jsx';
 import Plan from './pages/Plan.jsx';
 import FinalPlan from './pages/FinalPlan.jsx';
+import Feed from './pages/Feed.jsx';
+import NewPost from './pages/NewPost.jsx';
+import PostTrip from './pages/PostTrip.jsx';
 
 function Protected({ children }) {
   const location = useLocation();
@@ -30,6 +33,9 @@ export default function App() {
       <Route path="/trips/:tripId/itinerary" element={<Protected><Itinerary /></Protected>} />
       <Route path="/trips/:tripId/plan" element={<Protected><Plan /></Protected>} />
       <Route path="/trips/:tripId/final" element={<Protected><FinalPlan /></Protected>} />
+      <Route path="/feed" element={<Protected><Feed /></Protected>} />
+      <Route path="/feed/new" element={<Protected><NewPost /></Protected>} />
+      <Route path="/feed/post/:postId/trip" element={<Protected><PostTrip /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
