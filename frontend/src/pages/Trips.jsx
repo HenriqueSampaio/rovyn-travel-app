@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowRight, CheckCircle2, Compass, LogOut, Plus, Ticket, Trash2, Crown, Users } from 'lucide-react';
 import { api } from '../api/index.js';
-import { Page, Field, Loading, ErrorText } from '../ui.jsx';
+import { Page, Field, Loading, ErrorText, CityInput } from '../ui.jsx';
 
 function Countdown({ dates }) {
   if (!dates?.start) return null;
@@ -172,7 +172,7 @@ export default function Trips() {
             <input placeholder="Summer in the Algarve" value={name} onChange={e => setName(e.target.value)} />
           </Field>
           <Field label="Destination — optional">
-            <input placeholder="Hvar, Croatia" value={destination} onChange={e => setDestination(e.target.value)} />
+            <CityInput placeholder="Hvar, Croatia" value={destination} onChange={setDestination} />
           </Field>
           <p className="muted" style={{ fontSize: 13, marginTop: -16, marginBottom: 24 }}>
             {destination.trim()

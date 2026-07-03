@@ -206,9 +206,20 @@ export default function Plan() {
             </>
           ) : category === 'stay' ? (
             <>
-              <p style={{ fontWeight: 700, fontSize: 17 }}>{opt.name}</p>
+              <p style={{ fontWeight: 700, fontSize: 17 }}>
+                {opt.name}
+                {opt.live_price && (
+                  <span title="Real property with live availability for your dates" style={{
+                    marginLeft: 10, fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em',
+                    color: 'var(--pine)', border: '1px solid var(--pine)', borderRadius: 999,
+                    padding: '2px 8px', verticalAlign: 2,
+                  }}>
+                    LIVE PRICE
+                  </span>
+                )}
+              </p>
               <p className="muted" style={{ fontSize: 14, margin: '2px 0 6px' }}>
-                {opt.type} · {opt.area} {opt.rating ? <>· <Star size={12} fill="var(--clay)" color="var(--clay)" style={{ verticalAlign: -1 }} /> {opt.rating}</> : null}
+                {opt.type}{opt.area ? ` · ${opt.area}` : ''} {opt.rating ? <>· <Star size={12} fill="var(--clay)" color="var(--clay)" style={{ verticalAlign: -1 }} /> {opt.rating}</> : null}
               </p>
               <p style={{ fontSize: 14.5, color: 'var(--ink-soft)' }}>{opt.why}</p>
               {(opt.amenities || []).length > 0 && (
@@ -217,7 +228,8 @@ export default function Plan() {
               <p style={{ marginTop: 8, display: 'flex', alignItems: 'baseline', gap: 14 }}>
                 <span className="serif" style={{ fontSize: 24, color: 'var(--pine)' }}>${opt.price_per_night}<span style={{ fontSize: 14 }}> / night</span></span>
                 <span className="muted" style={{ fontSize: 13 }}>≈ ${opt.total_per_person} per person total</span>
-                {opt.links?.booking && <a className="btn-quiet" href={opt.links.booking} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>see similar</a>}
+                {opt.official_website && <a className="btn-quiet" href={opt.official_website} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>official site</a>}
+                {opt.links?.booking && <a className="btn-quiet" href={opt.links.booking} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>{opt.live_price ? 'compare' : 'see similar'}</a>}
               </p>
             </>
           ) : (
@@ -421,6 +433,22 @@ export default function Plan() {
         {tab !== 'overview' && (
           <>
             <p className="muted" style={{ maxWidth: 560, marginBottom: 10 }}>{CATEGORY_INTRO[tab]}</p>
+            {tab === 'stay' && (
+              options.stay_source === 'liteapi' ? (
+                <p style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 10,
+                  fontSize: 13.5, fontWeight: 700, color: 'var(--pine)',
+                }}>
+                  <Check size={14} strokeWidth={2.6} />
+                  Real hotels with live prices and availability for your dates.
+                </p>
+              ) : (
+                <p style={{ marginBottom: 10, fontSize: 13.5, color: 'var(--clay)' }}>
+                  These stays and prices are AI estimates.
+                  {' '}Tip: a “City, Country” destination (e.g. “Porto Cervo, Italy”) lets Rovyn fetch real hotels with live prices.
+                </p>
+              )
+            )}
             {(tab === 'visits' || tab === 'events') && board.recommended && (() => {
               const ids = new Set((options[tab] || []).map(o => o.id));
               const mine = [...myStars].filter(id => ids.has(id)).length;

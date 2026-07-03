@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion, Reorder, useDragControls } from 'framer-motion';
 import {
-  BedDouble, CalendarDays, Check, CheckCircle2, Compass,
-  CreditCard, GripVertical, Landmark, Lightbulb, Loader2, Lock, Mail, MoonStar,
-  PartyPopper, Pencil, PlaneTakeoff, Receipt, Scale, Send, Star, Sun, Sunset,
-  Ticket, Users, Wallet, X,
+  BedDouble, CalendarDays, Check, CheckCircle2, ClipboardCheck, Compass,
+  CreditCard, ExternalLink, Globe, GripVertical, Landmark, Lightbulb, Loader2,
+  Lock, Mail, MoonStar, PartyPopper, Pencil, PlaneTakeoff, Receipt, Scale,
+  Send, Star, Sun, Sunset, Ticket, Undo2, Users, Wallet, X,
 } from 'lucide-react';
 import { api, auth } from '../api/index.js';
 import { Page, Loading, ErrorText, JourneyTracker, Hero, Thumb, ThinkingLoader } from '../ui.jsx';
@@ -25,6 +25,142 @@ const TABS = [
   { key: 'travel', label: 'Travel & stay', Icon: PlaneTakeoff },
   { key: 'money', label: 'Costs & payment', Icon: Wallet },
 ];
+const BOOKINGS_TAB = { key: 'bookings', label: 'Bookings', Icon: ClipboardCheck };
+
+function sellerLabel(link) {
+  try {
+    const host = new URL(link).hostname.replace('www.', '');
+    const known = {
+      'expedia.com': 'Expedia', 'booking.com': 'Booking.com', 'airbnb.com': 'Airbnb',
+      'viator.com': 'Viator', 'getyourguide.com': 'GetYourGuide',
+    };
+    return known[host] || host;
+  } catch { return 'the seller'; }
+}
+
+const BOOKING_GROUPS = [
+  { category: 'flight', label: 'Flights', Icon: PlaneTakeoff,
+    hint: 'Each departure city books its own flight — anyone from that city can record it for the group.' },
+  { category: 'stay', label: 'Stay', Icon: BedDouble,
+    hint: 'One booking for the whole group — usually made by one person.' },
+  { category: 'visit', label: 'Visits', Icon: Landmark, hint: '' },
+  { category: 'event', label: 'Events', Icon: Ticket, hint: '' },
+];
+
+function BookingsChecklist({ bookings, busy, onConfirm, onUnbook }) {
+  const [openKey, setOpenKey] = useState(null);
+  const [code, setCode] = useState('');
+  const [note, setNote] = useState('');
+
+  if (!bookings) return <Loading text="Preparing your booking checklist…" />;
+  const { items, total, booked } = bookings;
+
+  async function submit(itemKey) {
+    const ok = await onConfirm(itemKey, code.trim(), note.trim());
+    if (ok) {
+      setOpenKey(null);
+      setCode('');
+      setNote('');
+    }
+  }
+
+  return (
+    <>
+      <p className="muted" style={{ maxWidth: 560, marginBottom: 6 }}>
+        Rovyn doesn't charge for travel yet — book each item directly with the seller,
+        then record the confirmation here so the whole group sees what's done.
+      </p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 26 }}>
+        <div style={{ flex: 1, maxWidth: 260, height: 2, background: 'var(--line-soft)' }}>
+          <div style={{ width: `${total ? (booked / total) * 100 : 0}%`, height: '100%', background: 'var(--pine)' }} />
+        </div>
+        <span className="muted" style={{ fontSize: 13.5, fontWeight: 600 }}>{booked} of {total} booked</span>
+      </div>
+
+      {BOOKING_GROUPS.map(({ category, label, Icon, hint }) => {
+        const group = items.filter(i => i.category === category);
+        if (group.length === 0) return null;
+        return (
+          <section key={category} style={{ marginBottom: 36 }}>
+            <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <Icon size={13} strokeWidth={2.5} /> {label}
+            </p>
+            {hint && <p className="muted" style={{ fontSize: 13, fontStyle: 'italic', marginBottom: 4 }}>{hint}</p>}
+            {group.map(item => (
+              <div key={item.item_key} style={{ padding: '16px 0', borderTop: '1px solid var(--line-soft)' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, minWidth: 220 }}>
+                    <p style={{ fontWeight: 600, fontSize: 15 }}>
+                      {item.title}
+                      {item.category === 'flight' && item.mine && !item.stale && (
+                        <span style={{ marginLeft: 10, fontSize: 11, color: 'var(--clay)', fontWeight: 700, letterSpacing: '0.08em' }}>YOURS</span>
+                      )}
+                      {item.stale && (
+                        <span style={{ marginLeft: 10, fontSize: 11, color: 'var(--clay)', fontWeight: 700, letterSpacing: '0.08em', border: '1px solid var(--clay)', borderRadius: 999, padding: '2px 8px' }}>
+                          NO LONGER IN THE PLAN
+                        </span>
+                      )}
+                    </p>
+                    {item.stale && (
+                      <p className="muted" style={{ fontSize: 13, marginTop: 3 }}>
+                        The plan changed after this was booked — cancel it with the seller, or keep it and tap undo to clear it from the list.
+                      </p>
+                    )}
+                    {item.status === 'booked' ? (
+                      <p style={{ fontSize: 13.5, color: 'var(--pine)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                        <CheckCircle2 size={14} /> Booked by {item.booked_by} — confirmation <strong>{item.confirmation}</strong>
+                        {item.note ? <span className="muted">· {item.note}</span> : null}
+                      </p>
+                    ) : (
+                      <p className="muted" style={{ fontSize: 13, marginTop: 3 }}>Not booked yet</p>
+                    )}
+                  </div>
+                  <span style={{ display: 'inline-flex', gap: 12, alignItems: 'center', flexShrink: 0 }}>
+                    {item.link && (
+                      <a className="ext-link" href={item.link} target="_blank" rel="noreferrer" style={{ padding: '8px 16px', fontSize: 13 }}>
+                        <ExternalLink size={13} /> Book on {sellerLabel(item.link)}
+                      </a>
+                    )}
+                    {item.status === 'booked' ? (
+                      <button className="btn-quiet" disabled={busy} onClick={() => onUnbook(item.item_key)} title="Mark as not booked">
+                        <Undo2 size={13} /> undo
+                      </button>
+                    ) : (
+                      <button className="btn-quiet" disabled={busy}
+                              onClick={() => { setOpenKey(openKey === item.item_key ? null : item.item_key); setCode(''); setNote(''); }}>
+                        <Check size={14} /> Mark as booked
+                      </button>
+                    )}
+                  </span>
+                </div>
+                {openKey === item.item_key && item.status !== 'booked' && (
+                  <div style={{ marginTop: 12, maxWidth: 480 }}>
+                    <input
+                      placeholder="Confirmation code (PNR, booking number, voucher #…)"
+                      value={code} onChange={e => setCode(e.target.value)}
+                      style={{ marginBottom: 10 }}
+                    />
+                    <input
+                      placeholder="Optional note (e.g. booked for me and Julia)"
+                      value={note} onChange={e => setNote(e.target.value)}
+                      style={{ marginBottom: 14 }}
+                    />
+                    <div style={{ display: 'flex', gap: 16 }}>
+                      <button className="btn" disabled={busy || !code.trim()} onClick={() => submit(item.item_key)}>
+                        Save confirmation <Check size={14} strokeWidth={2.5} />
+                      </button>
+                      <button className="btn-quiet" onClick={() => setOpenKey(null)}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </section>
+        );
+      })}
+    </>
+  );
+}
 
 function Section({ eyebrow, Icon, children, style }) {
   return (
@@ -246,7 +382,18 @@ export default function FinalPlan() {
   const [slotModal, setSlotModal] = useState(null); // { day, slot, label }
   const [receipt, setReceipt] = useState(null);
   const [emailInfo, setEmailInfo] = useState(null);
+  const [bookings, setBookings] = useState(null);
   const pollRef = useRef(null);
+  const bookingsReqId = useRef(0);
+
+  async function refreshBookings() {
+    // Monotonic counter: a stale poll response can never overwrite a newer one
+    const id = ++bookingsReqId.current;
+    try {
+      const b = await api.getBookings(tripId);
+      if (id === bookingsReqId.current) setBookings(b);
+    } catch { /* checklist may be momentarily locked (e.g. plan re-opened) */ }
+  }
 
   async function load() {
     try {
@@ -256,6 +403,7 @@ export default function FinalPlan() {
         return;
       }
       setData(d);
+      if (['approved', 'booked'].includes(d.status)) refreshBookings();
     } catch (err) {
       if (err.status === 401) navigate('/');
       else if (err.status === 403 || err.status === 404) navigate('/trips');
@@ -278,6 +426,14 @@ export default function FinalPlan() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.trip?.me?.paid]);
+
+  // If the plan is re-opened while someone is on the Bookings tab, the tab
+  // disappears — land them on Overview instead of a blank pane. (Must live
+  // above the early returns: hooks can't be conditional.)
+  const bookingsTabAllowed = ['approved', 'booked'].includes(data?.status);
+  useEffect(() => {
+    if (tab === 'bookings' && !bookingsTabAllowed) setTab('overview');
+  }, [bookingsTabAllowed, tab]);
 
   if (!data) return <Page><Loading text="Opening the final plan…" /></Page>;
   if (!data.plan) {
@@ -303,6 +459,36 @@ export default function FinalPlan() {
   const iApproved = trip?.me?.approved;
   const iPaid = trip?.me?.paid;
   const days = plan.itinerary?.days || [];
+  const canBook = ['approved', 'booked'].includes(status);
+  const visibleTabs = canBook ? [...TABS, BOOKINGS_TAB] : TABS;
+
+  async function confirmBooking(itemKey, code, note) {
+    setBusy(true);
+    setError('');
+    try {
+      await api.confirmBooking(tripId, itemKey, code, note);
+      await refreshBookings();
+      return true;
+    } catch (err) {
+      setError(err.message);
+      return false; // keep the form open so the pasted code isn't lost
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function unbookBooking(itemKey) {
+    setBusy(true);
+    setError('');
+    try {
+      await api.unbookBooking(tripId, itemKey);
+      await refreshBookings();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function act(fn, ...args) {
     setBusy(true);
@@ -366,6 +552,13 @@ export default function FinalPlan() {
           <PartyPopper size={16} color="var(--clay)" /> Booked — everyone approved and paid
         </span>
       );
+      if (bookings && bookings.booked < bookings.total) {
+        action = (
+          <button className="btn" onClick={() => setTab('bookings')}>
+            <ClipboardCheck size={15} /> Book your trip — {bookings.booked} of {bookings.total} done
+          </button>
+        );
+      }
     } else if (status === 'approved') {
       statusText = <span className="muted">{trip.paid_count} of {trip.total_members} paid</span>;
       action = !iPaid && (
@@ -535,6 +728,12 @@ export default function FinalPlan() {
                 </p>
                 {(plan.stay.amenities || []).length > 0 && (
                   <p className="muted" style={{ fontSize: 13.5, marginTop: 6 }}>{plan.stay.amenities.join(' · ')}</p>
+                )}
+                {plan.stay.official_website && (
+                  <a className="btn-quiet" href={plan.stay.official_website} target="_blank" rel="noreferrer"
+                     style={{ marginTop: 8, fontSize: 13.5 }}>
+                    <Globe size={13} /> Official website
+                  </a>
                 )}
               </div>
               <div style={{ textAlign: 'right' }}>
@@ -719,7 +918,7 @@ export default function FinalPlan() {
 
       {/* Tab bar */}
       <div style={{ display: 'flex', gap: 26, borderBottom: '1px solid var(--line)', marginBottom: 30, flexWrap: 'wrap' }}>
-        {TABS.map(({ key, label, Icon }) => {
+        {visibleTabs.map(({ key, label, Icon }) => {
           const active = tab === key;
           return (
             <button
@@ -745,6 +944,9 @@ export default function FinalPlan() {
         {tab === 'itinerary' && <Itinerary />}
         {tab === 'travel' && <Travel />}
         {tab === 'money' && <Money />}
+        {tab === 'bookings' && canBook && (
+          <BookingsChecklist bookings={bookings} busy={busy} onConfirm={confirmBooking} onUnbook={unbookBooking} />
+        )}
       </motion.div>
 
       {/* Replace-or-free modal */}

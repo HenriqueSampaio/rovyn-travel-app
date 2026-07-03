@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 
 class SignupRequest(BaseModel):
@@ -67,6 +67,11 @@ class SlotEditRequest(BaseModel):
     slot: str            # "morning" | "afternoon" | "evening"
     action: str          # "delete" | "replace" | "move_up" | "move_down"
     replacement_id: str = ""  # option id from the planning board pool, for "replace"
+
+
+class BookingConfirmRequest(BaseModel):
+    confirmation: str = Field(max_length=200)
+    note: str = Field(default="", max_length=500)
 
 
 class PostMediaItem(BaseModel):

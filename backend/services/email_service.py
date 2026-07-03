@@ -48,11 +48,13 @@ def send_email(to: str, subject: str, html: str) -> dict:
 
 def receipt_html(trip_name: str, destination: str, traveler: str, items: list[dict],
                  total: float, group_size: int) -> str:
+    from html import escape
     rows = "".join(
-        f"<tr><td style='padding:8px 0;border-bottom:1px solid #eee'>{i['label']}</td>"
+        f"<tr><td style='padding:8px 0;border-bottom:1px solid #eee'>{escape(str(i['label']))}</td>"
         f"<td style='padding:8px 0;border-bottom:1px solid #eee;text-align:right'>${i['amount']:,.2f}</td></tr>"
         for i in items
     )
+    trip_name, destination, traveler = escape(trip_name), escape(destination), escape(traveler)
     return f"""
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#23312B">
       <h1 style="font-weight:400">Rovyn</h1>

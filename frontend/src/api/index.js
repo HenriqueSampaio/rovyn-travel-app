@@ -91,6 +91,17 @@ export const api = {
   payShare: (tripId) => req(`/trips/${tripId}/pay`, { method: 'POST' }),
   getReceipt: (tripId) => req(`/trips/${tripId}/receipt`),
 
+  suggestCities: (q) => req(`/places/suggest?q=${encodeURIComponent(q)}`),
+
+  // Phase A booking checklist
+  getBookings: (tripId) => req(`/trips/${tripId}/bookings`),
+  confirmBooking: (tripId, itemKey, confirmation, note = '') =>
+    req(`/trips/${tripId}/bookings/${encodeURIComponent(itemKey)}/confirm`, {
+      method: 'POST', body: JSON.stringify({ confirmation, note }),
+    }),
+  unbookBooking: (tripId, itemKey) =>
+    req(`/trips/${tripId}/bookings/${encodeURIComponent(itemKey)}/unbook`, { method: 'POST' }),
+
   // Social feed
   mediaUrl: (path) => `${BASE}${path}`,
   uploadMedia: async (file) => {

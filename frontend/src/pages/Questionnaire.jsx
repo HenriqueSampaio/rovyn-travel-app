@@ -7,7 +7,7 @@ import {
   TrainFront, TreePine, UtensilsCrossed, Waves, Flower2, Zap,
 } from 'lucide-react';
 import { api } from '../api/index.js';
-import { Page, Field, ErrorText } from '../ui.jsx';
+import { Page, Field, ErrorText, CityInput } from '../ui.jsx';
 
 const VIBES = [
   { id: 'culture', label: 'Culture & history', Icon: Landmark },
@@ -157,8 +157,8 @@ export default function Questionnaire() {
         <p className="muted" style={{ marginBottom: 40 }}>We'll link you straight to flight searches from home.</p>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <PlaneTakeoff size={22} strokeWidth={1.6} color="var(--pine)" />
-          <input placeholder="New York (JFK)" value={form.departureCity}
-                 onChange={e => setForm(f => ({ ...f, departureCity: e.target.value }))} />
+          <CityInput placeholder="New York, United States" value={form.departureCity}
+                     onChange={v => setForm(f => ({ ...f, departureCity: v }))} />
         </div>
       </>
     ),

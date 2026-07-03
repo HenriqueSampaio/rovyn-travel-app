@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from backend.routers import auth_routes, social, trips
+from backend.routers import auth_routes, bookings, places, social, trips
 from backend.routers.social import MEDIA_DIR
 
 app = FastAPI(title="Rovyn Travel Planner API")
@@ -21,6 +21,8 @@ app.add_middleware(
 
 app.include_router(auth_routes.router, prefix="/auth", tags=["auth"])
 app.include_router(trips.router, prefix="/trips", tags=["trips"])
+app.include_router(bookings.router, prefix="/trips", tags=["bookings"])
+app.include_router(places.router, prefix="/places", tags=["places"])
 app.include_router(social.router, prefix="/social", tags=["social"])
 
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
