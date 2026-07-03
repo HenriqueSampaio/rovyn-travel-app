@@ -166,4 +166,5 @@ a { color: var(--pine); text-decoration: none; }
 .ext-link:hover { border-color: var(--pine); background: rgba(46, 93, 79, 0.06); }
 
 .spin { animation: spin 1.1s linear infinite; }
+.spin-slow { animation: spin 5s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

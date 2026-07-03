@@ -610,11 +610,11 @@ def select_winners(options: dict, tallies: dict, prefs: dict | None = None) -> t
         )[:cap]
         if not starred:
             starred = pool[:3]
-            rationale = f"No {label}s were starred, so Rovyn kept the three most essential."
+            rationale = f"No {label}s were starred, so Rovyn kept the three most essential:"
         else:
-            named = ", ".join(f"“{o.get('name')}” ({counts.get(o.get('id'))}★)" for o in starred)
-            rationale = f"Every {label} the group starred made the plan, most-loved first: {named}."
-        decisions.append({"category": cat, "choice": f"{len(starred)} selected", "rationale": rationale})
+            rationale = f"Every {label} the group starred made the plan, most-loved first:"
+        items = [{"name": o.get("name"), "stars": counts.get(o.get("id"), 0)} for o in starred]
+        decisions.append({"category": cat, "choice": f"{len(starred)} selected", "rationale": rationale, "items": items})
         if cat == "visits":
             visits = starred
         else:
@@ -798,28 +798,91 @@ def _sample_weave_plan(destination: str, prefs: dict, selection: dict, dates: di
 # Final plan revision (free-text change requests)
 # ---------------------------------------------------------------------------
 
+class RevisionNotPossible(Exception):
+    """The requested change can't be applied; str(exc) explains why, for the traveler."""
+
+
+def _detach_heavy(plan: dict) -> tuple[dict, list]:
+    """Deep-copy the plan and pull out image/link payloads (URLs are token-heavy
+    and irrelevant to the revision). Returns (slim_plan, heavy_entries)."""
+    plan = json.loads(json.dumps(plan))
+    heavy = []
+
+    def take(obj: dict, cat: str, ident):
+        for key in ("image", "links", "link", "booking_links"):
+            if isinstance(obj, dict) and key in obj:
+                heavy.append((cat, ident, key, obj.pop(key)))
+
+    take(plan, "plan", None)
+    if isinstance(plan.get("stay"), dict):
+        take(plan["stay"], "stay", None)
+    for cat in ("visits", "events"):
+        for item in plan.get(cat, []):
+            take(item, cat, item.get("id") or item.get("name"))
+    for city, flight in (plan.get("flights") or {}).items():
+        if isinstance(flight, dict):
+            take(flight, "flights", city)
+    return plan, heavy
+
+
+def _reattach_heavy(plan: dict, heavy: list) -> dict:
+    for cat, ident, key, val in heavy:
+        if cat == "plan":
+            target = plan
+        elif cat == "stay":
+            target = plan.get("stay")
+        elif cat == "flights":
+            target = (plan.get("flights") or {}).get(ident)
+        else:
+            target = next(
+                (it for it in plan.get(cat, [])
+                 if (it.get("id") or it.get("name")) == ident or it.get("name") == ident),
+                None,
+            )
+        if isinstance(target, dict) and key not in target:
+            target[key] = val
+    return plan
+
+
 def revise_final_plan(plan: dict, request: str, requester: str) -> dict:
     if not ai_available():
-        raise RuntimeError(
+        raise RevisionNotPossible(
             "AI plan revisions need ANTHROPIC_API_KEY in Rovyn/.env. "
             "You can still reorder days, or the group can re-run the final plan."
         )
+
+    slim, heavy = _detach_heavy(plan)
 
     prompt = f"""You maintain a finalized group trip plan. A traveler named {requester} requested this change:
 
 "{request}"
 
 Current plan JSON:
-{json.dumps(plan, indent=1)}
+{json.dumps(slim, indent=1)}
 
-Apply the change faithfully but minimally — keep everything else identical (same schema, same keys). Recalculate cost_per_person fields (including shared_total) and flight_cost_by_city if the change affects costs. Append one short entry to "revision_notes" describing what changed and for whom (e.g. "Swapped Day 3 boat trip for the kayak tour — requested by Ana").
+If the change CANNOT reasonably be applied — it would move or remove fixed moments (check-in, check-out, arrival, departure), it contradicts the trip's dates or destination, it isn't about this trip, or it's unintelligible — do NOT return a plan. Respond with ONLY:
+{{"impossible": "one friendly sentence explaining to the traveler why it doesn't fit and what they could try instead"}}
 
-Respond with ONLY the complete updated plan as valid JSON."""
+Otherwise apply the change faithfully but minimally — keep everything else identical (same schema, same keys). New visits/events get realistic cost_per_person and a spot in the day-by-day schedule. Append one short entry to "revision_notes" describing what changed and for whom (e.g. "Added the Botanical Garden on Day 3 — requested by Ana").
+
+Respond with ONLY the complete updated plan as valid JSON (or the impossible object)."""
 
     revised = _ask_claude(prompt, max_tokens=16000)
+    if isinstance(revised, dict) and revised.get("impossible"):
+        raise RevisionNotPossible(revised["impossible"])
     if not isinstance(revised, dict) or "days" not in revised.get("itinerary", {}):
         raise RuntimeError("The revision came back malformed — please try rephrasing the request.")
-    # Never trust the model with monotonic bookkeeping
+
+    revised = _reattach_heavy(revised, heavy)
+    # Photos for anything the revision added
+    town = (revised.get("destination") or "").split(",")[0].strip()
+    for cat, fallback in (("visits", town), ("events", f"{town} evening")):
+        for item in revised.get(cat, []):
+            if not item.get("image"):
+                item["image"] = first_image(f"{item.get('name', '')} {town}", fallback)
+
+    # Never trust the model with money math or monotonic bookkeeping
+    revised = recompute_plan_costs(revised)
     notes = plan.get("revision_notes", [])
     new_notes = revised.get("revision_notes", [])
     if len(new_notes) <= len(notes):

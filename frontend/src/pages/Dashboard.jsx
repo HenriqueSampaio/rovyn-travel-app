@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  ArrowRight, Check, ClipboardList, Copy, Crown, Link2, Loader2, MapPin, Sparkles, Users,
+  ArrowRight, Check, ClipboardList, Copy, Crown, Link2, MapPin, Sparkles, Users,
 } from 'lucide-react';
 import { api } from '../api/index.js';
-import { Page, Loading, ErrorText, JourneyTracker } from '../ui.jsx';
+import { Page, Loading, ErrorText, JourneyTracker, ThinkingLoader } from '../ui.jsx';
 
 /* Sends each trip status to the page that owns that phase. */
 export function phaseRoute(trip, tripId) {
@@ -164,14 +164,18 @@ export default function Dashboard() {
           <Sparkles size={13} strokeWidth={2.5} /> {fixed ? 'Planning board' : 'Destination matching'}
         </p>
         {trip.recommendations_generating || trip.options_generating || generating ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            <Loader2 className="spin" size={22} strokeWidth={1.8} color="var(--pine)" />
-            <p className="serif muted" style={{ fontStyle: 'italic', fontSize: 17 }}>
-              {fixed
-                ? `Assembling flights, stays and experiences for ${trip.decided_destination}…`
-                : "Reading everyone's answers and scouting destinations…"}
-            </p>
-          </div>
+          <ThinkingLoader messages={fixed ? [
+            `Rovyn is scouting ${trip.decided_destination}…`,
+            'Assembling flights, stays and experiences…',
+            'Rovyn is thinking…',
+            'Pricing options for your dates…',
+            'Almost there…',
+          ] : [
+            'Reading everyone’s answers…',
+            'Rovyn is scouting destinations…',
+            'Matching budgets, dates and vibes…',
+            'Rovyn is thinking…',
+          ]} />
         ) : trip.all_submitted ? (
           trip.is_leader ? (
             <>

@@ -3,10 +3,10 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   ArrowRight, BedDouble, Check, Compass, Landmark,
-  Loader2, MapPin, PlaneTakeoff, Sparkles, Star, Ticket, Users,
+  MapPin, PlaneTakeoff, Sparkles, Star, Ticket, Users,
 } from 'lucide-react';
 import { api, auth } from '../api/index.js';
-import { Page, Loading, ErrorText, JourneyTracker, Hero, Thumb } from '../ui.jsx';
+import { Page, Loading, ErrorText, JourneyTracker, Hero, Thumb, ThinkingLoader } from '../ui.jsx';
 
 const TABS = [
   { key: 'overview', label: 'Overview', Icon: Compass },
@@ -339,12 +339,13 @@ export default function Plan() {
             <Sparkles size={13} strokeWidth={2.5} /> The final plan
           </p>
           {finalizing ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <Loader2 className="spin" size={22} strokeWidth={1.8} color="var(--pine)" />
-              <p className="serif muted" style={{ fontStyle: 'italic', fontSize: 17 }}>
-                Counting stars and drafting the plan…
-              </p>
-            </div>
+            <ThinkingLoader messages={[
+              'Rovyn is planning your trip…',
+              'Counting everyone’s stars…',
+              'Weaving your picks into the days…',
+              'Rovyn is thinking…',
+              'Balancing budgets and pace…',
+            ]} />
           ) : trip.all_curated ? (
             trip.is_leader ? (
               <>

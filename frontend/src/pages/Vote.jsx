@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  ArrowRight, BedDouble, Check, Loader2, MapPin, PlaneTakeoff, Route, Ticket, Trophy, Vote as VoteIcon,
+  ArrowRight, BedDouble, Check, MapPin, PlaneTakeoff, Route, Ticket, Trophy, Vote as VoteIcon,
 } from 'lucide-react';
 import { api } from '../api/index.js';
-import { Page, Loading, ErrorText, Hero } from '../ui.jsx';
+import { Page, Loading, ErrorText, Hero, ThinkingLoader } from '../ui.jsx';
 
 export default function Vote() {
   const navigate = useNavigate();
@@ -91,12 +91,12 @@ export default function Vote() {
       {winner && (
         <div style={{ margin: '0 0 48px' }}>
           {trip.options_generating || building ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <Loader2 className="spin" size={22} strokeWidth={1.8} color="var(--pine)" />
-              <p className="serif muted" style={{ fontStyle: 'italic', fontSize: 17 }}>
-                Assembling flights, stays and experiences for {winner}…
-              </p>
-            </div>
+            <ThinkingLoader messages={[
+              `Rovyn is scouting ${winner}…`,
+              'Assembling flights, stays and experiences…',
+              'Rovyn is thinking…',
+              'Pricing options for your dates…',
+            ]} />
           ) : trip.is_leader ? (
             <button className="btn" onClick={build}>
               Open the planning board <ArrowRight size={16} />

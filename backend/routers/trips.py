@@ -15,7 +15,7 @@ from backend.models import (
     QuestionnaireData, ReorderRequest, SlotEditRequest, StarRequest, VoteRequest,
 )
 from backend.services.ai_service import (
-    CATEGORIES, ai_available, generate_final_plan, generate_itinerary,
+    CATEGORIES, RevisionNotPossible, ai_available, generate_final_plan, generate_itinerary,
     generate_trip_options, get_destination_recommendations, recommended_picks,
     recompute_plan_costs, revise_final_plan,
 )
@@ -155,11 +155,21 @@ def my_trips(user: dict = Depends(get_current_user)):
     with get_conn() as conn:
         rows = conn.execute(
             """SELECT tr.id, tr.name, tr.invite_code, tr.status, tr.selected_destination, tr.destination, tr.leader_id,
+                      tr.final_plan, tr.options,
                       (SELECT COUNT(*) FROM trip_members m WHERE m.trip_id = tr.id) AS member_count
                FROM trips tr JOIN trip_members tm ON tm.trip_id = tr.id
                WHERE tm.user_id = ? ORDER BY tr.created_at DESC""",
             (user["id"],),
         ).fetchall()
+
+    def trip_dates(r) -> dict:
+        for col in ("final_plan", "options"):
+            if r[col]:
+                d = json.loads(r[col]).get("dates") or {}
+                if d.get("start"):
+                    return {"start": d.get("start"), "end": d.get("end")}
+        return {}
+
     return {
         "trips": [
             {
@@ -170,6 +180,7 @@ def my_trips(user: dict = Depends(get_current_user)):
                 "selected_destination": r["selected_destination"] or r["destination"],
                 "is_leader": r["leader_id"] == user["id"],
                 "member_count": r["member_count"],
+                "dates": trip_dates(r),
             }
             for r in rows
         ]
@@ -788,10 +799,14 @@ def edit_plan(trip_id: str, req: EditRequest, user: dict = Depends(get_current_u
 
     try:
         revised = revise_final_plan(plan, req.request.strip(), user["name"])
+    except RevisionNotPossible as exc:
+        with get_conn() as conn:
+            conn.execute("UPDATE trips SET final_plan_generating = 0 WHERE id = ?", (trip_id,))
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         with get_conn() as conn:
             conn.execute("UPDATE trips SET final_plan_generating = 0 WHERE id = ?", (trip_id,))
-        raise HTTPException(status_code=502, detail=str(exc))
+        raise HTTPException(status_code=502, detail=f"The revision failed — please try again. ({exc})")
 
     with get_conn() as conn:
         # Any change to the plan needs everyone's approval again
