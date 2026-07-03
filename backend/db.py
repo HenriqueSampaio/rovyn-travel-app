@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS payments (
 
 CREATE TABLE IF NOT EXISTS bookings (
     trip_id      TEXT NOT NULL REFERENCES trips(id),
-    item_key     TEXT NOT NULL,   -- deterministic: 'flight:London', 'stay', 'visit:visits-2'
+    item_key     TEXT NOT NULL,   -- deterministic: 'flight:London', 'stay:Hotel X', 'visit:visits-2'
     category     TEXT NOT NULL,   -- flight | stay | visit | event
     scope        TEXT NOT NULL DEFAULT 'group',  -- 'group' or 'city:<departure city>'
     title        TEXT NOT NULL,
@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS bookings (
     booked_by    TEXT REFERENCES users(id),
     booked_at    TEXT,
     details      TEXT,            -- JSON snapshot of the plan item
+    stale        INTEGER NOT NULL DEFAULT 0,  -- booked item no longer in the plan (needs cancelling)
     created_at   TEXT NOT NULL,
     PRIMARY KEY (trip_id, item_key)
 );
@@ -172,6 +173,9 @@ def init_db() -> None:
         for col, ddl in _TRIP_MIGRATIONS:
             if col not in existing:
                 conn.execute(f"ALTER TABLE trips ADD COLUMN {col} {ddl}")
+        booking_cols = {r["name"] for r in conn.execute("PRAGMA table_info(bookings)")}
+        if booking_cols and "stale" not in booking_cols:
+            conn.execute("ALTER TABLE bookings ADD COLUMN stale INTEGER NOT NULL DEFAULT 0")
 
 
 init_db()

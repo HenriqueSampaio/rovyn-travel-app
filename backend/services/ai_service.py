@@ -825,7 +825,9 @@ def _detach_heavy(plan: dict) -> tuple[dict, list]:
     heavy = []
 
     def take(obj: dict, cat: str, ident):
-        for key in ("image", "links", "link", "booking_links"):
+        # URLs must never round-trip through the model: token-heavy AND the
+        # model must not be able to rewrite where travelers click.
+        for key in ("image", "links", "link", "booking_links", "official_website"):
             if isinstance(obj, dict) and key in obj:
                 heavy.append((cat, ident, key, obj.pop(key)))
 
@@ -890,10 +892,20 @@ Respond with ONLY the complete updated plan as valid JSON (or the impossible obj
         raise RuntimeError("The revision came back malformed — please try rephrasing the request.")
 
     revised = _reattach_heavy(revised, heavy)
-    # Photos for anything the revision added
+    # New visits/events need ids (checklist keys depend on them) and photos
     town = (revised.get("destination") or "").split(",")[0].strip()
     for cat, fallback in (("visits", town), ("events", f"{town} evening")):
+        existing_ids = {i.get("id") for i in revised.get(cat, []) if i.get("id")}
+        counter = 0
         for item in revised.get(cat, []):
+            if not item.get("id"):
+                counter += 1
+                new_id = f"{cat}-rev{counter}"
+                while new_id in existing_ids:
+                    counter += 1
+                    new_id = f"{cat}-rev{counter}"
+                item["id"] = new_id
+                existing_ids.add(new_id)
             if not item.get("image"):
                 item["image"] = first_image(f"{item.get('name', '')} {town}", fallback)
 

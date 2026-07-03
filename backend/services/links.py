@@ -9,7 +9,19 @@ they are appended to every generated link so bookings made through Rovyn earn
 commission. Links work identically without them.
 """
 import os
-from urllib.parse import quote, quote_plus, urlencode
+from urllib.parse import quote, quote_plus, urlencode, urlparse
+
+
+def safe_url(url) -> str | None:
+    """Only http(s) URLs may reach an <a href> — anything else (javascript:,
+    data:, garbage from an external API or a model) becomes None."""
+    if not url or not isinstance(url, str):
+        return None
+    try:
+        parsed = urlparse(url.strip())
+    except ValueError:
+        return None
+    return url.strip() if parsed.scheme in ("http", "https") and parsed.netloc else None
 
 
 def _with_affiliate(url: str, params: dict) -> str:

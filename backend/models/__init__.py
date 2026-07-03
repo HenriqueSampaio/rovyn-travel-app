@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 
 class SignupRequest(BaseModel):
@@ -70,8 +70,8 @@ class SlotEditRequest(BaseModel):
 
 
 class BookingConfirmRequest(BaseModel):
-    confirmation: str
-    note: str = ""
+    confirmation: str = Field(max_length=200)
+    note: str = Field(default="", max_length=500)
 
 
 class PostMediaItem(BaseModel):

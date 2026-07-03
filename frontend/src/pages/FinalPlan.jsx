@@ -56,10 +56,12 @@ function BookingsChecklist({ bookings, busy, onConfirm, onUnbook }) {
   const { items, total, booked } = bookings;
 
   async function submit(itemKey) {
-    await onConfirm(itemKey, code.trim(), note.trim());
-    setOpenKey(null);
-    setCode('');
-    setNote('');
+    const ok = await onConfirm(itemKey, code.trim(), note.trim());
+    if (ok) {
+      setOpenKey(null);
+      setCode('');
+      setNote('');
+    }
   }
 
   return (
@@ -90,10 +92,20 @@ function BookingsChecklist({ bookings, busy, onConfirm, onUnbook }) {
                   <div style={{ flex: 1, minWidth: 220 }}>
                     <p style={{ fontWeight: 600, fontSize: 15 }}>
                       {item.title}
-                      {item.category === 'flight' && item.mine && (
+                      {item.category === 'flight' && item.mine && !item.stale && (
                         <span style={{ marginLeft: 10, fontSize: 11, color: 'var(--clay)', fontWeight: 700, letterSpacing: '0.08em' }}>YOURS</span>
                       )}
+                      {item.stale && (
+                        <span style={{ marginLeft: 10, fontSize: 11, color: 'var(--clay)', fontWeight: 700, letterSpacing: '0.08em', border: '1px solid var(--clay)', borderRadius: 999, padding: '2px 8px' }}>
+                          NO LONGER IN THE PLAN
+                        </span>
+                      )}
                     </p>
+                    {item.stale && (
+                      <p className="muted" style={{ fontSize: 13, marginTop: 3 }}>
+                        The plan changed after this was booked — cancel it with the seller, or keep it and tap undo to clear it from the list.
+                      </p>
+                    )}
                     {item.status === 'booked' ? (
                       <p style={{ fontSize: 13.5, color: 'var(--pine)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
                         <CheckCircle2 size={14} /> Booked by {item.booked_by} — confirmation <strong>{item.confirmation}</strong>
@@ -372,6 +384,16 @@ export default function FinalPlan() {
   const [emailInfo, setEmailInfo] = useState(null);
   const [bookings, setBookings] = useState(null);
   const pollRef = useRef(null);
+  const bookingsReqId = useRef(0);
+
+  async function refreshBookings() {
+    // Monotonic counter: a stale poll response can never overwrite a newer one
+    const id = ++bookingsReqId.current;
+    try {
+      const b = await api.getBookings(tripId);
+      if (id === bookingsReqId.current) setBookings(b);
+    } catch { /* checklist may be momentarily locked (e.g. plan re-opened) */ }
+  }
 
   async function load() {
     try {
@@ -381,9 +403,7 @@ export default function FinalPlan() {
         return;
       }
       setData(d);
-      if (['approved', 'booked'].includes(d.status)) {
-        api.getBookings(tripId).then(setBookings).catch(() => {});
-      }
+      if (['approved', 'booked'].includes(d.status)) refreshBookings();
     } catch (err) {
       if (err.status === 401) navigate('/');
       else if (err.status === 403 || err.status === 404) navigate('/trips');
@@ -434,14 +454,23 @@ export default function FinalPlan() {
   const canBook = ['approved', 'booked'].includes(status);
   const visibleTabs = canBook ? [...TABS, BOOKINGS_TAB] : TABS;
 
+  // If the plan is re-opened while someone is on the Bookings tab, the tab
+  // disappears — land them on Overview instead of a blank pane.
+  useEffect(() => {
+    if (!visibleTabs.some(t => t.key === tab)) setTab('overview');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canBook, tab]);
+
   async function confirmBooking(itemKey, code, note) {
     setBusy(true);
     setError('');
     try {
       await api.confirmBooking(tripId, itemKey, code, note);
-      setBookings(await api.getBookings(tripId));
+      await refreshBookings();
+      return true;
     } catch (err) {
       setError(err.message);
+      return false; // keep the form open so the pasted code isn't lost
     } finally {
       setBusy(false);
     }
@@ -452,7 +481,7 @@ export default function FinalPlan() {
     setError('');
     try {
       await api.unbookBooking(tripId, itemKey);
-      setBookings(await api.getBookings(tripId));
+      await refreshBookings();
     } catch (err) {
       setError(err.message);
     } finally {

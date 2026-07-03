@@ -16,9 +16,28 @@ import urllib.parse
 import urllib.request
 
 import certifi
+import pycountry
+
+from backend.services.links import safe_url
 
 _SSL_CTX = ssl.create_default_context(cafile=certifi.where())
 _LITE_BASE = "https://api.liteapi.travel/v3.0"
+
+
+def _country_code(country: str) -> str | None:
+    """'Croatia' -> 'HR'; LiteAPI requires ISO-2 countryCode for city search."""
+    if not country:
+        return None
+    if len(country) == 2 and country.isalpha():
+        return country.upper()
+    try:
+        return pycountry.countries.lookup(country).alpha_2
+    except LookupError:
+        try:
+            matches = pycountry.countries.search_fuzzy(country)
+            return matches[0].alpha_2 if matches else None
+        except LookupError:
+            return None
 
 
 def liteapi_available() -> bool:
@@ -75,17 +94,21 @@ def real_stay_options(destination: str, check_in: str, check_out: str,
         return []
     try:
         city, country = _split_place(destination)
-        params = {"cityName": city, "limit": 40}
-        if country:
-            params["countryName"] = country
-        data = _lite_request("/data/hotels", params=params)
+        code = _country_code(country)
+        if not code:
+            # LiteAPI city search requires an ISO-2 countryCode; without a
+            # resolvable country we can't search reliably — use AI stays.
+            return []
+        data = _lite_request("/data/hotels", params={
+            "cityName": city, "countryCode": code, "limit": 40,
+        })
         hotels = data.get("data") or []
         if not hotels:
             return []
         by_id = {h.get("id"): h for h in hotels if h.get("id")}
 
-        # Two travelers per room is the planning default (matches existing math)
-        rooms_needed = max(1, round(group_size / 2))
+        # Two travelers per room, rounding UP so everyone has a bed
+        rooms_needed = max(1, (group_size + 1) // 2)
         rates = _lite_request("/hotels/rates", payload={
             "hotelIds": list(by_id.keys()),
             "checkin": check_in,
@@ -99,17 +122,15 @@ def real_stay_options(destination: str, check_in: str, check_out: str,
             hotel = by_id.get(entry.get("hotelId"))
             if not hotel:
                 continue
-            amounts = []
-            for rt in entry.get("roomTypes") or []:
-                for r in rt.get("rates") or []:
-                    amt = (((r.get("retailRate") or {}).get("total") or [{}])[0]).get("amount")
-                    if amt:
-                        amounts.append(float(amt))
-                offer = rt.get("offerRetailRate") or {}
-                if offer.get("amount"):
-                    amounts.append(float(offer["amount"]))
-            if amounts:
-                priced.append((hotel, min(amounts)))
+            # offerRetailRate is the WHOLE offer (all requested rooms summed,
+            # per LiteAPI docs) — per-occupancy rate totals must not be mixed in
+            offers = [
+                float((rt.get("offerRetailRate") or {}).get("amount"))
+                for rt in entry.get("roomTypes") or []
+                if (rt.get("offerRetailRate") or {}).get("amount")
+            ]
+            if offers:
+                priced.append((hotel, min(offers)))
         if not priced:
             return []
 
@@ -168,6 +189,6 @@ def official_website(name: str, place: str) -> str | None:
         with urllib.request.urlopen(req, timeout=10, context=_SSL_CTX) as res:
             data = json.loads(res.read().decode())
         places = data.get("places") or []
-        return places[0].get("websiteUri") if places else None
+        return safe_url(places[0].get("websiteUri")) if places else None
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError):
         return None

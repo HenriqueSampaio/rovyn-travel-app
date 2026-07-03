@@ -219,7 +219,7 @@ export default function Plan() {
                 )}
               </p>
               <p className="muted" style={{ fontSize: 14, margin: '2px 0 6px' }}>
-                {opt.type} · {opt.area} {opt.rating ? <>· <Star size={12} fill="var(--clay)" color="var(--clay)" style={{ verticalAlign: -1 }} /> {opt.rating}</> : null}
+                {opt.type}{opt.area ? ` · ${opt.area}` : ''} {opt.rating ? <>· <Star size={12} fill="var(--clay)" color="var(--clay)" style={{ verticalAlign: -1 }} /> {opt.rating}</> : null}
               </p>
               <p style={{ fontSize: 14.5, color: 'var(--ink-soft)' }}>{opt.why}</p>
               {(opt.amenities || []).length > 0 && (
