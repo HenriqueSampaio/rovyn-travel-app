@@ -69,6 +69,13 @@ Each integration below is optional and free; the app degrades gracefully without
 The **booking checklist** itself (Bookings tab on approved trips: deep links +
 "mark as booked" + confirmation capture + per-item emails) needs no setup at all.
 
+**City autocomplete** (destination & departure-city fields) also needs no setup:
+it ships with an offline [GeoNames](https://www.geonames.org) dataset
+(`backend/assets/cities.json.gz`, ~156k cities with population > 1,000, CC-BY 4.0 —
+attribution required if you strip it out of the repo). When `GOOGLE_PLACES_API_KEY`
+is set, suggestions upgrade to Google Places Autocomplete automatically, with the
+offline list as fallback on any error.
+
 ## 4. Payment architecture (future — how it will work)
 
 Today's flow is a **demo**: "Pay my share" records a payment row and emails a receipt;

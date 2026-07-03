@@ -91,6 +91,8 @@ export const api = {
   payShare: (tripId) => req(`/trips/${tripId}/pay`, { method: 'POST' }),
   getReceipt: (tripId) => req(`/trips/${tripId}/receipt`),
 
+  suggestCities: (q) => req(`/places/suggest?q=${encodeURIComponent(q)}`),
+
   // Phase A booking checklist
   getBookings: (tripId) => req(`/trips/${tripId}/bookings`),
   confirmBooking: (tripId, itemKey, confirmation, note = '') =>

@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Check, Compass, LogOut, Loader2 } from 'lucide-react';
-import { auth } from './api/index.js';
+import { ArrowLeft, Check, Compass, LogOut, Loader2, MapPin } from 'lucide-react';
+import { api, auth } from './api/index.js';
 
 export function Wordmark({ size = 26 }) {
   return (
@@ -103,6 +103,107 @@ export function Loading({ text = 'One moment…' }) {
       <Loader2 className="spin" size={30} strokeWidth={1.5} color="var(--pine)" />
       <p className="muted serif" style={{ fontStyle: 'italic', fontSize: 17 }}>{text}</p>
     </div>
+  );
+}
+
+/* City input with autocomplete — typo-proofs destination/departure fields.
+   Suggestions come from /places/suggest (Google Places when configured,
+   otherwise the bundled GeoNames world-city list). Free text still allowed. */
+export function CityInput({ value, onChange, placeholder, autoFocus }) {
+  const [suggestions, setSuggestions] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
+  const debounceRef = useRef(null);
+  const reqIdRef = useRef(0);
+  const pickedRef = useRef('');
+
+  function fetchSuggestions(q) {
+    const id = ++reqIdRef.current;
+    api.suggestCities(q)
+      .then(d => {
+        if (id !== reqIdRef.current) return; // stale response
+        setSuggestions(d.suggestions || []);
+        setOpen((d.suggestions || []).length > 0);
+        setActive(-1);
+      })
+      .catch(() => {});
+  }
+
+  function handleChange(text) {
+    onChange(text);
+    clearTimeout(debounceRef.current);
+    if (text.trim().length < 2 || text === pickedRef.current) {
+      setOpen(false);
+      setSuggestions([]);
+      return;
+    }
+    debounceRef.current = setTimeout(() => fetchSuggestions(text.trim()), 220);
+  }
+
+  function pick(s) {
+    pickedRef.current = s.label;
+    onChange(s.label);
+    setOpen(false);
+    setSuggestions([]);
+  }
+
+  function onKeyDown(e) {
+    if (!open || suggestions.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActive(a => (a + 1) % suggestions.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActive(a => (a <= 0 ? suggestions.length - 1 : a - 1));
+    } else if (e.key === 'Enter' && active >= 0) {
+      e.preventDefault();
+      pick(suggestions[active]);
+    } else if (e.key === 'Escape') {
+      setOpen(false);
+    }
+  }
+
+  return (
+    <span style={{ position: 'relative', display: 'block', flex: 1 }}>
+      <input
+        value={value}
+        placeholder={placeholder}
+        autoFocus={autoFocus}
+        onChange={e => handleChange(e.target.value)}
+        onKeyDown={onKeyDown}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onFocus={() => suggestions.length > 0 && value !== pickedRef.current && setOpen(true)}
+        autoComplete="off"
+      />
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 40,
+          background: 'var(--bg)', border: '1px solid var(--line)', borderTop: 'none',
+          boxShadow: '0 16px 40px rgba(35, 49, 43, 0.16)', maxHeight: 280, overflowY: 'auto',
+        }}>
+          {suggestions.map((s, i) => (
+            <button
+              key={s.label + i}
+              type="button"
+              onMouseDown={e => { e.preventDefault(); pick(s); }}
+              onMouseEnter={() => setActive(i)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+                padding: '11px 14px', textAlign: 'left', fontSize: 15,
+                background: i === active ? 'rgba(46, 93, 79, 0.08)' : 'transparent',
+                color: 'var(--ink)',
+              }}
+            >
+              <MapPin size={13} strokeWidth={1.8} color="var(--pine)" style={{ flexShrink: 0 }} />
+              <span>
+                <strong>{s.city}</strong>
+                {s.country ? <span className="muted">, {s.country}</span> : null}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
   );
 }
 
