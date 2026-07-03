@@ -4,6 +4,7 @@ from collections import Counter
 from datetime import datetime as dt, timedelta
 
 from backend.services import links
+from backend.services.hotel_service import official_website, real_stay_options
 from backend.services.image_service import first_image, image_for
 
 _client = None
@@ -328,6 +329,16 @@ def generate_trip_options(destination: str, responses: list[dict], trip_name: st
         options = _sample_trip_options(destination, prefs)
     options["destination"] = options.get("destination") or destination
     options.setdefault("dates", dict(prefs["travel_dates"]))
+    # Phase A accuracy: with a LITEAPI_API_KEY, stays become REAL hotels with
+    # live prices for the group's exact dates (AI/sample stays otherwise).
+    dates = options["dates"]
+    live_stays = real_stay_options(
+        destination, dates.get("start", ""), dates.get("end", ""),
+        prefs["group_size"], _duration_days(dates),
+    )
+    if live_stays:
+        options["stay"] = live_stays
+        options["stay_source"] = "liteapi"
     # Flights are personal: generated separately with a guaranteed entry for
     # every departure city, keyed by the exact city each traveler typed.
     options["flights"] = _flight_options(destination, prefs)
@@ -346,10 +357,11 @@ def _attach_images(options: dict, destination: str) -> dict:
     town = destination.split(",")[0].strip()
     options["image"] = first_image(f"{destination} travel", town)
     for opt in options.get("stay", []):
-        opt["image"] = first_image(
-            f"{opt.get('type', 'hotel')} {town}",
-            f"{opt.get('type', 'hotel')} interior",
-        )
+        if not opt.get("image"):  # real hotels carry their own photo
+            opt["image"] = first_image(
+                f"{opt.get('type', 'hotel')} {town}",
+                f"{opt.get('type', 'hotel')} interior",
+            )
     for opt in options.get("visits", []):
         opt["image"] = first_image(
             f"{opt.get('name', '')} {town}",
@@ -681,6 +693,10 @@ def generate_final_plan(destination: str, responses: list[dict], options: dict, 
     selection, decisions = select_winners(options, tallies, prefs)
     cost_per_person, flight_cost_by_city = compute_costs(selection, prefs, duration)
     dates = options.get("dates", prefs["travel_dates"])
+
+    # Accuracy: link the chosen stay's official website when discoverable
+    if selection.get("stay", {}).get("name") and not selection["stay"].get("official_website"):
+        selection["stay"]["official_website"] = official_website(selection["stay"]["name"], destination)
 
     if ai_available():
         woven = _ai_weave_plan(destination, prefs, selection, dates, duration)

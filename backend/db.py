@@ -94,6 +94,24 @@ CREATE TABLE IF NOT EXISTS payments (
     PRIMARY KEY (trip_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS bookings (
+    trip_id      TEXT NOT NULL REFERENCES trips(id),
+    item_key     TEXT NOT NULL,   -- deterministic: 'flight:London', 'stay', 'visit:visits-2'
+    category     TEXT NOT NULL,   -- flight | stay | visit | event
+    scope        TEXT NOT NULL DEFAULT 'group',  -- 'group' or 'city:<departure city>'
+    title        TEXT NOT NULL,
+    provider     TEXT NOT NULL DEFAULT 'self',   -- who fulfills it (Phase A: always self)
+    link         TEXT,            -- deep link to the seller
+    status       TEXT NOT NULL DEFAULT 'to_book',  -- to_book | booked
+    confirmation TEXT,            -- PNR / hotel code / voucher number pasted by traveler
+    note         TEXT,
+    booked_by    TEXT REFERENCES users(id),
+    booked_at    TEXT,
+    details      TEXT,            -- JSON snapshot of the plan item
+    created_at   TEXT NOT NULL,
+    PRIMARY KEY (trip_id, item_key)
+);
+
 CREATE TABLE IF NOT EXISTS posts (
     id            TEXT PRIMARY KEY,
     user_id       TEXT NOT NULL REFERENCES users(id),

@@ -52,6 +52,23 @@ Restart the backend after editing `.env` — it is read once at startup.
 5. Trips generated **before** the key was added have no stored images — create a new trip (or regenerate the board) to see photos.
 6. Code seam: `backend/services/image_service.py` (stdlib-only). Swapping to Unsplash later means changing one function — note Unsplash additionally requires visible attribution links and hotlinked URLs in production.
 
+## 3¾. Phase A — booking checklist, live hotel data & affiliate revenue
+
+Phase A of the booking architecture ships with no company or license required.
+Each integration below is optional and free; the app degrades gracefully without it.
+
+| Variable | Where to get it | What it unlocks |
+|---|---|---|
+| `LITEAPI_API_KEY` | [liteapi.travel](https://www.liteapi.travel/) → self-serve signup (free, no credit card) → dashboard → API keys (use the **sandbox** key first) | Stay options on the planning board become **real hotels with live prices** for the group's exact dates, badged "LIVE PRICE". Without it: AI/sample stays as before. |
+| `GOOGLE_PLACES_API_KEY` | [console.cloud.google.com](https://console.cloud.google.com) → create project → enable **Places API (New)** → credentials → API key ($200/month free credit covers ~10k lookups) | Stay options and the final plan link to the hotel's **official website**. Without it: Booking.com property links only. |
+| `VIATOR_PARTNER_ID` | [viator.com/partner](https://partnerresources.viator.com/) → join affiliate program (instant, free) → your `pid` | ~8% commission on activities booked through Rovyn's Viator links. |
+| `GYG_PARTNER_ID` | [partner.getyourguide.com](https://partner.getyourguide.com) → affiliate signup → partner ID | ~8% commission on GetYourGuide bookings. |
+| `BOOKING_AFFILIATE_AID` | Booking.com affiliate via [CJ](https://www.cj.com) or [Awin](https://www.awin.com) (direct program closed to small partners since June 2025) | ~4% on completed stays. |
+| `EXPEDIA_AFFILIATE_ID` | [expediagroup.com/affiliates](https://affiliates.expediagroup.com) | 2–6% hotels; flights pay ~$2/booking. |
+
+The **booking checklist** itself (Bookings tab on approved trips: deep links +
+"mark as booked" + confirmation capture + per-item emails) needs no setup at all.
+
 ## 4. Payment architecture (future — how it will work)
 
 Today's flow is a **demo**: "Pay my share" records a payment row and emails a receipt;

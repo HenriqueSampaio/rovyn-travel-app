@@ -69,6 +69,11 @@ class SlotEditRequest(BaseModel):
     replacement_id: str = ""  # option id from the planning board pool, for "replace"
 
 
+class BookingConfirmRequest(BaseModel):
+    confirmation: str
+    note: str = ""
+
+
 class PostMediaItem(BaseModel):
     url: str          # /media/... path returned by the upload endpoint
     media_type: str   # "image" | "video"
