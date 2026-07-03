@@ -736,7 +736,7 @@ Must-include events (respect their date_hint when placing them; evening-flavored
 
 Special requirements: {requirements}
 
-Rules: day 1 is arrival (keep it light), the last day is departure (morning only). Don't overpack any day. Give the itinerary a short evocative title. Also write a warm 2-3 sentence summary mentioning how the group's votes shaped the trip, and 3 practical local tips.
+Rules: day 1 is arrival — its morning (or afternoon, if flights land late) must be "Arrival & hotel check-in" and the day kept light. The last day is departure — its morning must be "Hotel check-out & departure" with nothing scheduled after. These fixed moments anchor the schedule; travelers can rearrange everything else later. Don't overpack any day. Give the itinerary a short evocative title. Also write a warm 2-3 sentence summary mentioning how the group's votes shaped the trip, and 3 practical local tips.
 
 Respond with ONLY valid JSON:
 {{
@@ -760,7 +760,8 @@ def _sample_weave_plan(destination: str, prefs: dict, selection: dict, dates: di
         "day": i + 1,
         "date": (start + timedelta(days=i)).strftime("%Y-%m-%d"),
         "theme": "Arrival & first stroll" if i == 0 else ("Departure day" if i == duration - 1 else f"Exploring {town}"),
-        "morning": "Arrive, drop bags, get your bearings" if i == 0 else "Café breakfast & slow start",
+        "morning": "Arrival & hotel check-in" if i == 0
+                   else ("Hotel check-out & departure" if i == duration - 1 else "Café breakfast & slow start"),
         "afternoon": "Neighborhood wander" if i == 0 else "Free time",
         "evening": "Welcome dinner" if i == 0 else "Free evening",
     } for i in range(max(duration, 1))]

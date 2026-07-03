@@ -80,6 +80,8 @@ export const api = {
     req(`/trips/${tripId}/edit`, { method: 'POST', body: JSON.stringify({ request }) }),
   reorderDays: (tripId, order) =>
     req(`/trips/${tripId}/reorder-days`, { method: 'POST', body: JSON.stringify({ order }) }),
+  arrangeSlots: (tripId, day, order) =>
+    req(`/trips/${tripId}/plan/day-slots`, { method: 'POST', body: JSON.stringify({ day, order }) }),
   editSlot: (tripId, day, slot, action, replacementId = '') =>
     req(`/trips/${tripId}/plan/slot`, {
       method: 'POST',
