@@ -427,6 +427,14 @@ export default function FinalPlan() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.trip?.me?.paid]);
 
+  // If the plan is re-opened while someone is on the Bookings tab, the tab
+  // disappears — land them on Overview instead of a blank pane. (Must live
+  // above the early returns: hooks can't be conditional.)
+  const bookingsTabAllowed = ['approved', 'booked'].includes(data?.status);
+  useEffect(() => {
+    if (tab === 'bookings' && !bookingsTabAllowed) setTab('overview');
+  }, [bookingsTabAllowed, tab]);
+
   if (!data) return <Page><Loading text="Opening the final plan…" /></Page>;
   if (!data.plan) {
     return (
@@ -453,13 +461,6 @@ export default function FinalPlan() {
   const days = plan.itinerary?.days || [];
   const canBook = ['approved', 'booked'].includes(status);
   const visibleTabs = canBook ? [...TABS, BOOKINGS_TAB] : TABS;
-
-  // If the plan is re-opened while someone is on the Bookings tab, the tab
-  // disappears — land them on Overview instead of a blank pane.
-  useEffect(() => {
-    if (!visibleTabs.some(t => t.key === tab)) setTab('overview');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canBook, tab]);
 
   async function confirmBooking(itemKey, code, note) {
     setBusy(true);
