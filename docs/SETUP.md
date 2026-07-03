@@ -54,6 +54,11 @@ Restart the backend after editing `.env` — it is read once at startup.
 
 ## 4. Payment architecture (future — how it will work)
 
+> **Superseded in scope by [BOOKING-ARCHITECTURE.md](BOOKING-ARCHITECTURE.md)** — the
+> full researched plan for auto-booking (Duffel/LiteAPI/Viator), money flow, legal
+> requirements, confirmations and room allocation. The Stripe mechanics below remain
+> accurate for the fee-collection piece.
+
 Today's flow is a **demo**: "Pay my share" records a payment row and emails a receipt;
 no money moves. The flow was deliberately shaped so real payments slot in without
 changing the user experience:
