@@ -5,6 +5,25 @@ import { ArrowRight, CheckCircle2, Compass, LogOut, Plus, Ticket, Trash2, Crown,
 import { api } from '../api/index.js';
 import { Page, Field, Loading, ErrorText } from '../ui.jsx';
 
+function Countdown({ dates }) {
+  if (!dates?.start) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const start = new Date(`${dates.start}T00:00:00`);
+  const end = dates.end ? new Date(`${dates.end}T00:00:00`) : start;
+  const days = Math.round((start - today) / 86400000);
+  let text;
+  if (days > 1) text = `✈ ${days} days to go`;
+  else if (days === 1) text = '✈ Tomorrow!';
+  else if (days === 0) text = '✈ Today — bon voyage!';
+  else if (today <= end) text = '🌴 Trip in progress';
+  else text = 'Trip completed';
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--clay)', fontWeight: 700 }}>
+      {text}
+    </span>
+  );
+}
+
 const STATUS_LABEL = {
   waiting: 'Gathering preferences',
   voting: 'Voting on destinations',
@@ -113,7 +132,7 @@ export default function Trips() {
                           <Crown size={13} /> You lead
                         </span>
                       )}
-                      <span>{STATUS_LABEL[t.status] || t.status}</span>
+                      {t.status === 'booked' ? <Countdown dates={t.dates} /> : <span>{STATUS_LABEL[t.status] || t.status}</span>}
                     </div>
                   </div>
                   {confirmId === t.id ? (

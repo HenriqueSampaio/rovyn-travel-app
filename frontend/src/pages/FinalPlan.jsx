@@ -8,7 +8,7 @@ import {
   Ticket, Users, Wallet, X,
 } from 'lucide-react';
 import { api, auth } from '../api/index.js';
-import { Page, Loading, ErrorText, JourneyTracker, Hero, Thumb } from '../ui.jsx';
+import { Page, Loading, ErrorText, JourneyTracker, Hero, Thumb, ThinkingLoader } from '../ui.jsx';
 
 const COST_LABELS = {
   stay: 'Accommodation (your share)',
@@ -241,6 +241,8 @@ export default function FinalPlan() {
   const [busy, setBusy] = useState(false);
   const [editText, setEditText] = useState('');
   const [editOpen, setEditOpen] = useState(false);
+  const [revising, setRevising] = useState(false);
+  const [showChanges, setShowChanges] = useState(false);
   const [slotModal, setSlotModal] = useState(null); // { day, slot, label }
   const [receipt, setReceipt] = useState(null);
   const [emailInfo, setEmailInfo] = useState(null);
@@ -278,7 +280,20 @@ export default function FinalPlan() {
   }, [data?.trip?.me?.paid]);
 
   if (!data) return <Page><Loading text="Opening the final plan…" /></Page>;
-  if (!data.plan) return <Page><Loading text="Counting stars and drafting the plan…" /></Page>;
+  if (!data.plan) {
+    return (
+      <Page>
+        <ThinkingLoader centered messages={[
+          'Rovyn is planning your trip…',
+          'Counting everyone’s stars…',
+          'Weaving your picks into the days…',
+          'Rovyn is thinking…',
+          'Balancing budgets and pace…',
+          'Almost there — polishing the details…',
+        ]} />
+      </Page>
+    );
+  }
 
   const { plan, checks, trip } = data;
   const status = data.status;
@@ -305,6 +320,7 @@ export default function FinalPlan() {
   async function submitEdit() {
     if (!editText.trim()) return;
     setBusy(true);
+    setRevising(true);
     setError('');
     try {
       await api.editPlan(tripId, editText.trim());
@@ -312,9 +328,10 @@ export default function FinalPlan() {
       setEditOpen(false);
       await load();
     } catch (err) {
-      setError(err.message);
+      setError(err.message); // includes "that change doesn't fit" explanations
     } finally {
       setBusy(false);
+      setRevising(false);
     }
   }
 
@@ -403,25 +420,52 @@ export default function FinalPlan() {
   /* ---------- tab contents ---------- */
 
   function Overview() {
+    const notes = plan.revision_notes || [];
     return (
       <>
         <Section eyebrow="How the group decided" Icon={Scale}>
           {(plan.decisions || []).map(d => (
             <div key={d.category} style={{ display: 'flex', gap: 16, padding: '13px 0', borderTop: '1px solid var(--line-soft)' }}>
               <span className="eyebrow" style={{ minWidth: 86, fontSize: 10.5, paddingTop: 3 }}>{d.category}</span>
-              <div>
+              <div style={{ flex: 1 }}>
                 <p style={{ fontWeight: 700, fontSize: 15 }}>{d.choice}</p>
                 <p className="muted" style={{ fontSize: 14 }}>{d.rationale}</p>
+                {(d.items || []).length > 0 && (
+                  <ul style={{ margin: '8px 0 2px', padding: 0, listStyle: 'none' }}>
+                    {d.items.map(item => (
+                      <li key={item.name} style={{
+                        display: 'flex', justifyContent: 'space-between', gap: 14,
+                        padding: '5px 0', borderTop: '1px dashed var(--line-soft)', fontSize: 14,
+                      }}>
+                        <span style={{ color: 'var(--ink-soft)' }}>{item.name}</span>
+                        {item.stars > 0 && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--clay)', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                            {item.stars} <Star size={12} fill="var(--clay)" />
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </div>
           ))}
         </Section>
 
-        {(plan.revision_notes || []).length > 0 && (
-          <Section eyebrow="Changes so far" Icon={Pencil}>
-            {plan.revision_notes.map((n, i) => (
-              <p key={i} className="serif" style={{ fontSize: 15, fontStyle: 'italic', color: 'var(--ink-soft)', marginBottom: 7 }}>— {n}</p>
-            ))}
+        {notes.length > 0 && (
+          <Section eyebrow="Plan history" Icon={Pencil}>
+            {!showChanges ? (
+              <button className="btn-quiet" onClick={() => setShowChanges(true)}>
+                See changes that were made ({notes.length})
+              </button>
+            ) : (
+              <>
+                {notes.map((n, i) => (
+                  <p key={i} className="serif" style={{ fontSize: 15, fontStyle: 'italic', color: 'var(--ink-soft)', marginBottom: 7 }}>— {n}</p>
+                ))}
+                <button className="btn-quiet" onClick={() => setShowChanges(false)} style={{ marginTop: 6 }}>Hide changes</button>
+              </>
+            )}
           </Section>
         )}
 
@@ -653,12 +697,21 @@ export default function FinalPlan() {
             onChange={e => setEditText(e.target.value)}
             style={{ minHeight: 74, resize: 'vertical', marginBottom: 12 }}
           />
-          <div style={{ display: 'flex', gap: 18 }}>
-            <button className="btn" onClick={submitEdit} disabled={busy || !editText.trim()}>
-              {busy ? <Loader2 className="spin" size={15} /> : <Send size={15} />} Revise the plan
-            </button>
-            <button className="btn-quiet" onClick={() => setEditOpen(false)}>Cancel</button>
-          </div>
+          {revising ? (
+            <ThinkingLoader messages={[
+              'Rovyn is reworking the plan…',
+              'Fitting your change into the days…',
+              'Rechecking the costs…',
+              'Rovyn is thinking…',
+            ]} />
+          ) : (
+            <div style={{ display: 'flex', gap: 18 }}>
+              <button className="btn" onClick={submitEdit} disabled={busy || !editText.trim()}>
+                <Send size={15} /> Revise the plan
+              </button>
+              <button className="btn-quiet" onClick={() => setEditOpen(false)}>Cancel</button>
+            </div>
+          )}
         </div>
       )}
 

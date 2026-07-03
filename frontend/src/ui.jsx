@@ -1,4 +1,5 @@
-import { motion } from 'framer-motion';
+import { useEffect, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Check, Compass, LogOut, Loader2 } from 'lucide-react';
 import { auth } from './api/index.js';
@@ -101,6 +102,44 @@ export function Loading({ text = 'One moment…' }) {
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '120px 0' }}>
       <Loader2 className="spin" size={30} strokeWidth={1.5} color="var(--pine)" />
       <p className="muted serif" style={{ fontStyle: 'italic', fontSize: 17 }}>{text}</p>
+    </div>
+  );
+}
+
+/* Animated waiting state — cycles through playful status lines while the AI works */
+export function ThinkingLoader({ messages, centered = false, style }) {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick(x => x + 1), 2600);
+    return () => clearInterval(t);
+  }, []);
+  const msg = messages[tick % messages.length];
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 14,
+      ...(centered ? { flexDirection: 'column', padding: '110px 0', textAlign: 'center' } : {}),
+      ...style,
+    }}>
+      <motion.span
+        animate={{ scale: [1, 1.15, 1] }}
+        transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+        style={{ display: 'inline-flex' }}
+      >
+        <Compass className="spin-slow" size={centered ? 34 : 22} strokeWidth={1.5} color="var(--pine)" />
+      </motion.span>
+      <AnimatePresence mode="wait">
+        <motion.p
+          key={msg}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.35 }}
+          className="serif muted"
+          style={{ fontStyle: 'italic', fontSize: centered ? 18 : 17 }}
+        >
+          {msg}
+        </motion.p>
+      </AnimatePresence>
     </div>
   );
 }
