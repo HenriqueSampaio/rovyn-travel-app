@@ -142,7 +142,7 @@ export default function Dashboard() {
           <Link2 size={13} strokeWidth={2.5} /> Bring more people
         </p>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 24, flexWrap: 'wrap' }}>
-          <span className="serif" style={{ fontSize: 40, letterSpacing: 8, color: 'var(--pine)' }}>
+          <span className="serif invite-code">
             {trip.invite_code}
           </span>
           <div style={{ display: 'flex', gap: 18 }}>

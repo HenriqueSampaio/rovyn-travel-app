@@ -139,7 +139,7 @@ export default function Questionnaire() {
       <>
         <h1 style={{ fontSize: 36, marginBottom: 10 }}>When could you get away?</h1>
         <p className="muted" style={{ marginBottom: 40 }}>We'll find the window everyone can make.</p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 40 }}>
+        <div className="two-col" style={{ columnGap: 40 }}>
           <Field label="From">
             <input type="date" min={today} value={form.dateStart}
                    onChange={e => setForm(f => ({ ...f, dateStart: e.target.value }))} />
@@ -187,7 +187,7 @@ export default function Questionnaire() {
       <>
         <h1 style={{ fontSize: 36, marginBottom: 10 }}>What are you traveling for?</h1>
         <p className="muted" style={{ marginBottom: 28 }}>Choose everything that calls to you.</p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 40 }}>
+        <div className="two-col" style={{ columnGap: 40 }}>
           {VIBES.map(v => (
             <OptionRow key={v.id} selected={form.vibes.includes(v.id)} Icon={v.Icon}
                        title={v.label} onClick={() => toggleVibe(v.id)} />

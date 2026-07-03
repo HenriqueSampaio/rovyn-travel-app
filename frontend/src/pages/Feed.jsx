@@ -257,7 +257,7 @@ export default function Feed() {
 
   return (
     <Page width={560}>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 8 }}>
         <div>
           <p className="eyebrow">The feed</p>
           <h1 style={{ fontSize: 38, margin: '10px 0 0' }}>Trips worth stealing</h1>

@@ -39,11 +39,8 @@ export function Nav() {
   // Any page inside a specific trip gets a way back home
   const insideTrip = /^\/trips\/.+/.test(location.pathname);
   return (
-    <nav style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '28px 0 20px', borderBottom: '1px solid var(--line-soft)', marginBottom: 48,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 26 }}>
+    <nav className="site-nav">
+      <div className="nav-left">
         <button onClick={() => navigate('/trips')} style={{ padding: 0 }}>
           <Wordmark />
         </button>
@@ -54,10 +51,10 @@ export function Nav() {
         )}
       </div>
       {user && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+        <div className="nav-right">
           <NavLink to="/feed" label="Feed" />
           <NavLink to="/trips" label="Trips" />
-          <span className="muted" style={{ fontSize: 14 }}>{user.name}</span>
+          <span className="muted nav-username" style={{ fontSize: 14 }}>{user.name}</span>
           <button
             className="btn-quiet"
             onClick={() => { auth.clear(); navigate('/'); }}
@@ -73,8 +70,8 @@ export function Nav() {
 
 export function Page({ children, width = 680, nav = true }) {
   return (
-    <div style={{ minHeight: '100vh', padding: '0 28px' }}>
-      <div style={{ maxWidth: width, margin: '0 auto', paddingBottom: 100 }}>
+    <div className="page">
+      <div className="page-inner" style={{ maxWidth: width }}>
         {nav && <Nav />}
         <motion.div
           initial={{ opacity: 0, y: 14 }}
@@ -270,23 +267,19 @@ export function journeyIndex(status) {
 export function JourneyTracker({ status, style }) {
   const current = journeyIndex(status);
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 0, margin: '0 0 44px', flexWrap: 'wrap', rowGap: 12, ...style }}>
+    <div className="journey" style={style}>
       {JOURNEY_STEPS.map((step, i) => {
         const done = i < current;
         const active = i === current;
         return (
           <div key={step.key} style={{ display: 'flex', alignItems: 'center' }}>
             {i > 0 && (
-              <div style={{
-                width: 26, height: 1, margin: '0 8px',
+              <div className="journey-link" style={{
                 background: done || active ? 'var(--pine)' : 'var(--line)',
               }} />
             )}
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-              fontSize: 11.5, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase',
+            <span className="journey-step" style={{
               color: done ? 'var(--pine)' : active ? 'var(--clay)' : 'var(--muted)',
-              whiteSpace: 'nowrap',
             }}>
               {done
                 ? <Check size={13} strokeWidth={3} />
@@ -315,6 +308,7 @@ export function Hero({ image, height = 230, style }) {
   return (
     <figure style={{ margin: 0, position: 'relative', ...style }}>
       <img
+        className="hero-img"
         src={image.url} alt={image.alt || ''} loading="lazy"
         style={{ width: '100%', height, objectFit: 'cover', borderRadius: 4, display: 'block' }}
       />
@@ -335,6 +329,7 @@ export function Thumb({ image, size = 84, style }) {
   if (!image?.thumb) return null;
   return (
     <img
+      className="thumb"
       src={image.thumb} alt={image.alt || ''} loading="lazy"
       title={image.credit ? `Photo: ${image.credit} · Pexels` : undefined}
       style={{
