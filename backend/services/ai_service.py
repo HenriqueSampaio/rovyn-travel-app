@@ -362,7 +362,7 @@ def generate_trip_options(destination: str, responses: list[dict], trip_name: st
         flights_future = pool.submit(_flight_options, destination, prefs)
         stays_future = pool.submit(
             real_stay_options, destination, dates.get("start", ""), dates.get("end", ""),
-            prefs["group_size"], duration,
+            prefs["group_size"], duration, "", prefs["accommodation_votes"],
         )
         options = base_future.result()
         live_stays = stays_future.result()
@@ -377,6 +377,7 @@ def generate_trip_options(destination: str, responses: list[dict], trip_name: st
         live_stays = real_stay_options(
             destination, dates.get("start", ""), dates.get("end", ""),
             prefs["group_size"], duration, country_hint=options["country"],
+            type_votes=prefs["accommodation_votes"],
         )
     if live_stays:
         options["stay"] = live_stays

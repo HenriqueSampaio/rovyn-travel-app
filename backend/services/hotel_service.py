@@ -75,6 +75,55 @@ def _split_place(destination: str) -> tuple[str, str]:
     return city, country
 
 
+# LiteAPI hotelTypeId -> human label (from GET /data/hotelTypes)
+_TYPE_NAMES = {
+    201: "apartment", 203: "hostel", 204: "hotel", 205: "motel", 206: "resort",
+    207: "residence", 208: "bed & breakfast", 209: "ryokan", 210: "farm stay",
+    212: "holiday park", 213: "villa", 214: "campsite", 215: "boat stay",
+    216: "guest house", 218: "inn", 219: "aparthotel", 220: "holiday home",
+    221: "lodge", 222: "homestay", 223: "country house", 224: "luxury tent",
+    225: "capsule hotel", 227: "riad", 228: "chalet", 229: "condo",
+    230: "cottage", 231: "economy hotel", 232: "gite",
+}
+
+# Rovyn questionnaire accommodation vote -> (core typeIds, partial typeIds)
+_VOTE_TYPE_IDS = {
+    "hostel": ({203, 225}, {208, 216, 218, 222}),
+    "boutique hotel": ({208, 216, 218, 227}, {204}),
+    "4-star hotel": ({204, 219, 231}, {206}),
+    "luxury resort": ({206}, {204}),
+    "airbnb/vacation rental": (
+        {201, 207, 213, 219, 220, 222, 223, 228, 229, 230, 232}, {208, 216}),
+}
+
+
+def _type_label(hotel: dict) -> str:
+    label = _TYPE_NAMES.get(hotel.get("hotelTypeId"), "hotel")
+    stars = hotel.get("stars") or hotel.get("starRating")
+    if label in ("hotel", "resort") and stars:
+        return f"{stars}-star {label}"
+    return label
+
+
+def _affinity(hotel: dict, type_votes: dict | None) -> float:
+    """0..1 — how well this property matches the group's accommodation votes."""
+    if not type_votes:
+        return 0.0
+    tid = hotel.get("hotelTypeId")
+    stars = hotel.get("stars") or hotel.get("starRating") or 0
+    total = sum(type_votes.values()) or 1
+    score = 0.0
+    for vote, count in type_votes.items():
+        core, partial = _VOTE_TYPE_IDS.get(vote, (set(), set()))
+        match = 1.0 if tid in core else (0.5 if tid in partial else 0.0)
+        if match and vote == "4-star hotel" and stars and not (3.5 <= stars <= 4.5):
+            match *= 0.6
+        if match and vote == "luxury resort" and tid == 204:
+            match = 0.5 if stars >= 5 else 0.15
+        score += (count / total) * match
+    return score
+
+
 def _hotel_image(h: dict) -> dict | None:
     url = h.get("main_photo") or h.get("thumbnail")
     if not url:
@@ -87,8 +136,11 @@ def _hotel_image(h: dict) -> dict | None:
 
 
 def real_stay_options(destination: str, check_in: str, check_out: str,
-                      group_size: int, nights: int, country_hint: str = "") -> list[dict]:
-    """Up to 4 real hotels with live prices, mapped to Rovyn's stay-option schema.
+                      group_size: int, nights: int, country_hint: str = "",
+                      type_votes: dict | None = None) -> list[dict]:
+    """Up to 6 real properties with live prices, mapped to Rovyn's stay-option
+    schema and biased toward the group's accommodation votes (a villa-loving
+    group sees villas first) while keeping price diversity.
     Returns [] on any failure — callers must fall back to AI/sample options."""
     if not liteapi_available():
         return []
@@ -134,31 +186,34 @@ def real_stay_options(destination: str, check_in: str, check_out: str,
         if not priced:
             return []
 
-        # Spread across price tiers: cheapest, two middle picks by rating, priciest
-        priced.sort(key=lambda p: p[1])
-        picks = {0, len(priced) - 1}
-        middle = sorted(range(1, len(priced) - 1),
-                        key=lambda i: -(priced[i][0].get("rating") or priced[i][0].get("starRating") or 0))
-        for i in middle:
-            if len(picks) >= 4:
-                break
-            picks.add(i)
+        # Rank by group-vote affinity (rating breaks ties), then guarantee
+        # price diversity by keeping the cheapest and priciest overall.
+        scored = [(hotel, total, _affinity(hotel, type_votes)) for hotel, total in priced]
+        scored.sort(key=lambda s: (-s[2], -(s[0].get("rating") or 0), s[1]))
+        chosen = scored[:4]
+        by_price = sorted(scored, key=lambda s: s[1])
+        for extreme in (by_price[0], by_price[-1]):
+            if not any(extreme[0].get("id") == c[0].get("id") for c in chosen) and len(chosen) < 6:
+                chosen.append(extreme)
+        chosen.sort(key=lambda s: s[1])
 
         options = []
-        for i in sorted(picks):
-            hotel, total = priced[i]
+        for hotel, total, affinity in chosen:
             per_person = round(total / max(group_size, 1))
             per_night = round(total / max(nights, 1))
-            stars = hotel.get("starRating") or hotel.get("stars")
+            label = _type_label(hotel)
+            why = f"Real availability for your dates — live total ${round(total)} for the group."
+            if affinity >= 0.5:
+                why = f"A {label} — matching the group's stay vote. Live total ${round(total)} for the group."
             options.append({
                 "name": hotel.get("name", "Hotel"),
-                "type": f"{stars}-star hotel" if stars else "hotel",
+                "type": label,
                 "area": hotel.get("address") or hotel.get("city") or "",
                 "price_per_night": per_night,
                 "total_per_person": per_person,
                 "rating": round(float(hotel.get("rating")), 1) if hotel.get("rating") else None,
                 "amenities": [],
-                "why": f"Real availability for your dates — live total ${round(total)} for the group.",
+                "why": why,
                 "image": _hotel_image(hotel),
                 "live_price": True,
                 "liteapi_hotel_id": hotel.get("id"),
