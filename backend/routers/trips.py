@@ -1,5 +1,6 @@
 import json
 import random
+import re
 import string
 import uuid
 from collections import Counter
@@ -10,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from backend.auth import get_current_user
 from backend.db import get_conn
 from backend.models import (
-    CreateTripRequest, CurationRequest, EditRequest, JoinTripRequest,
+    ArrangeSlotsRequest, CreateTripRequest, CurationRequest, EditRequest, JoinTripRequest,
     QuestionnaireData, ReorderRequest, SlotEditRequest, StarRequest, VoteRequest,
 )
 from backend.services.ai_service import (
@@ -705,6 +706,12 @@ def read_plan(trip_id: str, user: dict = Depends(get_current_user)):
     for c in checks:
         if c["user_id"] != user["id"]:
             c.pop("email", None)
+    slot_locks = {}
+    if plan:
+        for d in plan.get("itinerary", {}).get("days", []):
+            slot_locks[str(d.get("day"))] = {
+                slot: _slot_locked(d.get(slot, "")) for slot in _SLOT_ORDER
+            }
     return {
         "plan": plan,
         "generating": bool(trip["final_plan_generating"]),
@@ -713,6 +720,7 @@ def read_plan(trip_id: str, user: dict = Depends(get_current_user)):
         "checks": checks,
         "trip": payload,
         "replacement_pool": _replacement_pool(trip, plan) if plan else [],
+        "slot_locks": slot_locks,
     }
 
 
@@ -810,6 +818,12 @@ def reorder_days(trip_id: str, req: ReorderRequest, user: dict = Depends(get_cur
         days = plan.get("itinerary", {}).get("days", [])
         if sorted(req.order) != sorted(d.get("day") for d in days):
             raise HTTPException(status_code=400, detail="The new order must contain each existing day exactly once.")
+        # Arrival and departure days are pinned to the calendar
+        if len(days) >= 2 and (req.order[0] != days[0].get("day") or req.order[-1] != days[-1].get("day")):
+            raise HTTPException(
+                status_code=400,
+                detail="Arrival and departure days are fixed — only the days in between can be reordered.",
+            )
 
         by_number = {d.get("day"): d for d in days}
         dates_in_sequence = [d.get("date") for d in days]  # calendar stays fixed
@@ -832,6 +846,16 @@ def reorder_days(trip_id: str, req: ReorderRequest, user: dict = Depends(get_cur
 
 _SLOT_ORDER = ["morning", "afternoon", "evening"]
 _FREE_SLOT = "Free time — recharge or wander."
+
+# Fixed-schedule moments that can't be moved, replaced or deleted.
+_LOCKED_SLOT_RE = re.compile(
+    r"check[\s-]?in|check[\s-]?out|arriv|departure|depart\b|airport|flight home|drop bags",
+    re.IGNORECASE,
+)
+
+
+def _slot_locked(text: str) -> bool:
+    return bool(_LOCKED_SLOT_RE.search(text or ""))
 
 
 def _slot_item_name(plan: dict, slot_text: str):
@@ -865,6 +889,12 @@ def edit_slot(trip_id: str, req: SlotEditRequest, user: dict = Depends(get_curre
         if day is None:
             raise HTTPException(status_code=400, detail="That day doesn't exist in the plan.")
 
+        if _slot_locked(day.get(req.slot, "")):
+            raise HTTPException(
+                status_code=400,
+                detail="That's a fixed moment (check-in, check-out, arrival or departure) — it can't be moved or removed.",
+            )
+
         note = ""
         if req.action in ("move_up", "move_down"):
             idx = _SLOT_ORDER.index(req.slot)
@@ -872,6 +902,8 @@ def edit_slot(trip_id: str, req: SlotEditRequest, user: dict = Depends(get_curre
             if other < 0 or other >= len(_SLOT_ORDER):
                 raise HTTPException(status_code=400, detail="Nothing to swap with in that direction.")
             a, b = req.slot, _SLOT_ORDER[other]
+            if _slot_locked(day.get(_SLOT_ORDER[other], "")):
+                raise HTTPException(status_code=400, detail="Can't swap with a fixed moment like check-in or check-out.")
             day[a], day[b] = day.get(b, ""), day.get(a, "")
             note = f"Day {req.day}: swapped {a} and {b} — {user['name']}."
         else:
@@ -896,6 +928,50 @@ def edit_slot(trip_id: str, req: SlotEditRequest, user: dict = Depends(get_curre
         plan.setdefault("revision_notes", []).append(note)
 
         # Any change to the plan needs everyone's approval again
+        conn.execute("DELETE FROM approvals WHERE trip_id = ?", (trip_id,))
+        conn.execute(
+            "UPDATE trips SET final_plan = ?, status = 'final_review' WHERE id = ?",
+            (json.dumps(plan), trip_id),
+        )
+    return {"plan": plan}
+
+
+@router.post("/{trip_id}/plan/day-slots")
+def arrange_day_slots(trip_id: str, req: ArrangeSlotsRequest, user: dict = Depends(get_current_user)):
+    """Rearrange one day's morning/afternoon/evening contents in a single move
+    (drag-and-drop). `order` lists which OLD slot's content lands in each
+    position, e.g. ["afternoon", "morning", "evening"]."""
+    if sorted(req.order) != sorted(_SLOT_ORDER):
+        raise HTTPException(status_code=400, detail="Order must contain morning, afternoon and evening exactly once.")
+    with get_conn() as conn:
+        trip = _load_trip(conn, trip_id)
+        _require_member(conn, trip_id, user["id"])
+        if not trip["final_plan"]:
+            raise HTTPException(status_code=400, detail="There is no final plan to edit yet.")
+        payments = conn.execute("SELECT COUNT(*) c FROM payments WHERE trip_id = ?", (trip_id,)).fetchone()["c"]
+        if payments > 0:
+            raise HTTPException(status_code=400, detail="Payments have started — the plan is locked.")
+
+        plan = json.loads(trip["final_plan"])
+        days = plan.get("itinerary", {}).get("days", [])
+        day = next((d for d in days if d.get("day") == req.day), None)
+        if day is None:
+            raise HTTPException(status_code=400, detail="That day doesn't exist in the plan.")
+        if req.order == _SLOT_ORDER:
+            return {"plan": plan}  # nothing moved
+
+        # Fixed moments (check-in/out, arrival, departure) must stay put
+        for position, source in zip(_SLOT_ORDER, req.order):
+            if position != source and (_slot_locked(day.get(source, "")) or _slot_locked(day.get(position, ""))):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Fixed moments like check-in, check-out or your arrival can't be moved — rearrange around them.",
+                )
+
+        new_contents = {position: day.get(source, "") for position, source in zip(_SLOT_ORDER, req.order)}
+        day.update(new_contents)
+        plan.setdefault("revision_notes", []).append(f"Day {req.day}: schedule rearranged — {user['name']}.")
+
         conn.execute("DELETE FROM approvals WHERE trip_id = ?", (trip_id,))
         conn.execute(
             "UPDATE trips SET final_plan = ?, status = 'final_review' WHERE id = ?",

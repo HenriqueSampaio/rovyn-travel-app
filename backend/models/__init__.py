@@ -57,6 +57,11 @@ class ReorderRequest(BaseModel):
     order: list[int]  # new sequence of current day numbers, e.g. [2, 1, 3]
 
 
+class ArrangeSlotsRequest(BaseModel):
+    day: int
+    order: list[str]  # slot names by their NEW position, e.g. ["afternoon", "morning", "evening"]
+
+
 class SlotEditRequest(BaseModel):
     day: int
     slot: str            # "morning" | "afternoon" | "evening"

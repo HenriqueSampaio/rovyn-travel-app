@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, Reorder, useDragControls } from 'framer-motion';
 import {
-  ArrowDown, ArrowUp, BedDouble, CalendarDays, Check, CheckCircle2, Compass,
-  CreditCard, Landmark, Lightbulb, Loader2, Mail, MoonStar, PartyPopper,
-  Pencil, PlaneTakeoff, Receipt, Scale, Send, Star, Sun, Sunset, Ticket,
-  Users, Wallet, X,
+  BedDouble, CalendarDays, Check, CheckCircle2, Compass,
+  CreditCard, GripVertical, Landmark, Lightbulb, Loader2, Lock, Mail, MoonStar,
+  PartyPopper, Pencil, PlaneTakeoff, Receipt, Scale, Send, Star, Sun, Sunset,
+  Ticket, Users, Wallet, X,
 } from 'lucide-react';
 import { api, auth } from '../api/index.js';
 import { Page, Loading, ErrorText, JourneyTracker, Hero, Thumb } from '../ui.jsx';
@@ -34,6 +34,200 @@ function Section({ eyebrow, Icon, children, style }) {
       </p>
       {children}
     </section>
+  );
+}
+
+/* ---------- drag-and-drop itinerary ---------- */
+
+const SLOT_KEYS = ['morning', 'afternoon', 'evening'];
+const SLOT_ICONS = [Sun, Sunset, MoonStar];
+
+function DayBody({ day, editable, busy, locks, slotOrder, onSlotReorder, onDragStart, onSlotCommit, onDeleteSlot }) {
+  return (
+    <div>
+      <h3 className="serif" style={{ fontSize: 17.5, fontStyle: 'italic', marginBottom: 8 }}>{day.theme}</h3>
+      <Reorder.Group as="div" axis="y" values={slotOrder} onReorder={onSlotReorder} style={{ margin: 0, padding: 0 }}>
+        {slotOrder.map((srcKey, i) => {
+          const Icon = SLOT_ICONS[i];
+          const text = day[srcKey] || '';
+          const locked = Boolean(locks?.[srcKey]);
+          const draggable = editable && !locked && Boolean(text);
+          return (
+            <Reorder.Item
+              key={srcKey} value={srcKey} as="div"
+              dragListener={draggable}
+              onDragStart={onDragStart}
+              onDragEnd={() => onSlotCommit(day.day)}
+              whileDrag={{ scale: 1.02, boxShadow: '0 10px 28px rgba(35, 49, 43, 0.22)', zIndex: 6 }}
+              style={{
+                display: 'flex', gap: 12, marginBottom: 6, alignItems: 'flex-start',
+                position: 'relative', background: 'var(--bg)', borderRadius: 4, padding: '2px 4px',
+                cursor: draggable ? 'grab' : 'default', touchAction: draggable ? 'none' : 'auto',
+              }}
+            >
+              <Icon size={14} strokeWidth={1.7} color="var(--clay)" style={{ marginTop: 4, flexShrink: 0 }} />
+              <p style={{ flex: 1, fontSize: 14, color: 'var(--ink-soft)' }}>
+                {text || <em className="muted">Free</em>}
+              </p>
+              {locked ? (
+                <span title="Fixed to the calendar — can't be moved or removed" style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, marginTop: 3,
+                  fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--muted)',
+                }}>
+                  <Lock size={11} strokeWidth={2.2} /> fixed
+                </span>
+              ) : editable && text ? (
+                <span style={{ display: 'inline-flex', gap: 8, flexShrink: 0, marginTop: 2, alignItems: 'center' }}>
+                  <GripVertical size={14} color="var(--muted)" style={{ cursor: 'grab' }} />
+                  <button className="btn-quiet" title="Remove this" disabled={busy}
+                          style={{ padding: 2, color: 'var(--clay)' }}
+                          onClick={() => onDeleteSlot(day.day, srcKey, text)}>
+                    <X size={13} />
+                  </button>
+                </span>
+              ) : null}
+            </Reorder.Item>
+          );
+        })}
+      </Reorder.Group>
+    </div>
+  );
+}
+
+function DayLabel({ day, tag, handle }) {
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {handle}
+        <div className="serif" style={{ fontSize: 22, color: 'var(--pine)' }}>Day {day.day}</div>
+      </div>
+      <div className="muted" style={{ fontSize: 12 }}>{day.date}</div>
+      {tag && (
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 5,
+          fontSize: 10.5, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--muted)',
+        }}>
+          <Lock size={10} strokeWidth={2.2} /> {tag}
+        </span>
+      )}
+    </div>
+  );
+}
+
+const DAY_ROW_STYLE = {
+  display: 'grid', gridTemplateColumns: '96px 1fr', gap: 20,
+  padding: '20px 0', borderTop: '1px solid var(--line-soft)',
+};
+
+function DraggableDay({ day, onDragStart, onDragEnd, children }) {
+  const controls = useDragControls();
+  const handle = (
+    <GripVertical
+      size={15} color="var(--muted)"
+      style={{ cursor: 'grab', touchAction: 'none', flexShrink: 0 }}
+      onPointerDown={e => controls.start(e)}
+    />
+  );
+  return (
+    <Reorder.Item
+      as="div" value={day.day} dragListener={false} dragControls={controls}
+      onDragStart={onDragStart} onDragEnd={onDragEnd}
+      whileDrag={{ scale: 1.01, boxShadow: '0 14px 40px rgba(35, 49, 43, 0.25)', zIndex: 10 }}
+      style={{ ...DAY_ROW_STYLE, position: 'relative', background: 'var(--bg)', borderRadius: 4 }}
+    >
+      {children(handle)}
+    </Reorder.Item>
+  );
+}
+
+function ItineraryDays({ plan, editable, busy, slotLocks, commitDays, commitSlots, deleteSlot }) {
+  const days = plan.itinerary?.days || [];
+  const sig = JSON.stringify(days.map(d => [d.day, d.date, d.morning, d.afternoon, d.evening]));
+  const [middleIds, setMiddleIds] = useState(() => days.slice(1, -1).map(d => d.day));
+  const [slotOrders, setSlotOrders] = useState({});
+  const draggingRef = useRef(false);
+  const middleRef = useRef(middleIds);
+  middleRef.current = middleIds;
+  const slotOrdersRef = useRef(slotOrders);
+  slotOrdersRef.current = slotOrders;
+
+  useEffect(() => {
+    if (!draggingRef.current) {
+      setMiddleIds(days.slice(1, -1).map(d => d.day));
+      setSlotOrders({});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig]);
+
+  if (days.length === 0) return null;
+
+  const byId = Object.fromEntries(days.map(d => [d.day, d]));
+  const first = days[0];
+  const last = days.length > 1 ? days[days.length - 1] : null;
+  const canDragDays = editable && days.length >= 3;
+  const locksFor = d => slotLocks?.[String(d.day)] || {};
+
+  const onDragStart = () => { draggingRef.current = true; };
+
+  function daysDragEnd() {
+    draggingRef.current = false;
+    const order = [first.day, ...middleRef.current, ...(last ? [last.day] : [])];
+    if (JSON.stringify(order) !== JSON.stringify(days.map(d => d.day))) commitDays(order);
+  }
+
+  function slotsDragEnd(dayNum) {
+    draggingRef.current = false;
+    const order = slotOrdersRef.current[dayNum] || SLOT_KEYS;
+    if (JSON.stringify(order) === JSON.stringify(SLOT_KEYS)) return;
+    const locks = locksFor(byId[dayNum]);
+    const lockedMoved = SLOT_KEYS.some(k => locks[k] && order.indexOf(k) !== SLOT_KEYS.indexOf(k));
+    if (lockedMoved) {
+      // snap fixed moments back where they belong
+      setSlotOrders(s => ({ ...s, [dayNum]: undefined }));
+      return;
+    }
+    commitSlots(dayNum, order);
+  }
+
+  const renderBody = (d, dragHandle) => (
+    <>
+      <DayLabel
+        day={d}
+        handle={dragHandle}
+        tag={d.day === first.day ? 'arrival' : last && d.day === last.day ? 'departure' : null}
+      />
+      <DayBody
+        day={d} editable={editable} busy={busy} locks={locksFor(d)}
+        slotOrder={slotOrders[d.day] || SLOT_KEYS}
+        onSlotReorder={order => setSlotOrders(s => ({ ...s, [d.day]: order }))}
+        onDragStart={onDragStart}
+        onSlotCommit={slotsDragEnd}
+        onDeleteSlot={deleteSlot}
+      />
+    </>
+  );
+
+  return (
+    <div>
+      {/* Arrival day — pinned */}
+      <div style={DAY_ROW_STYLE}>{renderBody(first, null)}</div>
+
+      {/* Middle days — drag by the grip to reorder */}
+      {canDragDays ? (
+        <Reorder.Group as="div" axis="y" values={middleIds} onReorder={setMiddleIds} style={{ margin: 0, padding: 0 }}>
+          {middleIds.map(id => byId[id] && (
+            <DraggableDay key={id} day={byId[id]} onDragStart={onDragStart} onDragEnd={daysDragEnd}>
+              {handle => renderBody(byId[id], handle)}
+            </DraggableDay>
+          ))}
+        </Reorder.Group>
+      ) : (
+        days.slice(1, -1).map(d => <div key={d.day} style={DAY_ROW_STYLE}>{renderBody(d, null)}</div>)
+      )}
+
+      {/* Departure day — pinned */}
+      {last && <div style={DAY_ROW_STYLE}>{renderBody(last, null)}</div>}
+    </div>
   );
 }
 
@@ -122,14 +316,6 @@ export default function FinalPlan() {
     } finally {
       setBusy(false);
     }
-  }
-
-  function moveDay(index, delta) {
-    const order = days.map(d => d.day);
-    const j = index + delta;
-    if (j < 0 || j >= order.length) return;
-    [order[index], order[j]] = [order[j], order[index]];
-    act(api.reorderDays, tripId, order);
   }
 
   async function resolveSlot(action, replacementId = '') {
@@ -257,63 +443,25 @@ export default function FinalPlan() {
       <Section eyebrow={`Day by day — “${plan.itinerary?.title || 'the plan'}”`} Icon={Sun}>
         {editable && (
           <p className="muted" style={{ fontSize: 13.5, marginBottom: 8, fontStyle: 'italic' }}>
-            This itinerary is yours to shape: reorder whole days with the side arrows, nudge an
-            activity earlier/later within its day, or remove it (Rovyn will offer replacements).
+            This itinerary is yours to shape: drag whole days by their grip to reorder them, drag
+            activities within a day to reshuffle the schedule, or remove one with ✕ (Rovyn will
+            offer replacements). Moments marked <Lock size={11} style={{ verticalAlign: -1 }} /> —
+            arrival, check-in, check-out, departure — are pinned to the calendar and stay put.
             Any change asks the group to re-approve.
           </p>
         )}
-        {days.map((day, i) => (
-          <div key={`${day.day}-${day.date}`} style={{ display: 'grid', gridTemplateColumns: '86px 1fr auto', gap: 20, padding: '20px 0', borderTop: '1px solid var(--line-soft)' }}>
-            <div>
-              <div className="serif" style={{ fontSize: 22, color: 'var(--pine)' }}>Day {day.day}</div>
-              <div className="muted" style={{ fontSize: 12 }}>{day.date}</div>
-            </div>
-            <div>
-              <h3 className="serif" style={{ fontSize: 17.5, fontStyle: 'italic', marginBottom: 8 }}>{day.theme}</h3>
-              {[['morning', Sun], ['afternoon', Sunset], ['evening', MoonStar]].map(([slot, Icon], si) => (
-                day[slot] ? (
-                  <div key={slot} style={{ display: 'flex', gap: 12, marginBottom: 6, alignItems: 'flex-start' }}>
-                    <Icon size={14} strokeWidth={1.7} color="var(--clay)" style={{ marginTop: 4, flexShrink: 0 }} />
-                    <p style={{ flex: 1, fontSize: 14, color: 'var(--ink-soft)' }}>{day[slot]}</p>
-                    {editable && (
-                      <span style={{ display: 'inline-flex', gap: 6, flexShrink: 0, marginTop: 2 }}>
-                        <button className="btn-quiet" title="Move earlier in the day" disabled={busy || si === 0}
-                                style={{ padding: 2 }}
-                                onClick={() => act(api.editSlot, tripId, day.day, slot, 'move_up')}>
-                          <ArrowUp size={13} />
-                        </button>
-                        <button className="btn-quiet" title="Move later in the day" disabled={busy || si === 2}
-                                style={{ padding: 2 }}
-                                onClick={() => act(api.editSlot, tripId, day.day, slot, 'move_down')}>
-                          <ArrowDown size={13} />
-                        </button>
-                        <button className="btn-quiet" title="Remove this" disabled={busy}
-                                style={{ padding: 2, color: 'var(--clay)' }}
-                                onClick={() => setSlotModal({ day: day.day, slot, label: day[slot] })}>
-                          <X size={13} />
-                        </button>
-                      </span>
-                    )}
-                  </div>
-                ) : null
-              ))}
-            </div>
-            {editable ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <button className="btn-quiet" onClick={() => moveDay(i, -1)} disabled={busy || i === 0} style={{ padding: 4 }}>
-                  <ArrowUp size={15} />
-                </button>
-                <button className="btn-quiet" onClick={() => moveDay(i, 1)} disabled={busy || i === days.length - 1} style={{ padding: 4 }}>
-                  <ArrowDown size={15} />
-                </button>
-              </div>
-            ) : <span />}
-          </div>
-        ))}
+        <ItineraryDays
+          plan={plan}
+          editable={editable}
+          busy={busy}
+          slotLocks={data.slot_locks || {}}
+          commitDays={order => act(api.reorderDays, tripId, order)}
+          commitSlots={(day, order) => act(api.arrangeSlots, tripId, day, order)}
+          deleteSlot={(day, slot, label) => setSlotModal({ day, slot, label })}
+        />
       </Section>
     );
   }
-
   function Travel() {
     return (
       <>
