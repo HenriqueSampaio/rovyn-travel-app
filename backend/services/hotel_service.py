@@ -6,7 +6,8 @@ estimates. Without a key — or on any API hiccup — callers fall back to the
 existing AI/sample options, so this module never breaks trip planning.
 
 Optional companion: GOOGLE_PLACES_API_KEY enriches hotels (and any stay option)
-with their official website via Google Places Text Search.
+with their official website via Google Places Text Search, and provides guest
+reviews for stays that don't come from LiteAPI.
 """
 import json
 import os
@@ -14,6 +15,7 @@ import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 import certifi
 import pycountry
@@ -212,6 +214,7 @@ def real_stay_options(destination: str, check_in: str, check_out: str,
                 "price_per_night": per_night,
                 "total_per_person": per_person,
                 "rating": round(float(hotel.get("rating")), 1) if hotel.get("rating") else None,
+                "review_count": hotel.get("reviewCount"),
                 "amenities": [],
                 "why": why,
                 "image": _hotel_image(hotel),
@@ -223,6 +226,143 @@ def real_stay_options(destination: str, check_in: str, check_out: str,
     except Exception:
         # Live hotel data is an enhancement — it must never break trip planning
         return []
+
+
+def _liteapi_gallery(hotel_id: str, limit: int = 10) -> tuple[list[dict], float | None, int | None]:
+    """(photos, rating /10, review count) from LiteAPI's hotel-details endpoint.
+    The list endpoint only carries one photo; details carry the full gallery."""
+    detail = (_lite_request("/data/hotel", params={"hotelId": hotel_id})).get("data") or {}
+    images = detail.get("hotelImages") or []
+    images.sort(key=lambda i: (not i.get("defaultImage"),
+                               i["order"] if isinstance(i.get("order"), (int, float)) else 10_000))
+    photos, seen = [], set()
+    for img in images:
+        url = safe_url(img.get("url") or img.get("urlHd"))
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        photos.append({"url": url, "caption": (img.get("caption") or "").strip()})
+        if len(photos) >= limit:
+            break
+    rating = detail.get("rating")
+    return photos, (round(float(rating), 1) if rating else None), detail.get("reviewCount")
+
+
+def _liteapi_reviews(hotel_id: str, limit: int = 6) -> list[dict]:
+    """Recent guest reviews from LiteAPI, mapped to Rovyn's review shape."""
+    data = _lite_request("/data/reviews", params={"hotelId": hotel_id, "limit": limit, "timeout": 8})
+    reviews = []
+    for r in data.get("data") or []:
+        headline = (r.get("headline") or "").strip()
+        pros = (r.get("pros") or "").strip()
+        cons = (r.get("cons") or "").strip()
+        if not (headline or pros or cons):
+            continue
+        score = r.get("averageScore")
+        reviews.append({
+            "score10": round(float(score), 1) if score is not None else None,
+            "headline": headline,
+            "pros": pros,
+            "cons": cons,
+            "author": (r.get("name") or "").strip() or "A guest",
+            "date": (r.get("date") or "")[:10],
+            "traveler_type": (r.get("type") or "").replace("_", " "),
+            "source": "liteapi",
+        })
+    return reviews
+
+
+def _google_place_reviews(name: str, place: str) -> dict | None:
+    """Aggregate rating + up to 5 guest reviews via Google Places Text Search —
+    the review source for stays that didn't come from LiteAPI. None when the
+    key is missing, the place is unknown, or anything fails."""
+    key = os.environ.get("GOOGLE_PLACES_API_KEY")
+    if not key or not name:
+        return None
+    try:
+        req = urllib.request.Request(
+            "https://places.googleapis.com/v1/places:searchText",
+            data=json.dumps({"textQuery": f"{name} {place}".strip()}).encode(),
+            headers={
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": key,
+                "X-Goog-FieldMask": "places.rating,places.userRatingCount,places.reviews",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10, context=_SSL_CTX) as res:
+            data = json.loads(res.read().decode())
+        places = data.get("places") or []
+        if not places:
+            return None
+        top = places[0]
+        reviews = []
+        for r in top.get("reviews") or []:
+            text = ((r.get("text") or {}).get("text") or "").strip()
+            if not text:
+                continue
+            reviews.append({
+                # Google rates /5 — normalize to /10 so the UI shows one scale
+                "score10": round(float(r["rating"]) * 2, 1) if r.get("rating") else None,
+                "headline": "",
+                "pros": "",
+                "cons": "",
+                "text": text,
+                "author": (r.get("authorAttribution") or {}).get("displayName") or "A guest",
+                "date": (r.get("publishTime") or "")[:10],
+                "traveler_type": "",
+                "source": "google",
+            })
+        rating = top.get("rating")
+        return {
+            "rating10": round(float(rating) * 2, 1) if rating else None,
+            "review_count": top.get("userRatingCount"),
+            "reviews": reviews[:5],
+        }
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError,
+            json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return None
+
+
+def stay_media_for_options(stays: list[dict], destination: str) -> dict:
+    """Photo galleries + guest reviews for every stay option, keyed by option id.
+
+    LiteAPI properties get their real gallery and guest reviews; other stays
+    fall back to Google Places reviews when that key is configured. Fetches run
+    concurrently and every one is best-effort — an option simply has no entry
+    when nothing could be found. Callers cache the result on the trip."""
+    def fetch(opt: dict):
+        photos, reviews, rating10, count = [], [], None, None
+        hotel_id = opt.get("liteapi_hotel_id")
+        if hotel_id and liteapi_available():
+            try:
+                photos, rating10, count = _liteapi_gallery(hotel_id)
+            except Exception:
+                pass
+            try:
+                reviews = _liteapi_reviews(hotel_id)
+            except Exception:
+                pass
+        if not reviews:
+            google = _google_place_reviews(opt.get("name", ""), destination)
+            if google:
+                reviews = google["reviews"]
+                rating10 = rating10 or google["rating10"]
+                count = count or google["review_count"]
+        if not (photos or reviews):
+            return opt.get("id"), None
+        return opt.get("id"), {
+            "photos": photos,
+            "reviews": reviews,
+            "rating10": rating10 if rating10 is not None else opt.get("rating"),
+            "review_count": count if count is not None else opt.get("review_count"),
+        }
+
+    stays = [s for s in stays if s.get("id")]
+    if not stays:
+        return {}
+    with ThreadPoolExecutor(max_workers=min(6, len(stays))) as pool:
+        return {oid: media for oid, media in pool.map(fetch, stays) if media}
 
 
 def official_website(name: str, place: str) -> str | None:

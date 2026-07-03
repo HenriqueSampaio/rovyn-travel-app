@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Check, Compass, LogOut, Loader2, MapPin } from 'lucide-react';
+import { ArrowLeft, Check, ChevronLeft, ChevronRight, Compass, LogOut, Loader2, MapPin } from 'lucide-react';
 import { api, auth } from './api/index.js';
 
 export function Wordmark({ size = 26 }) {
@@ -251,7 +251,7 @@ const JOURNEY_STEPS = [
   { key: 'destination', label: 'Destination' },
   { key: 'curate', label: 'Star favorites' },
   { key: 'plan', label: 'Final plan' },
-  { key: 'pay', label: 'Approve & pay' },
+  { key: 'pay', label: 'Approve & book' },
 ];
 
 export function journeyIndex(status) {
@@ -327,6 +327,77 @@ export function Hero({ image, height = 230, style }) {
         </figcaption>
       )}
     </figure>
+  );
+}
+
+/* Photo gallery — browse a stay's real photos in place with arrows and dots */
+export function PhotoCarousel({ photos, height = 220, style }) {
+  const [idx, setIdx] = useState(0);
+  if (!photos?.length) return null;
+  const i = Math.min(idx, photos.length - 1);
+  const photo = photos[i];
+  const next = photos[(i + 1) % photos.length];
+  const go = (delta, e) => {
+    e.stopPropagation();
+    setIdx((i + delta + photos.length) % photos.length);
+  };
+  const arrowStyle = side => ({
+    position: 'absolute', top: '50%', transform: 'translateY(-50%)', [side]: 10,
+    width: 34, height: 34, borderRadius: '50%', display: 'inline-flex',
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+    background: 'rgba(35, 49, 43, 0.55)', color: '#F6F2E8',
+    transition: 'background 0.2s ease',
+  });
+  return (
+    <div style={{ position: 'relative', borderRadius: 4, overflow: 'hidden', background: 'var(--bg-soft)', ...style }}>
+      <motion.img
+        key={photo.url}
+        src={photo.url}
+        alt={photo.caption || 'hotel photo'}
+        title={photo.caption || undefined}
+        initial={{ opacity: 0.35 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.3 }}
+        loading="lazy"
+        style={{ width: '100%', height, objectFit: 'cover', display: 'block' }}
+      />
+      {photos.length > 1 && (
+        <>
+          {/* warm the next photo so browsing feels instant */}
+          <img src={next.url} alt="" aria-hidden="true" style={{ display: 'none' }} />
+          <button type="button" aria-label="Previous photo" onClick={e => go(-1, e)} style={arrowStyle('left')}>
+            <ChevronLeft size={18} strokeWidth={2.4} />
+          </button>
+          <button type="button" aria-label="Next photo" onClick={e => go(1, e)} style={arrowStyle('right')}>
+            <ChevronRight size={18} strokeWidth={2.4} />
+          </button>
+          <span style={{
+            position: 'absolute', right: 10, top: 8, padding: '3px 10px', borderRadius: 999,
+            background: 'rgba(35, 49, 43, 0.55)', color: '#F6F2E8', fontSize: 11.5, fontWeight: 700,
+          }}>
+            {i + 1} / {photos.length}
+          </span>
+          <span style={{
+            position: 'absolute', left: 0, right: 0, bottom: 8, display: 'flex',
+            justifyContent: 'center', gap: 6,
+          }}>
+            {photos.map((p, d) => (
+              <button
+                key={p.url}
+                type="button"
+                aria-label={`Photo ${d + 1}`}
+                onClick={e => { e.stopPropagation(); setIdx(d); }}
+                style={{
+                  width: 7, height: 7, borderRadius: '50%', padding: 0,
+                  background: d === i ? '#F6F2E8' : 'rgba(246, 242, 232, 0.45)',
+                  boxShadow: '0 1px 3px rgba(0, 0, 0, 0.35)',
+                }}
+              />
+            ))}
+          </span>
+        </>
+      )}
+    </div>
   );
 }
 

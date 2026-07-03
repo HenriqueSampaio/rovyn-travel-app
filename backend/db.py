@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS trips (
     options_generating         INTEGER NOT NULL DEFAULT 0,
     final_plan                 TEXT,
     final_plan_generating      INTEGER NOT NULL DEFAULT 0,
+    stay_media                 TEXT,
     created_at                 TEXT NOT NULL
 );
 
@@ -88,6 +89,7 @@ CREATE TABLE IF NOT EXISTS payments (
     user_id      TEXT NOT NULL REFERENCES users(id),
     amount_cents INTEGER NOT NULL,
     currency     TEXT NOT NULL DEFAULT 'USD',
+    mode         TEXT NOT NULL DEFAULT 'full',  -- 'full' (Rovyn books, Phase B) | 'self_book'
     receipt      TEXT NOT NULL,
     email_status TEXT NOT NULL DEFAULT 'none',
     paid_at      TEXT NOT NULL,
@@ -155,6 +157,7 @@ _TRIP_MIGRATIONS = [
     ("options_generating", "INTEGER NOT NULL DEFAULT 0"),
     ("final_plan", "TEXT"),
     ("final_plan_generating", "INTEGER NOT NULL DEFAULT 0"),
+    ("stay_media", "TEXT"),
 ]
 
 
@@ -176,6 +179,9 @@ def init_db() -> None:
         booking_cols = {r["name"] for r in conn.execute("PRAGMA table_info(bookings)")}
         if booking_cols and "stale" not in booking_cols:
             conn.execute("ALTER TABLE bookings ADD COLUMN stale INTEGER NOT NULL DEFAULT 0")
+        payment_cols = {r["name"] for r in conn.execute("PRAGMA table_info(payments)")}
+        if payment_cols and "mode" not in payment_cols:
+            conn.execute("ALTER TABLE payments ADD COLUMN mode TEXT NOT NULL DEFAULT 'full'")
 
 
 init_db()

@@ -3,10 +3,10 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   ArrowRight, BedDouble, Check, Compass, Landmark,
-  MapPin, PlaneTakeoff, Sparkles, Star, Ticket, Users,
+  MapPin, PlaneTakeoff, Quote, Sparkles, Star, Ticket, Users,
 } from 'lucide-react';
 import { api, auth } from '../api/index.js';
-import { Page, Loading, ErrorText, JourneyTracker, Hero, Thumb, ThinkingLoader } from '../ui.jsx';
+import { Page, Loading, ErrorText, JourneyTracker, Hero, PhotoCarousel, Thumb, ThinkingLoader } from '../ui.jsx';
 
 const TABS = [
   { key: 'overview', label: 'Overview', Icon: Compass },
@@ -41,6 +41,102 @@ function StarButton({ starred, count, onClick, disabled }) {
       <Star size={20} strokeWidth={1.8} fill={starred ? 'var(--clay)' : 'none'} />
       {count > 0 && <span>{count}</span>}
     </button>
+  );
+}
+
+/* Guest reviews under a stay — LiteAPI guest feedback (pros/cons) or Google
+   Places reviews (text), collapsed to two until expanded */
+function GuestReviews({ media, fallbackRating }) {
+  const [open, setOpen] = useState(false);
+  const reviews = media?.reviews || [];
+  if (reviews.length === 0) return null;
+  const rating = media?.rating10 ?? fallbackRating;
+  const shown = open ? reviews : reviews.slice(0, 2);
+  return (
+    <div style={{ marginTop: 14 }}>
+      <p className="eyebrow" style={{ fontSize: 10.5, display: 'flex', alignItems: 'center', gap: 7, marginBottom: 2 }}>
+        <Quote size={12} strokeWidth={2.5} /> Guest reviews
+        {rating != null && <span style={{ color: 'var(--clay)' }}>{Number(rating).toFixed(1)}/10</span>}
+        {media?.review_count > 0 && (
+          <span className="muted" style={{ letterSpacing: 0, textTransform: 'none', fontWeight: 600 }}>
+            · {media.review_count.toLocaleString()} reviews
+          </span>
+        )}
+      </p>
+      {shown.map((r, i) => (
+        <div key={`${r.author}-${r.date}-${i}`} style={{ padding: '10px 0', borderTop: '1px dashed var(--line-soft)' }}>
+          <p style={{ fontSize: 13.5 }}>
+            <strong>{r.headline || 'A recent stay'}</strong>
+            <span className="muted">
+              {' '}— {r.author}
+              {r.traveler_type ? ` · ${r.traveler_type}` : ''}
+              {r.date ? ` · ${r.date}` : ''}
+              {r.score10 != null ? ` · rated ${Number(r.score10).toFixed(1)}/10` : ''}
+            </span>
+          </p>
+          {r.pros && (
+            <p style={{ fontSize: 13.5, color: 'var(--ink-soft)', marginTop: 2 }}>
+              <span style={{ color: 'var(--pine)', fontWeight: 700 }}>+</span> {r.pros}
+            </p>
+          )}
+          {r.cons && (
+            <p style={{ fontSize: 13.5, color: 'var(--ink-soft)', marginTop: 2 }}>
+              <span style={{ color: 'var(--clay)', fontWeight: 700 }}>−</span> {r.cons}
+            </p>
+          )}
+          {r.text && <p style={{ fontSize: 13.5, color: 'var(--ink-soft)', marginTop: 2 }}>{r.text}</p>}
+        </div>
+      ))}
+      {reviews.length > 2 && (
+        <button className="btn-quiet" style={{ fontSize: 13 }} onClick={() => setOpen(o => !o)}>
+          {open ? 'Show fewer reviews' : `Read all ${reviews.length} reviews`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* A stay option: photo gallery (real hotels get their full LiteAPI gallery),
+   the details, and guest reviews */
+function StayCard({ opt, media, starred, count, onStar }) {
+  const photos = media?.photos || [];
+  return (
+    <div style={{ padding: '22px 0', borderTop: '1px solid var(--line-soft)' }}>
+      {photos.length > 0
+        ? <PhotoCarousel photos={photos} height={240} style={{ marginBottom: 16 }} />
+        : <Hero image={opt.image} height={200} style={{ marginBottom: 16 }} />}
+      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+        <div style={{ flex: 1 }}>
+          <p style={{ fontWeight: 700, fontSize: 17 }}>
+            {opt.name}
+            {opt.live_price && (
+              <span title="Real property with live availability for your dates" style={{
+                marginLeft: 10, fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em',
+                color: 'var(--pine)', border: '1px solid var(--pine)', borderRadius: 999,
+                padding: '2px 8px', verticalAlign: 2,
+              }}>
+                LIVE PRICE
+              </span>
+            )}
+          </p>
+          <p className="muted" style={{ fontSize: 14, margin: '2px 0 6px' }}>
+            {opt.type}{opt.area ? ` · ${opt.area}` : ''} {opt.rating ? <>· <Star size={12} fill="var(--clay)" color="var(--clay)" style={{ verticalAlign: -1 }} /> {opt.rating}</> : null}
+          </p>
+          <p style={{ fontSize: 14.5, color: 'var(--ink-soft)' }}>{opt.why}</p>
+          {(opt.amenities || []).length > 0 && (
+            <p className="muted" style={{ fontSize: 13, marginTop: 4 }}>{opt.amenities.join(' · ')}</p>
+          )}
+          <p style={{ marginTop: 8, display: 'flex', alignItems: 'baseline', gap: 14 }}>
+            <span className="serif" style={{ fontSize: 24, color: 'var(--pine)' }}>${opt.price_per_night}<span style={{ fontSize: 14 }}> / night</span></span>
+            <span className="muted" style={{ fontSize: 13 }}>≈ ${opt.total_per_person} per person total</span>
+            {opt.official_website && <a className="btn-quiet" href={opt.official_website} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>official site</a>}
+            {opt.links?.booking && <a className="btn-quiet" href={opt.links.booking} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>{opt.live_price ? 'compare' : 'see similar'}</a>}
+          </p>
+        </div>
+        <StarButton starred={starred} count={count} onClick={onStar} />
+      </div>
+      <GuestReviews media={media} fallbackRating={opt.rating} />
+    </div>
   );
 }
 
@@ -80,8 +176,10 @@ export default function Plan() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
+  const [stayMedia, setStayMedia] = useState(null); // null = not loaded yet
   const pollRef = useRef(null);
   const starsInitialized = useRef(false);
+  const stayMediaRequested = useRef(false);
 
   useEffect(() => {
     async function poll() {
@@ -112,6 +210,16 @@ export default function Plan() {
     pollRef.current = setInterval(poll, 3500);
     return () => clearInterval(pollRef.current);
   }, [tripId, navigate]);
+
+  // Photo galleries + guest reviews are fetched once, when the Stay tab is
+  // first opened — the backend caches them on the trip after that.
+  useEffect(() => {
+    if (tab !== 'stay' || stayMediaRequested.current) return;
+    stayMediaRequested.current = true;
+    api.getStayMedia(tripId)
+      .then(d => setStayMedia(d.media || {}))
+      .catch(() => setStayMedia({}));
+  }, [tab, tripId]);
 
   if (!trip || !board?.options) return <Page><Loading text="Laying out the planning board…" /></Page>;
 
@@ -181,7 +289,7 @@ export default function Plan() {
       const buddies = (board.star_names?.[opt.id] || []).filter(n => n !== me?.name);
       return (
       <div key={opt.id} style={{ display: 'flex', gap: 16, padding: '22px 0', borderTop: '1px solid var(--line-soft)', alignItems: 'flex-start' }}>
-        {category !== 'flights' && <Thumb image={opt.image} size={category === 'stay' ? 96 : 76} />}
+        {category !== 'flights' && <Thumb image={opt.image} size={76} />}
         <div style={{ flex: 1 }}>
           {category === 'flights' ? (
             <>
@@ -203,34 +311,6 @@ export default function Plan() {
                   {buddies[0]}{buddies.length > 1 ? ` +${buddies.length - 1} more` : ''} selected this flight!
                 </p>
               )}
-            </>
-          ) : category === 'stay' ? (
-            <>
-              <p style={{ fontWeight: 700, fontSize: 17 }}>
-                {opt.name}
-                {opt.live_price && (
-                  <span title="Real property with live availability for your dates" style={{
-                    marginLeft: 10, fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em',
-                    color: 'var(--pine)', border: '1px solid var(--pine)', borderRadius: 999,
-                    padding: '2px 8px', verticalAlign: 2,
-                  }}>
-                    LIVE PRICE
-                  </span>
-                )}
-              </p>
-              <p className="muted" style={{ fontSize: 14, margin: '2px 0 6px' }}>
-                {opt.type}{opt.area ? ` · ${opt.area}` : ''} {opt.rating ? <>· <Star size={12} fill="var(--clay)" color="var(--clay)" style={{ verticalAlign: -1 }} /> {opt.rating}</> : null}
-              </p>
-              <p style={{ fontSize: 14.5, color: 'var(--ink-soft)' }}>{opt.why}</p>
-              {(opt.amenities || []).length > 0 && (
-                <p className="muted" style={{ fontSize: 13, marginTop: 4 }}>{opt.amenities.join(' · ')}</p>
-              )}
-              <p style={{ marginTop: 8, display: 'flex', alignItems: 'baseline', gap: 14 }}>
-                <span className="serif" style={{ fontSize: 24, color: 'var(--pine)' }}>${opt.price_per_night}<span style={{ fontSize: 14 }}> / night</span></span>
-                <span className="muted" style={{ fontSize: 13 }}>≈ ${opt.total_per_person} per person total</span>
-                {opt.official_website && <a className="btn-quiet" href={opt.official_website} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>official site</a>}
-                {opt.links?.booking && <a className="btn-quiet" href={opt.links.booking} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>{opt.live_price ? 'compare' : 'see similar'}</a>}
-              </p>
             </>
           ) : (
             <>
@@ -449,6 +529,11 @@ export default function Plan() {
                 </p>
               )
             )}
+            {tab === 'stay' && stayMedia === null && (
+              <p className="muted" style={{ fontSize: 13, fontStyle: 'italic', marginBottom: 10 }}>
+                Fetching photo galleries and guest reviews…
+              </p>
+            )}
             {(tab === 'visits' || tab === 'events') && board.recommended && (() => {
               const ids = new Set((options[tab] || []).map(o => o.id));
               const mine = [...myStars].filter(id => ids.has(id)).length;
@@ -463,7 +548,18 @@ export default function Plan() {
                 </p>
               );
             })()}
-            {tab === 'flights' ? renderFlights() : renderStars(tab, options[tab] || [])}
+            {tab === 'flights' ? renderFlights()
+              : tab === 'stay' ? (options.stay || []).map(opt => (
+                <StayCard
+                  key={opt.id}
+                  opt={opt}
+                  media={stayMedia?.[opt.id]}
+                  starred={myStars.has(opt.id)}
+                  count={counts[opt.id] || 0}
+                  onStar={() => star('stay', opt.id)}
+                />
+              ))
+              : renderStars(tab, options[tab] || [])}
             <CategoryFooter
               status={catStatus(tab)}
               busy={busy}

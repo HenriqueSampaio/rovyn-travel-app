@@ -69,6 +69,12 @@ class SlotEditRequest(BaseModel):
     replacement_id: str = ""  # option id from the planning board pool, for "replace"
 
 
+class PayRequest(BaseModel):
+    # "self_book": traveler books every item directly with sellers (Phase A);
+    # "full": one payment and Rovyn books everything — arrives with Phase B.
+    mode: str = "full"
+
+
 class BookingConfirmRequest(BaseModel):
     confirmation: str = Field(max_length=200)
     note: str = Field(default="", max_length=500)
