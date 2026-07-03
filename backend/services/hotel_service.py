@@ -87,14 +87,14 @@ def _hotel_image(h: dict) -> dict | None:
 
 
 def real_stay_options(destination: str, check_in: str, check_out: str,
-                      group_size: int, nights: int) -> list[dict]:
+                      group_size: int, nights: int, country_hint: str = "") -> list[dict]:
     """Up to 4 real hotels with live prices, mapped to Rovyn's stay-option schema.
     Returns [] on any failure — callers must fall back to AI/sample options."""
     if not liteapi_available():
         return []
     try:
         city, country = _split_place(destination)
-        code = _country_code(country)
+        code = _country_code(country) or _country_code(country_hint)
         if not code:
             # LiteAPI city search requires an ISO-2 countryCode; without a
             # resolvable country we can't search reliably — use AI stays.

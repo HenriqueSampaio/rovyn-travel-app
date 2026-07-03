@@ -27,17 +27,17 @@ def images_available() -> bool:
     return bool(os.environ.get("PEXELS_API_KEY"))
 
 
-def image_for(query: str, orientation: str = "landscape") -> dict | None:
-    """Best Pexels photo for a query, or None (no key / no match / API error)."""
+def _photos_for(query: str, orientation: str = "landscape") -> list[dict]:
+    """Up to 6 Pexels photos for a query, cached per query. Empty on failure."""
     key = os.environ.get("PEXELS_API_KEY")
     query = (query or "").strip()
     if not key or not query:
-        return None
+        return []
     cache_key = (query.lower(), orientation)
     if cache_key in _cache:
         return _cache[cache_key]
 
-    params = urllib.parse.urlencode({"query": query, "per_page": 1, "orientation": orientation})
+    params = urllib.parse.urlencode({"query": query, "per_page": 6, "orientation": orientation})
     req = urllib.request.Request(
         f"https://api.pexels.com/v1/search?{params}",
         headers={
@@ -46,26 +46,38 @@ def image_for(query: str, orientation: str = "landscape") -> dict | None:
             "User-Agent": "Rovyn/1.0 (group trip planner)",
         },
     )
-    result = None
     try:
         with urllib.request.urlopen(req, timeout=10, context=_SSL_CTX) as res:
             data = json.loads(res.read().decode())
-        photos = data.get("photos") or []
-        if photos:
-            p = photos[0]
-            src = p.get("src", {})
-            result = {
-                "url": src.get("large"),        # ~940px — heroes
-                "thumb": src.get("medium"),     # ~350px — list thumbnails
+        photos = [
+            {
+                "url": (p.get("src") or {}).get("large"),    # ~940px — heroes
+                "thumb": (p.get("src") or {}).get("medium"), # ~350px — thumbnails
                 "alt": p.get("alt") or query,
                 "credit": p.get("photographer", ""),
                 "credit_url": p.get("photographer_url", ""),
             }
+            for p in data.get("photos") or []
+            if (p.get("src") or {}).get("large")
+        ]
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError):
-        return None  # never let a photo break trip planning; uncached so it can retry
+        return []  # never let a photo break trip planning; uncached so it can retry
 
-    _cache[cache_key] = result
-    return result
+    _cache[cache_key] = photos
+    return photos
+
+
+def image_for(query: str, orientation: str = "landscape") -> dict | None:
+    """Best Pexels photo for a query, or None (no key / no match / API error)."""
+    photos = _photos_for(query, orientation)
+    return photos[0] if photos else None
+
+
+def nth_image(query: str, n: int, orientation: str = "landscape") -> dict | None:
+    """The n-th photo for a query — lets several items that share one fallback
+    query (e.g. four '4-star hotel Porto' stays) get DIFFERENT pictures."""
+    photos = _photos_for(query, orientation)
+    return photos[n % len(photos)] if photos else None
 
 
 def first_image(*queries: str) -> dict | None:

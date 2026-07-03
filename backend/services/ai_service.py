@@ -1,11 +1,12 @@
 import json
 import os
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime as dt, timedelta
 
 from backend.services import links
 from backend.services.hotel_service import official_website, real_stay_options
-from backend.services.image_service import first_image, image_for
+from backend.services.image_service import first_image, image_for, nth_image
 
 _client = None
 
@@ -130,8 +131,10 @@ def _parse_json_reply(text: str):
         if text.startswith("json"):
             text = text[4:]
         text = text.strip()
-    # Tolerate prose around the JSON payload
-    for opener, closer in (("[", "]"), ("{", "}")):
+    # Tolerate prose around the JSON payload; try the shape the reply starts
+    # with first, so an object containing arrays parses as the object
+    pairs = (("{", "}"), ("[", "]")) if text[:1] == "{" else (("[", "]"), ("{", "}"))
+    for opener, closer in pairs:
         start = text.find(opener)
         end = text.rfind(closer)
         if start != -1 and end > start:
@@ -143,14 +146,37 @@ def _parse_json_reply(text: str):
 
 
 def _ask_claude(prompt: str, max_tokens: int = 8192):
-    response = _get_client().messages.create(
-        model="claude-opus-4-8",
-        max_tokens=max_tokens,
-        thinking={"type": "adaptive"},
-        messages=[{"role": "user", "content": prompt}],
-    )
-    text = next((b.text for b in response.content if b.type == "text"), "")
-    return _parse_json_reply(text)
+    """Streamed request with one connection-error retry.
+
+    Long generations (final-plan weaves take 30-90s of thinking) leave a
+    non-streaming HTTP connection idle, and idle connections get dropped
+    ('server disconnected without a response'). Streaming keeps bytes moving.
+    """
+    from anthropic import APIConnectionError, APITimeoutError
+
+    last_err = None
+    # Attempt 1: adaptive thinking. Attempt 2: thinking off — covers both
+    # transient connection drops AND the model spending the entire token
+    # budget on thinking and returning no text at all.
+    for thinking in ({"type": "adaptive"}, None):
+        try:
+            kwargs = {
+                "model": "claude-opus-4-8",
+                "max_tokens": max_tokens,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            if thinking:
+                kwargs["thinking"] = thinking
+            with _get_client().messages.stream(**kwargs) as stream:
+                message = stream.get_final_message()
+            text = next((b.text for b in message.content if b.type == "text"), "")
+            if not text.strip():
+                last_err = RuntimeError("The model returned an empty completion (token budget spent on thinking).")
+                continue
+            return _parse_json_reply(text)
+        except (APIConnectionError, APITimeoutError) as exc:
+            last_err = exc
+    raise last_err
 
 
 def _attach_links(rec: dict, prefs: dict) -> dict:
@@ -323,25 +349,39 @@ def _attach_option_links(options: dict, prefs: dict, destination: str) -> dict:
 
 def generate_trip_options(destination: str, responses: list[dict], trip_name: str = "") -> dict:
     prefs = _aggregate_preferences(responses)
-    if ai_available():
-        options = _ai_trip_options(destination, prefs, trip_name)
-    else:
-        options = _sample_trip_options(destination, prefs)
+    dates = dict(prefs["travel_dates"])
+    duration = _duration_days(dates)
+
+    # The three slow, independent fetches run concurrently: the big options
+    # prompt, the per-city flights prompt, and the live hotel search.
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        base_future = pool.submit(
+            _ai_trip_options if ai_available() else (lambda d, p, _t: _sample_trip_options(d, p)),
+            destination, prefs, trip_name,
+        )
+        flights_future = pool.submit(_flight_options, destination, prefs)
+        stays_future = pool.submit(
+            real_stay_options, destination, dates.get("start", ""), dates.get("end", ""),
+            prefs["group_size"], duration,
+        )
+        options = base_future.result()
+        live_stays = stays_future.result()
+        options["flights"] = flights_future.result()
+
     options["destination"] = options.get("destination") or destination
-    options.setdefault("dates", dict(prefs["travel_dates"]))
-    # Phase A accuracy: with a LITEAPI_API_KEY, stays become REAL hotels with
-    # live prices for the group's exact dates (AI/sample stays otherwise).
-    dates = options["dates"]
-    live_stays = real_stay_options(
-        destination, dates.get("start", ""), dates.get("end", ""),
-        prefs["group_size"], _duration_days(dates),
-    )
+    options.setdefault("dates", dates)
+
+    # Destinations like "Porto Cervo, Sardinia" name a region, not a country —
+    # retry the live-hotel search with the AI's country answer as the hint.
+    if not live_stays and options.get("country"):
+        live_stays = real_stay_options(
+            destination, dates.get("start", ""), dates.get("end", ""),
+            prefs["group_size"], duration, country_hint=options["country"],
+        )
     if live_stays:
         options["stay"] = live_stays
         options["stay_source"] = "liteapi"
-    # Flights are personal: generated separately with a guaranteed entry for
-    # every departure city, keyed by the exact city each traveler typed.
-    options["flights"] = _flight_options(destination, prefs)
+
     options = _assign_option_ids(options)
     options = _attach_option_links(options, prefs, destination)
     options = _attach_images(options, destination)
@@ -355,24 +395,39 @@ def _attach_images(options: dict, destination: str) -> dict:
     the image API. All lookups are best-effort — None just means no photo.
     """
     town = destination.split(",")[0].strip()
-    options["image"] = first_image(f"{destination} travel", town)
-    for opt in options.get("stay", []):
+
+    def stay_image(opt, idx):
+        # Don't query hotel NAMES: Pexels fuzzy-matches them to the same
+        # generic destination photo. Deal each hotel a different photo (by
+        # index) from the shared pool instead.
+        return (nth_image(f"{opt.get('type', 'hotel')} {town}", idx)
+                or nth_image(f"hotel {town}", idx)
+                or nth_image(town, idx))
+
+    jobs = [(options, "image", (f"{destination} travel", town))]
+    fns = []
+    for idx, opt in enumerate(options.get("stay", [])):
         if not opt.get("image"):  # real hotels carry their own photo
-            opt["image"] = first_image(
-                f"{opt.get('type', 'hotel')} {town}",
-                f"{opt.get('type', 'hotel')} interior",
-            )
+            fns.append((opt, "image", (lambda o=opt, i=idx: stay_image(o, i))))
     for opt in options.get("visits", []):
-        opt["image"] = first_image(
+        jobs.append((opt, "image", (
             f"{opt.get('name', '')} {town}",
             f"{town} {opt.get('category', '')}".strip(),
             town,
-        )
+        )))
     for opt in options.get("events", []):
-        opt["image"] = first_image(
-            f"{opt.get('name', '')}",
-            f"{town} evening",
-        )
+        jobs.append((opt, "image", (f"{opt.get('name', '')}", f"{town} evening")))
+
+    # ~20 sequential Pexels lookups were a large slice of board-generation
+    # time; fetch them concurrently instead.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = [(target, key, pool.submit(first_image, *queries)) for target, key, queries in jobs]
+        futures += [(target, key, pool.submit(fn)) for target, key, fn in fns]
+        for target, key, fut in futures:
+            try:
+                target[key] = fut.result()
+            except Exception:
+                target[key] = None
     return options
 
 
@@ -699,7 +754,20 @@ def generate_final_plan(destination: str, responses: list[dict], options: dict, 
         selection["stay"]["official_website"] = official_website(selection["stay"]["name"], destination)
 
     if ai_available():
-        woven = _ai_weave_plan(destination, prefs, selection, dates, duration)
+        try:
+            woven = _ai_weave_plan(destination, prefs, selection, dates, duration)
+            if isinstance(woven, list):  # model replied with a bare days array
+                woven = {"days": woven}
+            if not isinstance(woven, dict) or not woven.get("days"):
+                raise ValueError("malformed weave response")
+        except Exception:
+            # Finalizing must never fail outright: fall back to the
+            # deterministic weave — same picks, simpler day arrangement.
+            woven = _sample_weave_plan(destination, prefs, selection, dates, duration)
+            woven["tips"] = [
+                "The AI scheduler was unreachable, so Rovyn arranged your picks automatically — "
+                "drag anything you'd like to rearrange, or use “Request a change”.",
+            ] + [t for t in woven.get("tips", []) if "sample mode" not in t]
     else:
         woven = _sample_weave_plan(destination, prefs, selection, dates, duration)
 
@@ -762,7 +830,7 @@ Respond with ONLY valid JSON:
   "tips": ["tip 1", "tip 2", "tip 3"]
 }}"""
 
-    return _ask_claude(prompt, max_tokens=8192)
+    return _ask_claude(prompt, max_tokens=12000)
 
 
 def _sample_weave_plan(destination: str, prefs: dict, selection: dict, dates: dict, duration: int) -> dict:

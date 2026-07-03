@@ -433,6 +433,22 @@ export default function Plan() {
         {tab !== 'overview' && (
           <>
             <p className="muted" style={{ maxWidth: 560, marginBottom: 10 }}>{CATEGORY_INTRO[tab]}</p>
+            {tab === 'stay' && (
+              options.stay_source === 'liteapi' ? (
+                <p style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 10,
+                  fontSize: 13.5, fontWeight: 700, color: 'var(--pine)',
+                }}>
+                  <Check size={14} strokeWidth={2.6} />
+                  Real hotels with live prices and availability for your dates.
+                </p>
+              ) : (
+                <p style={{ marginBottom: 10, fontSize: 13.5, color: 'var(--clay)' }}>
+                  These stays and prices are AI estimates.
+                  {' '}Tip: a “City, Country” destination (e.g. “Porto Cervo, Italy”) lets Rovyn fetch real hotels with live prices.
+                </p>
+              )
+            )}
             {(tab === 'visits' || tab === 'events') && board.recommended && (() => {
               const ids = new Set((options[tab] || []).map(o => o.id));
               const mine = [...myStars].filter(id => ids.has(id)).length;
