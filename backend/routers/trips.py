@@ -4,7 +4,7 @@ import re
 import string
 import uuid
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -12,14 +12,14 @@ from backend.auth import get_current_user
 from backend.db import get_conn
 from backend.models import (
     ArrangeSlotsRequest, CreateTripRequest, CurationRequest, EditRequest, JoinTripRequest,
-    QuestionnaireData, ReorderRequest, SlotEditRequest, StarRequest, VoteRequest,
+    PayRequest, QuestionnaireData, ReorderRequest, SlotEditRequest, StarRequest, VoteRequest,
 )
 from backend.services.ai_service import (
     CATEGORIES, RevisionNotPossible, ai_available, generate_final_plan, generate_itinerary,
     generate_trip_options, get_destination_recommendations, recommended_picks,
     recompute_plan_costs, revise_final_plan,
 )
-from backend.services import email_service
+from backend.services.hotel_service import stay_media_for_options
 
 router = APIRouter()
 
@@ -73,6 +73,11 @@ def _status_payload(conn, trip, user_id: str) -> dict:
     progress_rows = conn.execute(
         "SELECT user_id, category, status FROM category_progress WHERE trip_id = ?", (trip["id"],)
     ).fetchall()
+    pay_modes = {
+        r["user_id"]: r["mode"] for r in conn.execute(
+            "SELECT user_id, mode FROM payments WHERE trip_id = ?", (trip["id"],)
+        )
+    }
     tallies = Counter(v["destination_name"] for v in votes)
     my_vote = next((v["destination_name"] for v in votes if v["user_id"] == user_id), None)
 
@@ -111,6 +116,7 @@ def _status_payload(conn, trip, user_id: str) -> dict:
                 "curated_count": curated_count(m["id"]),
                 "approved": bool(m["approved"]),
                 "paid": bool(m["paid"]),
+                "booking_mode": pay_modes.get(m["id"]),
             }
             for m in members
         ],
@@ -124,6 +130,7 @@ def _status_payload(conn, trip, user_id: str) -> dict:
             "curated_count": curated_count(user_id),
             "approved": bool(me and me["approved"]),
             "paid": bool(me and me["paid"]),
+            "booking_mode": pay_modes.get(user_id),
         },
         "has_recommendations": trip["recommendations"] is not None,
         "recommendations_generating": bool(trip["recommendations_generating"]),
@@ -300,6 +307,43 @@ def submit_questionnaire(trip_id: str, data: QuestionnaireData, user: dict = Dep
         total = conn.execute("SELECT COUNT(*) c FROM trip_members WHERE trip_id = ?", (trip_id,)).fetchone()["c"]
         done = conn.execute("SELECT COUNT(*) c FROM questionnaires WHERE trip_id = ?", (trip_id,)).fetchone()["c"]
     return {"success": True, "all_submitted": done == total}
+
+
+@router.get("/{trip_id}/date-votes")
+def read_date_votes(trip_id: str, user: dict = Depends(get_current_user)):
+    """Per-day tally of the date windows travel mates already submitted —
+    feeds the availability heatmap on the questionnaire's date step."""
+    with get_conn() as conn:
+        _load_trip(conn, trip_id)
+        _require_member(conn, trip_id, user["id"])
+        rows = conn.execute(
+            """SELECT q.user_id, q.data, u.name FROM questionnaires q
+               JOIN users u ON u.id = q.user_id WHERE q.trip_id = ?""",
+            (trip_id,),
+        ).fetchall()
+        total = conn.execute(
+            "SELECT COUNT(*) c FROM trip_members WHERE trip_id = ?", (trip_id,)
+        ).fetchone()["c"]
+
+    counts: dict[str, int] = {}
+    names: dict[str, list] = {}
+    for r in rows:
+        data = json.loads(r["data"])
+        try:
+            start = date.fromisoformat(data.get("travel_dates_start", ""))
+            end = date.fromisoformat(data.get("travel_dates_end", ""))
+        except ValueError:
+            continue
+        if end < start or (end - start).days > 120:  # ignore nonsense windows
+            continue
+        label = "You" if r["user_id"] == user["id"] else r["name"]
+        day = start
+        while day <= end:
+            iso = day.isoformat()
+            counts[iso] = counts.get(iso, 0) + 1
+            names.setdefault(iso, []).append(label)
+            day += timedelta(days=1)
+    return {"counts": counts, "names": names, "submitted": len(rows), "total_members": total}
 
 
 # ---------------------------------------------------------------------------
@@ -485,6 +529,32 @@ def read_options(trip_id: str, user: dict = Depends(get_current_user)):
         "my_pace": my_pace,
         "recommended": recommended,
     }
+
+
+@router.get("/{trip_id}/stay-media")
+def read_stay_media(trip_id: str, user: dict = Depends(get_current_user)):
+    """Photo galleries + guest reviews for the board's stay options.
+
+    Fetched from LiteAPI (real hotels) or Google Places (AI stays) on the
+    first request, then cached on the trip — stay options never change once
+    the board is generated, so the cache never goes stale."""
+    with get_conn() as conn:
+        trip = _load_trip(conn, trip_id)
+        _require_member(conn, trip_id, user["id"])
+        if trip["stay_media"] is not None:
+            return {"media": json.loads(trip["stay_media"])}
+        if not trip["options"]:
+            return {"media": {}}
+        options = json.loads(trip["options"])
+        destination = options.get("destination") or _decided_destination(trip) or ""
+
+    # Network fetches happen outside the connection — they can take seconds
+    media = stay_media_for_options(options.get("stay") or [], destination)
+
+    with get_conn() as conn:
+        conn.execute("UPDATE trips SET stay_media = ? WHERE id = ?",
+                     (json.dumps(media), trip_id))
+    return {"media": media}
 
 
 def _valid_option_ids(options: dict, category: str) -> set[str]:
@@ -1014,17 +1084,33 @@ def read_check(trip_id: str, user: dict = Depends(get_current_user)):
 
 
 @router.post("/{trip_id}/pay")
-def pay_share(trip_id: str, user: dict = Depends(get_current_user)):
+def pay_share(trip_id: str, req: PayRequest | None = None, user: dict = Depends(get_current_user)):
+    """Lock in how this traveler completes the trip.
+
+    Phase A ships 'self_book': the traveler books every item directly with
+    sellers and tracks it on the booking checklist — no money moves through
+    Rovyn. 'full' (one payment, Rovyn auto-books everything) arrives with
+    Phase B and is rejected until then.
+    """
+    mode = (req.mode if req else "full").strip()
+    if mode == "full":
+        raise HTTPException(
+            status_code=400,
+            detail="Paying in full through Rovyn arrives with Phase B — choose “I'll book it myself” for now.",
+        )
+    if mode != "self_book":
+        raise HTTPException(status_code=400, detail="Unknown booking mode.")
+
     with get_conn() as conn:
         trip = _load_trip(conn, trip_id)
         _require_member(conn, trip_id, user["id"])
         if trip["status"] not in ("approved", "booked"):
-            raise HTTPException(status_code=400, detail="Everyone must approve the final plan before payment opens.")
+            raise HTTPException(status_code=400, detail="Everyone must approve the final plan before booking opens.")
         existing = conn.execute(
             "SELECT 1 FROM payments WHERE trip_id = ? AND user_id = ?", (trip_id, user["id"])
         ).fetchone()
         if existing:
-            raise HTTPException(status_code=400, detail="You've already paid your share.")
+            raise HTTPException(status_code=400, detail="You've already locked in how you'll book.")
 
         checks = _member_checks(conn, trip)
         mine = next((c for c in checks if c["user_id"] == user["id"]), None)
@@ -1033,6 +1119,8 @@ def pay_share(trip_id: str, user: dict = Depends(get_current_user)):
 
         plan = json.loads(trip["final_plan"])
         receipt_no = f"RV-{trip_id[:8].upper()}-{user['id'][:4].upper()}"
+        # For self_book this is a commitment record, not a charge: the total is
+        # the estimate the traveler pays sellers directly.
         receipt = {
             "receipt_no": receipt_no,
             "trip_name": trip["name"],
@@ -1041,6 +1129,7 @@ def pay_share(trip_id: str, user: dict = Depends(get_current_user)):
             "items": mine["items"],
             "total": mine["total"],
             "currency": "USD",
+            "mode": mode,
             "paid_at": _now(),
             "demo": True,  # no real money moves in the MVP
         }
@@ -1049,28 +1138,21 @@ def pay_share(trip_id: str, user: dict = Depends(get_current_user)):
             "SELECT COUNT(*) c FROM trip_members WHERE trip_id = ?", (trip_id,)
         ).fetchone()["c"]
 
-        html = email_service.receipt_html(
-            trip["name"], plan.get("destination", ""), user["name"],
-            mine["items"], mine["total"], total_members,
-        )
-        email_result = email_service.send_email(
-            user["email"],
-            f"Rovyn receipt — {trip['name']} ({receipt_no})",
-            html,
-        )
+        # No receipt email for self_book — nothing was charged; the booking
+        # checklist emails each confirmation as it's recorded instead.
+        email_result = {"sent": False, "skipped": True}
 
         conn.execute(
-            """INSERT INTO payments (trip_id, user_id, amount_cents, currency, receipt, email_status, paid_at)
-               VALUES (?, ?, ?, 'USD', ?, ?, ?)""",
-            (trip_id, user["id"], round(mine["total"] * 100), json.dumps(receipt),
-             "sent" if email_result.get("sent") else "simulated", receipt["paid_at"]),
+            """INSERT INTO payments (trip_id, user_id, amount_cents, currency, mode, receipt, email_status, paid_at)
+               VALUES (?, ?, 0, 'USD', ?, ?, 'none', ?)""",
+            (trip_id, user["id"], mode, json.dumps(receipt), receipt["paid_at"]),
         )
         paid = conn.execute("SELECT COUNT(*) c FROM payments WHERE trip_id = ?", (trip_id,)).fetchone()["c"]
         all_paid = paid == total_members
         if all_paid:
             conn.execute("UPDATE trips SET status = 'booked' WHERE id = ?", (trip_id,))
 
-    return {"success": True, "receipt": receipt, "email": email_result, "all_paid": all_paid}
+    return {"success": True, "receipt": receipt, "email": email_result, "all_paid": all_paid, "mode": mode}
 
 
 @router.get("/{trip_id}/receipt")

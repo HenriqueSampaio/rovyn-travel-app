@@ -51,6 +51,7 @@ export const api = {
 
   submitQuestionnaire: (tripId, data) =>
     req(`/trips/${tripId}/questionnaire`, { method: 'POST', body: JSON.stringify(data) }),
+  getDateVotes: (tripId) => req(`/trips/${tripId}/date-votes`),
 
   getRecommendations: (tripId) => req(`/trips/${tripId}/recommendations`),
   generateRecommendations: (tripId) =>
@@ -67,6 +68,7 @@ export const api = {
   // Planning board
   getOptions: (tripId) => req(`/trips/${tripId}/options`),
   generateOptions: (tripId) => req(`/trips/${tripId}/options`, { method: 'POST' }),
+  getStayMedia: (tripId) => req(`/trips/${tripId}/stay-media`),
   toggleStar: (tripId, category, optionId, starred) =>
     req(`/trips/${tripId}/star`, { method: 'POST', body: JSON.stringify({ category, option_id: optionId, starred }) }),
   setCuration: (tripId, category, status) =>
@@ -88,7 +90,8 @@ export const api = {
       body: JSON.stringify({ day, slot, action, replacement_id: replacementId }),
     }),
   getCheck: (tripId) => req(`/trips/${tripId}/check`),
-  payShare: (tripId) => req(`/trips/${tripId}/pay`, { method: 'POST' }),
+  payShare: (tripId, mode = 'self_book') =>
+    req(`/trips/${tripId}/pay`, { method: 'POST', body: JSON.stringify({ mode }) }),
   getReceipt: (tripId) => req(`/trips/${tripId}/receipt`),
 
   suggestCities: (q) => req(`/places/suggest?q=${encodeURIComponent(q)}`),

@@ -458,6 +458,7 @@ export default function FinalPlan() {
   const myCheck = checks.find(c => c.user_id === me?.id);
   const iApproved = trip?.me?.approved;
   const iPaid = trip?.me?.paid;
+  const selfBooked = trip?.me?.booking_mode === 'self_book' || receipt?.mode === 'self_book';
   const days = plan.itinerary?.days || [];
   const canBook = ['approved', 'booked'].includes(status);
   const visibleTabs = canBook ? [...TABS, BOOKINGS_TAB] : TABS;
@@ -527,14 +528,18 @@ export default function FinalPlan() {
     if (m) await act(api.editSlot, tripId, m.day, m.slot, action, replacementId);
   }
 
-  async function pay() {
+  async function chooseBooking(mode) {
     setBusy(true);
     setError('');
     try {
-      const res = await api.payShare(tripId);
+      const res = await api.payShare(tripId, mode);
       setReceipt(res.receipt);
       setEmailInfo(res.email);
       await load();
+      if (mode === 'self_book') {
+        await refreshBookings();
+        setTab('bookings'); // straight to the checklist they just committed to
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -549,7 +554,7 @@ export default function FinalPlan() {
     if (status === 'booked') {
       statusText = (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--pine)', fontWeight: 700 }}>
-          <PartyPopper size={16} color="var(--clay)" /> Booked — everyone approved and paid
+          <PartyPopper size={16} color="var(--clay)" /> Locked in — everyone approved and chose how to book
         </span>
       );
       if (bookings && bookings.booked < bookings.total) {
@@ -560,11 +565,15 @@ export default function FinalPlan() {
         );
       }
     } else if (status === 'approved') {
-      statusText = <span className="muted">{trip.paid_count} of {trip.total_members} paid</span>;
-      action = !iPaid && (
-        <button className="btn clay" onClick={() => { setTab('money'); pay(); }} disabled={busy}>
-          {busy ? <Loader2 className="spin" size={15} /> : <CreditCard size={15} />} Pay my share — ${myCheck?.total.toLocaleString()}
+      statusText = <span className="muted">{trip.paid_count} of {trip.total_members} locked in</span>;
+      action = !iPaid ? (
+        <button className="btn clay" onClick={() => setTab('money')} disabled={busy}>
+          <Wallet size={15} /> Choose how to book — ${myCheck?.total.toLocaleString()}
         </button>
+      ) : (
+        <span className="serif muted" style={{ fontStyle: 'italic', fontSize: 15 }}>
+          You're locked in — waiting on the others.
+        </span>
       );
     } else {
       statusText = <span className="muted">{trip.approved_count} of {trip.total_members} approved</span>;
@@ -586,7 +595,7 @@ export default function FinalPlan() {
       }}>
         <span style={{ display: 'inline-flex', gap: 6 }}>
           {trip.members.map(m => (
-            <span key={m.user_id} title={`${m.name}${m.approved ? ' — approved' : ''}${m.paid ? ' & paid' : ''}`}
+            <span key={m.user_id} title={`${m.name}${m.approved ? ' — approved' : ''}${m.paid ? (m.booking_mode === 'self_book' ? ' & booking solo' : ' & paid') : ''}`}
               style={{
                 width: 26, height: 26, borderRadius: '50%', display: 'inline-flex',
                 alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 700,
@@ -813,9 +822,39 @@ export default function FinalPlan() {
 
             {['approved', 'booked'].includes(status) ? (
               !iPaid ? (
-                <button className="btn clay" onClick={pay} disabled={busy}>
-                  {busy ? <Loader2 className="spin" size={16} /> : <CreditCard size={16} />} Pay my share — ${myCheck.total.toLocaleString()}
-                </button>
+                <div style={{ display: 'grid', gap: 20, maxWidth: 560 }}>
+                  <div>
+                    <button className="btn clay" disabled title="Automated booking arrives with Phase B">
+                      <CreditCard size={16} /> Pay in full — Rovyn books everything · ${myCheck.total.toLocaleString()}
+                    </button>
+                    <p className="muted" style={{ fontSize: 13, marginTop: 7, maxWidth: 480 }}>
+                      One payment and every flight, stay and ticket is booked for you automatically.
+                      <strong style={{ color: 'var(--clay)' }}> Coming soon</strong> — Phase B of Rovyn's booking architecture.
+                    </p>
+                  </div>
+                  <div>
+                    <button className="btn" onClick={() => chooseBooking('self_book')} disabled={busy}>
+                      {busy ? <Loader2 className="spin" size={16} /> : <ClipboardCheck size={16} />} I'll book everything myself
+                    </button>
+                    <p className="muted" style={{ fontSize: 13, marginTop: 7, maxWidth: 480 }}>
+                      Rovyn opens your booking checklist with a deep link for every item — you pay each
+                      seller directly and the whole group tracks progress together.
+                    </p>
+                  </div>
+                </div>
+              ) : selfBooked ? (
+                <div>
+                  <p style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--pine)', fontWeight: 700, marginBottom: 6 }}>
+                    <CheckCircle2 size={17} /> You're booking it yourself — nothing was charged
+                  </p>
+                  <p className="muted" style={{ fontSize: 14, marginBottom: 12, maxWidth: 480 }}>
+                    Your total above is what you'll pay sellers directly. Record each confirmation on the
+                    checklist so the group sees what's done.
+                  </p>
+                  <button className="btn" onClick={() => setTab('bookings')}>
+                    <ClipboardCheck size={15} /> Open the booking checklist
+                  </button>
+                </div>
               ) : (
                 <div>
                   <p style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--pine)', fontWeight: 700, marginBottom: 6 }}>
@@ -833,14 +872,14 @@ export default function FinalPlan() {
               )
             ) : (
               <p className="serif muted" style={{ fontStyle: 'italic', fontSize: 15 }}>
-                Payment opens once all {trip.total_members} travelers approve the plan.
+                Booking opens once all {trip.total_members} travelers approve the plan.
               </p>
             )}
 
             <div style={{ marginTop: 26 }}>
               <p className="eyebrow" style={{ fontSize: 10.5, marginBottom: 10 }}>
                 <Users size={11} style={{ verticalAlign: -1, marginRight: 6 }} />
-                Group payment status — {trip.paid_count} of {trip.total_members}
+                Group status — {trip.paid_count} of {trip.total_members} locked in
               </p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
                 {checks.map(c => (
