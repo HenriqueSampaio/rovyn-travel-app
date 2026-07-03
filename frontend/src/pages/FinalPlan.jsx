@@ -96,7 +96,7 @@ function BookingsChecklist({ bookings, busy, onConfirm, onUnbook }) {
                         <span style={{ marginLeft: 10, fontSize: 11, color: 'var(--clay)', fontWeight: 700, letterSpacing: '0.08em' }}>YOURS</span>
                       )}
                       {item.stale && (
-                        <span style={{ marginLeft: 10, fontSize: 11, color: 'var(--clay)', fontWeight: 700, letterSpacing: '0.08em', border: '1px solid var(--clay)', borderRadius: 999, padding: '2px 8px' }}>
+                        <span style={{ marginLeft: 10, fontSize: 11, color: 'var(--clay)', fontWeight: 700, letterSpacing: '0.08em', border: '1px solid var(--clay)', borderRadius: 999, padding: '2px 8px', whiteSpace: 'nowrap', display: 'inline-block' }}>
                           NO LONGER IN THE PLAN
                         </span>
                       )}
@@ -250,10 +250,7 @@ function DayLabel({ day, tag, handle }) {
   );
 }
 
-const DAY_ROW_STYLE = {
-  display: 'grid', gridTemplateColumns: '96px 1fr', gap: 20,
-  padding: '20px 0', borderTop: '1px solid var(--line-soft)',
-};
+const DAY_ROW_STYLE = { padding: '20px 0', borderTop: '1px solid var(--line-soft)' };
 
 function DraggableDay({ day, onDragStart, onDragEnd, children }) {
   const controls = useDragControls();
@@ -269,6 +266,7 @@ function DraggableDay({ day, onDragStart, onDragEnd, children }) {
       as="div" value={day.day} dragListener={false} dragControls={controls}
       onDragStart={onDragStart} onDragEnd={onDragEnd}
       whileDrag={{ scale: 1.01, boxShadow: '0 14px 40px rgba(35, 49, 43, 0.25)', zIndex: 10 }}
+      className="day-row"
       style={{ ...DAY_ROW_STYLE, position: 'relative', background: 'var(--bg)', borderRadius: 4 }}
     >
       {children(handle)}
@@ -346,7 +344,7 @@ function ItineraryDays({ plan, editable, busy, slotLocks, commitDays, commitSlot
   return (
     <div>
       {/* Arrival day — pinned */}
-      <div style={DAY_ROW_STYLE}>{renderBody(first, null)}</div>
+      <div className="day-row" style={DAY_ROW_STYLE}>{renderBody(first, null)}</div>
 
       {/* Middle days — drag by the grip to reorder */}
       {canDragDays ? (
@@ -358,11 +356,11 @@ function ItineraryDays({ plan, editable, busy, slotLocks, commitDays, commitSlot
           ))}
         </Reorder.Group>
       ) : (
-        days.slice(1, -1).map(d => <div key={d.day} style={DAY_ROW_STYLE}>{renderBody(d, null)}</div>)
+        days.slice(1, -1).map(d => <div key={d.day} className="day-row" style={DAY_ROW_STYLE}>{renderBody(d, null)}</div>)
       )}
 
       {/* Departure day — pinned */}
-      {last && <div style={DAY_ROW_STYLE}>{renderBody(last, null)}</div>}
+      {last && <div className="day-row" style={DAY_ROW_STYLE}>{renderBody(last, null)}</div>}
     </div>
   );
 }
@@ -588,11 +586,7 @@ export default function FinalPlan() {
       );
     }
     return (
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap',
-        padding: '16px 0', borderTop: '1px solid var(--line)', borderBottom: '1px solid var(--line)',
-        marginBottom: 28,
-      }}>
+      <div className="action-strip">
         <span style={{ display: 'inline-flex', gap: 6 }}>
           {trip.members.map(m => (
             <span key={m.user_id} title={`${m.name}${m.approved ? ' — approved' : ''}${m.paid ? (m.booking_mode === 'self_book' ? ' & booking solo' : ' & paid') : ''}`}
@@ -956,19 +950,17 @@ export default function FinalPlan() {
       <ErrorText>{error}</ErrorText>
 
       {/* Tab bar */}
-      <div style={{ display: 'flex', gap: 26, borderBottom: '1px solid var(--line)', marginBottom: 30, flexWrap: 'wrap' }}>
+      <div className="tab-bar" style={{ marginBottom: 30 }}>
         {visibleTabs.map(({ key, label, Icon }) => {
           const active = tab === key;
           return (
             <button
               key={key}
+              className="tab-btn"
               onClick={() => setTab(key)}
               style={{
-                display: 'inline-flex', alignItems: 'center', gap: 7,
-                padding: '10px 2px 12px', fontSize: 14.5, fontWeight: 700,
                 color: active ? 'var(--ink)' : 'var(--muted)',
                 borderBottom: active ? '2px solid var(--pine)' : '2px solid transparent',
-                marginBottom: -1,
               }}
             >
               <Icon size={15} strokeWidth={2} />
@@ -998,13 +990,9 @@ export default function FinalPlan() {
           }}
         >
           <motion.div
+            className="modal-card"
             initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
             onClick={e => e.stopPropagation()}
-            style={{
-              background: 'var(--bg)', maxWidth: 540, width: '100%', maxHeight: '80vh',
-              overflowY: 'auto', padding: '36px 38px 30px', borderRadius: 4,
-              boxShadow: '0 24px 60px rgba(35, 49, 43, 0.35)',
-            }}
           >
             <p className="eyebrow">Day {slotModal.day} · {slotModal.slot}</p>
             <h2 style={{ fontSize: 26, margin: '8px 0 6px' }}>Wish to replace this with something?</h2>

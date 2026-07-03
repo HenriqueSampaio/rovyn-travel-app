@@ -151,8 +151,8 @@ export default function Vote() {
             </p>
 
             {/* match line */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
-              <div style={{ flex: 1, maxWidth: 260, height: 2, background: 'var(--line-soft)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, rowGap: 6, flexWrap: 'wrap', marginBottom: 20 }}>
+              <div style={{ flex: 1, minWidth: 120, maxWidth: 260, height: 2, background: 'var(--line-soft)' }}>
                 <div style={{ width: `${dest.match_score}%`, height: '100%', background: 'var(--pine)' }} />
               </div>
               <span className="muted" style={{ fontSize: 13 }}>{dest.match_score}% group match</span>

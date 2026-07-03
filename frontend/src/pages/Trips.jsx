@@ -123,12 +123,12 @@ export default function Trips() {
                     <div className="opt-title serif" style={{ fontSize: 22 }}>
                       {t.selected_destination ? `${t.name} — ${t.selected_destination}` : t.name}
                     </div>
-                    <div className="opt-desc" style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 4 }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    <div className="opt-desc" style={{ display: 'flex', alignItems: 'center', gap: '2px 14px', flexWrap: 'wrap', marginTop: 4 }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
                         <Users size={13} /> {t.member_count} traveler{t.member_count === 1 ? '' : 's'}
                       </span>
                       {t.is_leader && (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
                           <Crown size={13} /> You lead
                         </span>
                       )}
@@ -163,7 +163,7 @@ export default function Trips() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 56 }}>
+      <div className="two-col" style={{ rowGap: 56 }}>
         <form onSubmit={create}>
           <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
             <Plus size={13} strokeWidth={2.5} /> Start a trip

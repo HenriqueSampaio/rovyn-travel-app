@@ -15,7 +15,7 @@
   --sans: 'Karla', -apple-system, sans-serif;
 }
 
-html { scroll-behavior: smooth; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
 body {
   font-family: var(--sans);
@@ -168,3 +168,210 @@ a { color: var(--pine); text-decoration: none; }
 .spin { animation: spin 1.1s linear infinite; }
 .spin-slow { animation: spin 5s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ============================================================
+   Layout classes — structural rules live here (not inline) so
+   the mobile media queries below can restack them.
+   ============================================================ */
+
+/* Page shell */
+.page {
+  min-height: 100vh;
+  padding: 0 28px;
+}
+.page-inner {
+  margin: 0 auto;
+  padding-bottom: 100px;
+}
+
+/* Top navigation */
+.site-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  flex-wrap: wrap;
+  padding: 28px 0 20px;
+  border-bottom: 1px solid var(--line-soft);
+  margin-bottom: 48px;
+}
+.site-nav .nav-left,
+.site-nav .nav-right {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+.site-nav .nav-left { gap: 26px; }
+
+/* Tab bar (planning board, final plan) */
+.tab-bar {
+  display: flex;
+  gap: 26px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 34px;
+  flex-wrap: wrap;
+}
+.tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 2px 12px;
+  font-size: 14.5px;
+  font-weight: 700;
+  margin-bottom: -1px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Side-by-side fields/forms that stack on mobile */
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 48px;
+}
+
+/* Itinerary day rows: date rail + day body */
+.day-row {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 20px;
+}
+.day-row.wide {
+  grid-template-columns: 110px 1fr;
+  gap: 28px;
+}
+
+/* Approve/pay strip on the final plan */
+.action-strip {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 28px;
+}
+
+/* Centered dialog card */
+.modal-card {
+  background: var(--bg);
+  max-width: 540px;
+  width: 100%;
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 36px 38px 30px;
+  border-radius: 4px;
+  box-shadow: 0 24px 60px rgba(35, 49, 43, 0.35);
+}
+
+/* Big letter-spaced invite code on the dashboard */
+.invite-code {
+  font-size: 40px;
+  letter-spacing: 8px;
+  color: var(--pine);
+}
+
+/* Journey tracker — the 5-step progress line under every trip title */
+.journey {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  row-gap: 12px;
+  margin: 0 0 44px;
+}
+.journey-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.journey-link {
+  width: 26px;
+  height: 1px;
+  margin: 0 8px;
+}
+
+/* ============================================================
+   Mobile — one main breakpoint. The type-scale rules use
+   !important on purpose: headings are sized inline in JSX, and
+   this override layer is how the editorial scale compresses on
+   small screens without touching every page.
+   ============================================================ */
+@media (max-width: 640px) {
+  body { overflow-x: clip; }
+
+  h1 { font-size: clamp(28px, 8.5vw, 36px) !important; }
+  h2 { font-size: clamp(20px, 6vw, 26px) !important; }
+
+  .page {
+    padding: 0 max(18px, env(safe-area-inset-right)) 0 max(18px, env(safe-area-inset-left));
+  }
+  .page-inner { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
+
+  /* iOS Safari zooms into focused fields under 16px — hold every
+     field at 16.5px on phones (a couple are sized smaller inline) */
+  input, textarea, select { font-size: 16.5px !important; }
+
+  .site-nav {
+    padding: 20px 0 14px;
+    margin-bottom: 32px;
+  }
+  .site-nav .nav-left { gap: 16px; }
+  .site-nav .nav-right { gap: 14px; }
+  .nav-username { display: none; }
+
+  /* Tabs become a swipeable strip instead of wrapping */
+  .tab-bar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 20px;
+    margin-bottom: 26px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .tab-bar::-webkit-scrollbar { display: none; }
+
+  .two-col {
+    grid-template-columns: 1fr;
+    column-gap: 0;
+  }
+
+  .day-row,
+  .day-row.wide {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .action-strip { gap: 14px; }
+  .action-strip .btn {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+
+  .modal-card { padding: 26px 20px 22px; }
+
+  .invite-code {
+    font-size: 30px;
+    letter-spacing: 5px;
+  }
+
+  /* Large list thumbnails shrink so text keeps room to breathe;
+     small ones stay as sized (inline per usage, hence !important) */
+  .thumb {
+    max-width: 92px !important;
+    max-height: 66px !important;
+  }
+  .hero-img { height: 170px !important; }
+
+  .btn { padding: 13px 26px; }
+
+  /* Journey tracker reads tighter on a phone */
+  .journey { row-gap: 10px; }
+  .journey-step { font-size: 10.5px; }
+  .journey-link { width: 14px; margin: 0 6px; }
+}

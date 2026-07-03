@@ -128,7 +128,7 @@ function CopyFlow({ postId, plan }) {
         padding: '28px 26px', borderRadius: 14, border: '1px solid var(--line)', marginBottom: 60,
       }}>
         <p className="serif" style={{ fontSize: 21, marginBottom: 18 }}>When would you go?</p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+        <div className="two-col" style={{ columnGap: 24 }}>
           <Field label="First day">
             <input type="date" required value={start} onChange={e => setStart(e.target.value)} />
           </Field>
