@@ -1,6 +1,7 @@
 backend/data/
 __pycache__/
 .env
+.env.local
 node_modules/
 .venv/
 .claude/settings.local.json

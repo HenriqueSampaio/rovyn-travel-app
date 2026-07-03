@@ -1,5 +1,22 @@
+"""Database layer — SQLite by default, Postgres when DATABASE_URL is set.
+
+The whole app writes plain SQL with `?` placeholders and reads rows by
+column name, so both engines run the same statements: in Postgres mode a
+thin connection proxy rewrites `?` to `%s` (outside string literals) and
+psycopg's dict_row keeps `row["col"]` working. Usage in routers stays
+`with get_conn() as conn:` — commit on success, rollback on exception.
+
+Set DATABASE_URL to a Postgres/Supabase connection string to switch, e.g.
+postgresql://postgres.<ref>:<password>@aws-0-eu-west-1.pooler.supabase.com:5432/postgres
+"""
+
+import os
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
+
+DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
+IS_POSTGRES = DATABASE_URL.startswith(("postgres://", "postgresql://"))
 
 _DB_PATH = Path(__file__).parent / "data" / "rovyn.db"
 
@@ -8,7 +25,7 @@ CREATE TABLE IF NOT EXISTS users (
     id            TEXT PRIMARY KEY,
     email         TEXT UNIQUE NOT NULL,
     name          TEXT NOT NULL,
-    password_hash TEXT NOT NULL,
+    password_hash TEXT NOT NULL DEFAULT '',
     created_at    TEXT NOT NULL
 );
 
@@ -151,37 +168,116 @@ CREATE TABLE IF NOT EXISTS post_comments (
 """
 
 # Columns added after the first release; applied to pre-existing databases.
-_TRIP_MIGRATIONS = [
-    ("destination", "TEXT"),
-    ("options", "TEXT"),
-    ("options_generating", "INTEGER NOT NULL DEFAULT 0"),
-    ("final_plan", "TEXT"),
-    ("final_plan_generating", "INTEGER NOT NULL DEFAULT 0"),
-    ("stay_media", "TEXT"),
+_COLUMN_MIGRATIONS = [
+    ("trips", "destination", "TEXT"),
+    ("trips", "options", "TEXT"),
+    ("trips", "options_generating", "INTEGER NOT NULL DEFAULT 0"),
+    ("trips", "final_plan", "TEXT"),
+    ("trips", "final_plan_generating", "INTEGER NOT NULL DEFAULT 0"),
+    ("trips", "stay_media", "TEXT"),
+    ("bookings", "stale", "INTEGER NOT NULL DEFAULT 0"),
+    ("payments", "mode", "TEXT NOT NULL DEFAULT 'full'"),
 ]
 
+if IS_POSTGRES:
+    import psycopg
+    from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
 
-def get_conn() -> sqlite3.Connection:
-    _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    IntegrityError = (sqlite3.IntegrityError, psycopg.IntegrityError)
 
+    _pool = ConnectionPool(
+        DATABASE_URL,
+        min_size=1,
+        max_size=int(os.environ.get("DB_POOL_SIZE", "10")),
+        kwargs={"row_factory": dict_row},
+        open=False,
+    )
 
-def init_db() -> None:
-    with get_conn() as conn:
-        conn.executescript(_SCHEMA)
-        existing = {r["name"] for r in conn.execute("PRAGMA table_info(trips)")}
-        for col, ddl in _TRIP_MIGRATIONS:
-            if col not in existing:
-                conn.execute(f"ALTER TABLE trips ADD COLUMN {col} {ddl}")
-        booking_cols = {r["name"] for r in conn.execute("PRAGMA table_info(bookings)")}
-        if booking_cols and "stale" not in booking_cols:
-            conn.execute("ALTER TABLE bookings ADD COLUMN stale INTEGER NOT NULL DEFAULT 0")
-        payment_cols = {r["name"] for r in conn.execute("PRAGMA table_info(payments)")}
-        if payment_cols and "mode" not in payment_cols:
-            conn.execute("ALTER TABLE payments ADD COLUMN mode TEXT NOT NULL DEFAULT 'full'")
+    def _translate(sql: str) -> str:
+        """Rewrite `?` placeholders to `%s`, leaving quoted literals alone."""
+        out = []
+        in_string = False
+        for ch in sql:
+            if ch == "'":
+                in_string = not in_string
+                out.append(ch)
+            elif ch == "?" and not in_string:
+                out.append("%s")
+            else:
+                out.append(ch)
+        return "".join(out)
+
+    class _PgConn:
+        """Duck-types the sqlite3.Connection surface the routers use."""
+
+        def __init__(self, conn):
+            self._conn = conn
+
+        def execute(self, sql, params=()):
+            return self._conn.execute(_translate(sql), params)
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+    @contextmanager
+    def get_conn():
+        with _pool.connection() as conn:
+            yield _PgConn(conn)
+
+    def _existing_columns(conn, table: str) -> set:
+        rows = conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = %s",
+            (table,),
+        ).fetchall()
+        return {r["column_name"] for r in rows}
+
+    def init_db() -> None:
+        try:
+            _pool.open(wait=True, timeout=15)
+        except Exception as exc:  # unreachable/wrong DATABASE_URL should fail loudly
+            raise RuntimeError(
+                f"Could not connect to DATABASE_URL ({exc}). Check the connection "
+                "string (Supabase → Project Settings → Database → Connection string; "
+                "use the session pooler URI and URL-encode the password)."
+            ) from exc
+        with _pool.connection() as conn:
+            conn.execute(_SCHEMA)
+            for table, col, ddl in _COLUMN_MIGRATIONS:
+                if col not in _existing_columns(conn, table):
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {ddl}")
+
+else:
+    IntegrityError = (sqlite3.IntegrityError,)
+
+    def _raw_sqlite_conn() -> sqlite3.Connection:
+        _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        return conn
+
+    @contextmanager
+    def get_conn():
+        conn = _raw_sqlite_conn()
+        try:
+            with conn:  # sqlite's own context manager: commit / rollback
+                yield conn
+        finally:
+            conn.close()
+
+    def init_db() -> None:
+        conn = _raw_sqlite_conn()
+        try:
+            conn.executescript(_SCHEMA)
+            for table, col, ddl in _COLUMN_MIGRATIONS:
+                existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+                if existing and col not in existing:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+            conn.commit()
+        finally:
+            conn.close()
 
 
 init_db()

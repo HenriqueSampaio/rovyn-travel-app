@@ -236,7 +236,7 @@ def join_trip(req: JoinTripRequest, user: dict = Depends(get_current_user)):
                 detail="This trip has already moved past the join stage — ask the leader to start a new one.",
             )
         conn.execute(
-            "INSERT OR IGNORE INTO trip_members (trip_id, user_id, joined_at) VALUES (?, ?, ?)",
+            "INSERT INTO trip_members (trip_id, user_id, joined_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
             (trip["id"], user["id"], _now()),
         )
     return {"id": trip["id"], "name": trip["name"], "already_member": False}
@@ -579,7 +579,7 @@ def toggle_star(trip_id: str, req: StarRequest, user: dict = Depends(get_current
             raise HTTPException(status_code=400, detail="That option doesn't exist in this category.")
         if req.starred:
             conn.execute(
-                "INSERT OR IGNORE INTO stars (trip_id, user_id, category, option_id) VALUES (?, ?, ?, ?)",
+                "INSERT INTO stars (trip_id, user_id, category, option_id) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
                 (trip_id, user["id"], req.category, req.option_id),
             )
             # Starring something overrides a previous "I don't mind"
@@ -839,7 +839,7 @@ def approve_plan(trip_id: str, user: dict = Depends(get_current_user)):
         if trip["status"] not in ("final_review", "approved"):
             raise HTTPException(status_code=400, detail="Approvals aren't open right now.")
         conn.execute(
-            "INSERT OR IGNORE INTO approvals (trip_id, user_id, approved_at) VALUES (?, ?, ?)",
+            "INSERT INTO approvals (trip_id, user_id, approved_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
             (trip_id, user["id"], _now()),
         )
         total = conn.execute("SELECT COUNT(*) c FROM trip_members WHERE trip_id = ?", (trip_id,)).fetchone()["c"]

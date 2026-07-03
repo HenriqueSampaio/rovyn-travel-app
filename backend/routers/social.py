@@ -253,7 +253,7 @@ def like_post(post_id: str, req: LikeRequest, user: dict = Depends(get_current_u
         _require_post(conn, post_id)
         if req.liked:
             conn.execute(
-                "INSERT OR IGNORE INTO post_likes (post_id, user_id, liked_at) VALUES (?, ?, ?)",
+                "INSERT INTO post_likes (post_id, user_id, liked_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
                 (post_id, user["id"], _now()),
             )
         else:

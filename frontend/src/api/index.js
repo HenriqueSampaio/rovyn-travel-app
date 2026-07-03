@@ -1,7 +1,32 @@
+import { supabase } from '../lib/supabase.js';
+
 const BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 
+/* In Supabase mode the session lives in supabase-js (which refreshes it in
+   the background); we mirror it here so token/user reads stay synchronous. */
+let sbSession = null;
+const listeners = new Set();
+const notify = () => listeners.forEach(fn => fn());
+
+let resolveReady;
+export const authReady = supabase
+  ? new Promise(res => { resolveReady = res; })
+  : Promise.resolve();
+
+if (supabase) {
+  supabase.auth.getSession().then(({ data }) => {
+    sbSession = data.session;
+    resolveReady();
+    notify();
+  });
+  supabase.auth.onAuthStateChange((_event, session) => {
+    sbSession = session;
+    notify();
+  });
+}
+
 function token() {
-  return localStorage.getItem('rovyn_token');
+  return supabase ? sbSession?.access_token : localStorage.getItem('rovyn_token');
 }
 
 async function req(path, options = {}) {
@@ -20,15 +45,30 @@ async function req(path, options = {}) {
 }
 
 export const auth = {
-  save({ token: t, user }) {
+  mode: supabase ? 'supabase' : 'local',
+  /* Components call subscribe(cb) to re-render on sign-in/out. */
+  subscribe(fn) {
+    listeners.add(fn);
+    return () => listeners.delete(fn);
+  },
+  save({ token: t, user }) { // legacy mode only
     localStorage.setItem('rovyn_token', t);
     localStorage.setItem('rovyn_user', JSON.stringify(user));
   },
   user() {
+    if (supabase) {
+      const u = sbSession?.user;
+      if (!u) return null;
+      const meta = u.user_metadata || {};
+      const name = (meta.full_name || meta.name || '').trim()
+        || (u.email || '').split('@')[0] || 'Traveler';
+      return { id: u.id, email: u.email, name };
+    }
     try { return JSON.parse(localStorage.getItem('rovyn_user')); } catch { return null; }
   },
-  isSignedIn() { return Boolean(token()); },
+  isSignedIn() { return supabase ? Boolean(sbSession) : Boolean(token()); },
   clear() {
+    if (supabase) supabase.auth.signOut().catch(() => {});
     localStorage.removeItem('rovyn_token');
     localStorage.removeItem('rovyn_user');
   },

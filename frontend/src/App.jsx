@@ -1,5 +1,6 @@
+import { useEffect, useReducer, useState } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { auth } from './api/index.js';
+import { auth, authReady } from './api/index.js';
 import Auth from './pages/Auth.jsx';
 import Trips from './pages/Trips.jsx';
 import Join from './pages/Join.jsx';
@@ -22,6 +23,17 @@ function Protected({ children }) {
 }
 
 export default function App() {
+  // Supabase restores the session (and completes OAuth redirects)
+  // asynchronously — hold routing until it has, so Protected pages
+  // don't bounce a signed-in user to the sign-in screen.
+  const [ready, setReady] = useState(auth.mode === 'local');
+  const [, rerender] = useReducer(x => x + 1, 0);
+  useEffect(() => {
+    authReady.then(() => setReady(true));
+    return auth.subscribe(rerender);
+  }, []);
+  if (!ready) return null;
+
   return (
     <Routes>
       <Route path="/" element={<Auth />} />
