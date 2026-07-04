@@ -1,13 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ArrowLeft, ArrowRight, Backpack, Building2, Check, Home, Hotel, Landmark,
-  Mountain, Music, Palmtree, PlaneTakeoff, ShoppingBag, Shuffle, TrainFront,
-  TreePine, UtensilsCrossed, Waves, Flower2,
+  ArrowLeft, ArrowRight, Backpack, Building2, Check, Coffee, Gauge, Home, Hotel,
+  Landmark, Mountain, Music, Palmtree, PlaneTakeoff, ShoppingBag, Shuffle,
+  TrainFront, TreePine, UtensilsCrossed, Waves, Flower2, Zap,
 } from 'lucide-react';
 import { api } from '../api/index.js';
-import { Page, Field, ErrorText } from '../ui.jsx';
+import { Page, Field, ErrorText, CityInput } from '../ui.jsx';
 
 const VIBES = [
   { id: 'culture', label: 'Culture & history', Icon: Landmark },
@@ -34,7 +34,127 @@ const ACCOMMODATIONS = [
   { id: 'airbnb/vacation rental', label: 'Airbnb or villa', desc: 'Home-like and spacious', Icon: Home },
 ];
 
-const TOTAL = 7;
+const PACES = [
+  { id: 'very', label: 'Very busy', desc: 'Pack the days — see and do everything', Icon: Zap },
+  { id: 'moderately', label: 'Moderately busy', desc: 'A couple of anchors a day, room to breathe', Icon: Gauge },
+  { id: 'slightly', label: 'Slightly busy', desc: 'One thing a day, the rest is vacation', Icon: Coffee },
+];
+
+const TOTAL = 8;
+
+/* ---------- group availability heatmap (When2meet-style) ---------- */
+
+function isoOf(year, month, day) {
+  return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function heatColor(count, submitted) {
+  if (!count) return 'transparent';
+  const ratio = submitted ? count / submitted : 0;
+  return `rgba(46, 93, 79, ${(0.14 + 0.76 * ratio).toFixed(3)})`;
+}
+
+function MonthGrid({ year, month, todayIso, votes, start, end, onPick }) {
+  const first = new Date(year, month, 1);
+  const label = first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells = [
+    ...Array(first.getDay()).fill(null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+  const submitted = votes.submitted || 0;
+  return (
+    <div>
+      <p className="serif" style={{ fontSize: 16, fontStyle: 'italic', marginBottom: 8 }}>{label}</p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 3 }}>
+        {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+          <span key={`${d}${i}`} className="muted" style={{ fontSize: 10.5, fontWeight: 700, textAlign: 'center' }}>{d}</span>
+        ))}
+        {cells.map((day, i) => {
+          if (!day) return <span key={`blank-${i}`} />;
+          const iso = isoOf(year, month, day);
+          const count = votes.counts?.[iso] || 0;
+          const ratio = submitted ? count / submitted : 0;
+          const past = iso < todayIso;
+          const mine = start && (end ? iso >= start && iso <= end : iso === start);
+          const who = votes.names?.[iso];
+          return (
+            <button
+              key={iso}
+              type="button"
+              disabled={past}
+              onClick={() => onPick(iso)}
+              title={who?.length ? `${count} of ${submitted} — ${who.join(', ')}` : undefined}
+              style={{
+                aspectRatio: '1', minWidth: 0, borderRadius: 3, fontSize: 12.5, fontWeight: 600,
+                background: past ? 'transparent' : heatColor(count, submitted),
+                color: past ? 'var(--line)' : ratio > 0.55 ? '#F6F2E8' : 'var(--ink-soft)',
+                boxShadow: mine
+                  ? 'inset 0 0 0 2px var(--clay)'
+                  : !past && !count ? 'inset 0 0 0 1px var(--line-soft)' : 'none',
+                cursor: past ? 'default' : 'pointer',
+              }}
+            >
+              {day}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DateHeatmap({ votes, start, end, onPick }) {
+  const now = new Date();
+  const todayIso = isoOf(now.getFullYear(), now.getMonth(), now.getDate());
+  // Open on the first month with group picks still ahead of us
+  const [page, setPage] = useState(() => {
+    const upcoming = Object.keys(votes.counts || {}).filter(d => d >= todayIso).sort()[0];
+    if (!upcoming) return 0;
+    const [y, m] = upcoming.split('-').map(Number);
+    return Math.max(0, (y - now.getFullYear()) * 12 + (m - 1) - now.getMonth());
+  });
+  const months = [0, 1].map(offset => {
+    const d = new Date(now.getFullYear(), now.getMonth() + page + offset, 1);
+    return { year: d.getFullYear(), month: d.getMonth() };
+  });
+  const submitted = votes.submitted || 0;
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+        <button className="btn-quiet" disabled={page <= 0} onClick={() => setPage(p => Math.max(0, p - 1))} aria-label="Earlier months">
+          <ArrowLeft size={14} /> earlier
+        </button>
+        <button className="btn-quiet" disabled={page >= 22} onClick={() => setPage(p => Math.min(22, p + 1))} aria-label="Later months">
+          later <ArrowRight size={14} />
+        </button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 28 }}>
+        {months.map(m => (
+          <MonthGrid key={`${m.year}-${m.month}`} {...m} todayIso={todayIso}
+                     votes={votes} start={start} end={end} onPick={onPick} />
+        ))}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+        {submitted > 0 && (
+          <>
+            <span className="muted" style={{ fontSize: 12 }}>1 traveler</span>
+            {Array.from({ length: Math.min(submitted, 5) }, (_, i) => (
+              <span key={i} style={{
+                width: 14, height: 14, borderRadius: 3,
+                background: heatColor(i + 1, Math.min(submitted, 5)),
+              }} />
+            ))}
+            <span className="muted" style={{ fontSize: 12 }}>all {submitted}</span>
+            <span style={{ width: 18 }} />
+          </>
+        )}
+        <span style={{ width: 14, height: 14, borderRadius: 3, boxShadow: 'inset 0 0 0 2px var(--clay)' }} />
+        <span className="muted" style={{ fontSize: 12 }}>your window</span>
+      </div>
+    </div>
+  );
+}
 
 function OptionRow({ selected, onClick, Icon, title, desc }) {
   return (
@@ -71,11 +191,29 @@ export default function Questionnaire() {
   const [dir, setDir] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [dateVotes, setDateVotes] = useState(null);
   const [form, setForm] = useState({
     dateStart: '', dateEnd: '', departureCity: '',
     budgetMin: 500, budgetMax: 2000,
-    tripStyle: '', vibes: [], accommodation: '', specialRequirements: '',
+    tripStyle: '', vibes: [], accommodation: '', pace: '', specialRequirements: '',
   });
+
+  useEffect(() => {
+    api.getDateVotes(tripId)
+      .then(setDateVotes)
+      .catch(() => setDateVotes({ counts: {}, names: {}, submitted: 0, total_members: 0 }));
+  }, [tripId]);
+
+  // Tap a calendar day: first tap opens your window, second closes it,
+  // tapping earlier than the start restarts.
+  function pickDate(iso) {
+    setError('');
+    setForm(f => {
+      if (!f.dateStart || f.dateEnd) return { ...f, dateStart: iso, dateEnd: '' };
+      if (iso <= f.dateStart) return { ...f, dateStart: iso, dateEnd: '' };
+      return { ...f, dateEnd: iso };
+    });
+  }
 
   function toggleVibe(id) {
     setForm(f => ({
@@ -91,6 +229,7 @@ export default function Questionnaire() {
     if (step === 4 && !form.tripStyle) return 'Pick a travel style — "no preference" counts.';
     if (step === 5 && form.vibes.length === 0) return 'Choose at least one.';
     if (step === 6 && !form.accommodation) return 'Choose where you would like to stay.';
+    if (step === 7 && !form.pace) return 'Pick a pace — it shapes how full your days are.';
     return null;
   }
 
@@ -117,6 +256,7 @@ export default function Questionnaire() {
         trip_style: form.tripStyle || 'no-preference',
         vibes: form.vibes,
         accommodation_type: form.accommodation,
+        pace: form.pace || 'moderately',
         special_requirements: form.specialRequirements,
       });
       navigate(`/trips/${tripId}`);
@@ -131,7 +271,7 @@ export default function Questionnaire() {
       <>
         <h1 style={{ fontSize: 36, marginBottom: 10 }}>When could you get away?</h1>
         <p className="muted" style={{ marginBottom: 40 }}>We'll find the window everyone can make.</p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 40 }}>
+        <div className="two-col" style={{ columnGap: 40 }}>
           <Field label="From">
             <input type="date" min={today} value={form.dateStart}
                    onChange={e => setForm(f => ({ ...f, dateStart: e.target.value }))} />
@@ -141,6 +281,21 @@ export default function Questionnaire() {
                    onChange={e => setForm(f => ({ ...f, dateEnd: e.target.value }))} />
           </Field>
         </div>
+        <div style={{ marginTop: 8 }}>
+          <p className="eyebrow" style={{ fontSize: 11, marginBottom: 6 }}>When the group can go</p>
+          {dateVotes ? (
+            <>
+              <p className="muted" style={{ fontSize: 13.5, marginBottom: 14, maxWidth: 520 }}>
+                {dateVotes.submitted > 0
+                  ? `${dateVotes.submitted} of ${dateVotes.total_members} travelers have picked dates — the greener a day, the more of you can make it. Tap a day to start your window, tap another to close it.`
+                  : 'No one has picked dates yet — you set the tone. Tap a day to start your window, tap another to close it.'}
+              </p>
+              <DateHeatmap votes={dateVotes} start={form.dateStart} end={form.dateEnd} onPick={pickDate} />
+            </>
+          ) : (
+            <p className="muted" style={{ fontSize: 13.5, fontStyle: 'italic' }}>Loading the group's calendar…</p>
+          )}
+        </div>
       </>
     ),
     2: (
@@ -149,8 +304,8 @@ export default function Questionnaire() {
         <p className="muted" style={{ marginBottom: 40 }}>We'll link you straight to flight searches from home.</p>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <PlaneTakeoff size={22} strokeWidth={1.6} color="var(--pine)" />
-          <input placeholder="New York (JFK)" value={form.departureCity}
-                 onChange={e => setForm(f => ({ ...f, departureCity: e.target.value }))} />
+          <CityInput placeholder="New York, United States" value={form.departureCity}
+                     onChange={v => setForm(f => ({ ...f, departureCity: v }))} />
         </div>
       </>
     ),
@@ -179,7 +334,7 @@ export default function Questionnaire() {
       <>
         <h1 style={{ fontSize: 36, marginBottom: 10 }}>What are you traveling for?</h1>
         <p className="muted" style={{ marginBottom: 28 }}>Choose everything that calls to you.</p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 40 }}>
+        <div className="two-col" style={{ columnGap: 40 }}>
           {VIBES.map(v => (
             <OptionRow key={v.id} selected={form.vibes.includes(v.id)} Icon={v.Icon}
                        title={v.label} onClick={() => toggleVibe(v.id)} />
@@ -199,6 +354,19 @@ export default function Questionnaire() {
       </>
     ),
     7: (
+      <>
+        <h1 style={{ fontSize: 36, marginBottom: 10 }}>How busy do you want to be?</h1>
+        <p className="muted" style={{ marginBottom: 28 }}>
+          This sets the rhythm of your days — and how many activities Rovyn will suggest you pick.
+        </p>
+        {PACES.map(p => (
+          <OptionRow key={p.id} selected={form.pace === p.id} Icon={p.Icon}
+                     title={p.label} desc={p.desc}
+                     onClick={() => setForm(f => ({ ...f, pace: p.id }))} />
+        ))}
+      </>
+    ),
+    8: (
       <>
         <h1 style={{ fontSize: 36, marginBottom: 10 }}>Anything the group should know?</h1>
         <p className="muted" style={{ marginBottom: 40 }}>Dietary needs, accessibility, anything that matters. Optional.</p>

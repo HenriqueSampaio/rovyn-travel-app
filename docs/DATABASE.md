@@ -91,6 +91,39 @@ erDiagram
         TEXT paid_at
     }
 
+    posts {
+        TEXT id PK "uuid"
+        TEXT user_id FK "author"
+        TEXT trip_id FK "associated trip (nullable)"
+        TEXT trip_snapshot "JSON: plan frozen at post time (nullable)"
+        TEXT caption
+        TEXT destination "denormalized for display"
+        TEXT vibes "JSON: tags for feed personalization"
+        TEXT created_at
+    }
+
+    post_media {
+        TEXT id PK "uuid"
+        TEXT post_id FK
+        INTEGER position "carousel order"
+        TEXT media_type "image | video"
+        TEXT url "/media/... served from backend/data/media"
+    }
+
+    post_likes {
+        TEXT post_id PK,FK
+        TEXT user_id PK,FK
+        TEXT liked_at
+    }
+
+    post_comments {
+        TEXT id PK "uuid"
+        TEXT post_id FK
+        TEXT user_id FK
+        TEXT text
+        TEXT created_at
+    }
+
     users ||--o{ auth_sessions : "signs in"
     users ||--o{ trip_members : "belongs to"
     users ||--o{ trips : "leads"
@@ -107,6 +140,13 @@ erDiagram
     users ||--o{ approvals : "approves"
     trips ||--o{ payments : "equal-split charges"
     users ||--o{ payments : "pays share"
+    users ||--o{ posts : "publishes"
+    trips o|--o{ posts : "shared by"
+    posts ||--|{ post_media : "photos / videos"
+    posts ||--o{ post_likes : "hearts"
+    users ||--o{ post_likes : "likes"
+    posts ||--o{ post_comments : "discussion"
+    users ||--o{ post_comments : "writes"
 ```
 
 ## Trip status lifecycle
@@ -143,3 +183,13 @@ stateDiagram-v2
   person was charged must never change retroactively.
 - **Migrations**: `db.py` adds any missing `trips` columns on startup
   (`_TRIP_MIGRATIONS`), so pulling a newer branch never requires deleting the database.
+- **`posts.trip_snapshot` is a frozen copy** of the trip's plan at the moment of posting
+  (same principle as `payments.receipt`): the itinerary a viewer opens from the feed never
+  drifts as the original group keeps editing, and it stays available even if the trip is
+  later deleted. Copying a trip runs the snapshot through an AI feasibility pass
+  (`ai_service.adapt_copied_plan`) before a brand-new `trips` row is created for the copier.
+- **Feed personalization is derived, not stored**: a viewer's vibe profile is recomputed
+  from their `questionnaires` history on every feed request and matched against
+  `posts.vibes`; there is no interest table to keep in sync.
+- **Media files** live on disk under `backend/data/media/` (git-ignored) and are served
+  by FastAPI's StaticFiles mount at `/media`; the DB stores only the URL path.

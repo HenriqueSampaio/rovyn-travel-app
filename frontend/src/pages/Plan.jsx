@@ -2,28 +2,28 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  ArrowRight, BedDouble, Check, ChevronDown, ChevronUp, Compass, Landmark,
-  Loader2, MapPin, PlaneTakeoff, Route, Sparkles, Star, Ticket, Users,
+  ArrowRight, BedDouble, Check, Compass, Landmark,
+  MapPin, PlaneTakeoff, Quote, Sparkles, Star, Ticket, Users,
 } from 'lucide-react';
 import { api, auth } from '../api/index.js';
-import { Page, Loading, ErrorText, JourneyTracker } from '../ui.jsx';
+import { Page, Loading, ErrorText, JourneyTracker, Hero, PhotoCarousel, Thumb, ThinkingLoader } from '../ui.jsx';
 
 const TABS = [
   { key: 'overview', label: 'Overview', Icon: Compass },
   { key: 'flights', label: 'Flights', Icon: PlaneTakeoff },
   { key: 'stay', label: 'Stay', Icon: BedDouble },
-  { key: 'itinerary', label: 'Itinerary', Icon: Route },
   { key: 'visits', label: 'Visits', Icon: Landmark },
   { key: 'events', label: 'Events', Icon: Ticket },
 ];
 
 const CATEGORY_INTRO = {
-  flights: 'Star the flights from your city that work for you — each city picks its own. The most-starred option per city makes the plan.',
+  flights: 'These flights are yours alone — they leave from your city. Star the ones that work for you; the most-starred flight among travelers from your city makes the plan, and your check reflects your own flight.',
   stay: 'Star every place you\'d be happy sleeping in. The most-starred stay wins, and Rovyn explains the vote.',
-  itinerary: 'Three ways to spend the same days. Star the pace you want — the most-loved variant becomes the backbone of the trip.',
-  visits: 'Star every sight you don\'t want to miss. Everything the group stars gets woven into the days.',
-  events: 'Star the experiences you\'d actually show up for. Starred events get a slot in the plan.',
+  visits: 'Star every sight you don\'t want to miss — Rovyn builds the day-by-day itinerary from the group\'s picks.',
+  events: 'Star the experiences you\'d actually show up for. Starred events get an evening (or their scheduled slot) in the plan.',
 };
+
+const PACE_LABEL = { very: 'very busy', moderately: 'moderately busy', slightly: 'slightly busy' };
 
 function StarButton({ starred, count, onClick, disabled }) {
   return (
@@ -41,6 +41,102 @@ function StarButton({ starred, count, onClick, disabled }) {
       <Star size={20} strokeWidth={1.8} fill={starred ? 'var(--clay)' : 'none'} />
       {count > 0 && <span>{count}</span>}
     </button>
+  );
+}
+
+/* Guest reviews under a stay — LiteAPI guest feedback (pros/cons) or Google
+   Places reviews (text), collapsed to two until expanded */
+function GuestReviews({ media, fallbackRating }) {
+  const [open, setOpen] = useState(false);
+  const reviews = media?.reviews || [];
+  if (reviews.length === 0) return null;
+  const rating = media?.rating10 ?? fallbackRating;
+  const shown = open ? reviews : reviews.slice(0, 2);
+  return (
+    <div style={{ marginTop: 14 }}>
+      <p className="eyebrow" style={{ fontSize: 10.5, display: 'flex', alignItems: 'center', gap: 7, marginBottom: 2 }}>
+        <Quote size={12} strokeWidth={2.5} /> Guest reviews
+        {rating != null && <span style={{ color: 'var(--clay)' }}>{Number(rating).toFixed(1)}/10</span>}
+        {media?.review_count > 0 && (
+          <span className="muted" style={{ letterSpacing: 0, textTransform: 'none', fontWeight: 600 }}>
+            · {media.review_count.toLocaleString()} reviews
+          </span>
+        )}
+      </p>
+      {shown.map((r, i) => (
+        <div key={`${r.author}-${r.date}-${i}`} style={{ padding: '10px 0', borderTop: '1px dashed var(--line-soft)' }}>
+          <p style={{ fontSize: 13.5 }}>
+            <strong>{r.headline || 'A recent stay'}</strong>
+            <span className="muted">
+              {' '}— {r.author}
+              {r.traveler_type ? ` · ${r.traveler_type}` : ''}
+              {r.date ? ` · ${r.date}` : ''}
+              {r.score10 != null ? ` · rated ${Number(r.score10).toFixed(1)}/10` : ''}
+            </span>
+          </p>
+          {r.pros && (
+            <p style={{ fontSize: 13.5, color: 'var(--ink-soft)', marginTop: 2 }}>
+              <span style={{ color: 'var(--pine)', fontWeight: 700 }}>+</span> {r.pros}
+            </p>
+          )}
+          {r.cons && (
+            <p style={{ fontSize: 13.5, color: 'var(--ink-soft)', marginTop: 2 }}>
+              <span style={{ color: 'var(--clay)', fontWeight: 700 }}>−</span> {r.cons}
+            </p>
+          )}
+          {r.text && <p style={{ fontSize: 13.5, color: 'var(--ink-soft)', marginTop: 2 }}>{r.text}</p>}
+        </div>
+      ))}
+      {reviews.length > 2 && (
+        <button className="btn-quiet" style={{ fontSize: 13 }} onClick={() => setOpen(o => !o)}>
+          {open ? 'Show fewer reviews' : `Read all ${reviews.length} reviews`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* A stay option: photo gallery (real hotels get their full LiteAPI gallery),
+   the details, and guest reviews */
+function StayCard({ opt, media, starred, count, onStar }) {
+  const photos = media?.photos || [];
+  return (
+    <div style={{ padding: '22px 0', borderTop: '1px solid var(--line-soft)' }}>
+      {photos.length > 0
+        ? <PhotoCarousel photos={photos} height={240} style={{ marginBottom: 16 }} />
+        : <Hero image={opt.image} height={200} style={{ marginBottom: 16 }} />}
+      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+        <div style={{ flex: 1 }}>
+          <p style={{ fontWeight: 700, fontSize: 17 }}>
+            {opt.name}
+            {opt.live_price && (
+              <span title="Real property with live availability for your dates" style={{
+                marginLeft: 10, fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em',
+                color: 'var(--pine)', border: '1px solid var(--pine)', borderRadius: 999,
+                padding: '2px 8px', verticalAlign: 2, whiteSpace: 'nowrap', display: 'inline-block',
+              }}>
+                LIVE PRICE
+              </span>
+            )}
+          </p>
+          <p className="muted" style={{ fontSize: 14, margin: '2px 0 6px' }}>
+            {opt.type}{opt.area ? ` · ${opt.area}` : ''} {opt.rating ? <>· <Star size={12} fill="var(--clay)" color="var(--clay)" style={{ verticalAlign: -1 }} /> {opt.rating}</> : null}
+          </p>
+          <p style={{ fontSize: 14.5, color: 'var(--ink-soft)' }}>{opt.why}</p>
+          {(opt.amenities || []).length > 0 && (
+            <p className="muted" style={{ fontSize: 13, marginTop: 4 }}>{opt.amenities.join(' · ')}</p>
+          )}
+          <p style={{ marginTop: 8, display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
+            <span className="serif" style={{ fontSize: 24, color: 'var(--pine)' }}>${opt.price_per_night}<span style={{ fontSize: 14 }}> / night</span></span>
+            <span className="muted" style={{ fontSize: 13 }}>≈ ${opt.total_per_person} per person total</span>
+            {opt.official_website && <a className="btn-quiet" href={opt.official_website} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>official site</a>}
+            {opt.links?.booking && <a className="btn-quiet" href={opt.links.booking} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>{opt.live_price ? 'compare' : 'see similar'}</a>}
+          </p>
+        </div>
+        <StarButton starred={starred} count={count} onClick={onStar} />
+      </div>
+      <GuestReviews media={media} fallbackRating={opt.rating} />
+    </div>
   );
 }
 
@@ -68,27 +164,6 @@ function CategoryFooter({ status, onDone, onNoPref, onReset, busy }) {
   );
 }
 
-function DayPeek({ days }) {
-  const [open, setOpen] = useState(false);
-  const shown = open ? days : days.slice(0, 2);
-  return (
-    <div style={{ marginTop: 12 }}>
-      {shown.map(d => (
-        <div key={d.day} style={{ display: 'flex', gap: 12, fontSize: 14, padding: '7px 0', borderTop: '1px solid var(--line-soft)' }}>
-          <span className="serif" style={{ color: 'var(--pine)', minWidth: 52 }}>Day {d.day}</span>
-          <span style={{ fontWeight: 600, minWidth: 150 }}>{d.theme}</span>
-          <span className="muted" style={{ flex: 1 }}>{d.morning} · {d.afternoon} · {d.evening}</span>
-        </div>
-      ))}
-      {days.length > 2 && (
-        <button className="btn-quiet" onClick={() => setOpen(o => !o)} style={{ marginTop: 6 }}>
-          {open ? <>Fewer days <ChevronUp size={14} /></> : <>All {days.length} days <ChevronDown size={14} /></>}
-        </button>
-      )}
-    </div>
-  );
-}
-
 export default function Plan() {
   const navigate = useNavigate();
   const { tripId } = useParams();
@@ -101,8 +176,10 @@ export default function Plan() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
+  const [stayMedia, setStayMedia] = useState(null); // null = not loaded yet
   const pollRef = useRef(null);
   const starsInitialized = useRef(false);
+  const stayMediaRequested = useRef(false);
 
   useEffect(() => {
     async function poll() {
@@ -133,6 +210,16 @@ export default function Plan() {
     pollRef.current = setInterval(poll, 3500);
     return () => clearInterval(pollRef.current);
   }, [tripId, navigate]);
+
+  // Photo galleries + guest reviews are fetched once, when the Stay tab is
+  // first opened — the backend caches them on the trip after that.
+  useEffect(() => {
+    if (tab !== 'stay' || stayMediaRequested.current) return;
+    stayMediaRequested.current = true;
+    api.getStayMedia(tripId)
+      .then(d => setStayMedia(d.media || {}))
+      .catch(() => setStayMedia({}));
+  }, [tab, tripId]);
 
   if (!trip || !board?.options) return <Page><Loading text="Laying out the planning board…" /></Page>;
 
@@ -198,8 +285,11 @@ export default function Plan() {
   const doneCount = TABS.slice(1).filter(t => catStatus(t.key)).length;
 
   function renderStars(category, list, { disabled } = {}) {
-    return list.map(opt => (
+    return list.map(opt => {
+      const buddies = (board.star_names?.[opt.id] || []).filter(n => n !== me?.name);
+      return (
       <div key={opt.id} style={{ display: 'flex', gap: 16, padding: '22px 0', borderTop: '1px solid var(--line-soft)', alignItems: 'flex-start' }}>
+        {category !== 'flights' && <Thumb image={opt.image} size={76} />}
         <div style={{ flex: 1 }}>
           {category === 'flights' ? (
             <>
@@ -210,34 +300,17 @@ export default function Plan() {
                 Out {opt.depart} · back {opt.return} · {opt.stops === 0 ? 'nonstop' : `${opt.stops} stop${opt.stops > 1 ? 's' : ''}`} · {opt.duration}
               </p>
               <p style={{ fontSize: 14, color: 'var(--ink-soft)' }}>{opt.why}</p>
-              <p style={{ marginTop: 6, display: 'flex', alignItems: 'baseline', gap: 14 }}>
+              <p style={{ marginTop: 6, display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
                 <span className="serif" style={{ fontSize: 24, color: 'var(--pine)' }}>${opt.est_price_per_person}</span>
                 <span className="muted" style={{ fontSize: 13 }}>est. round trip</span>
                 {opt.link && <a className="btn-quiet" href={opt.link} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>compare on Expedia</a>}
               </p>
-            </>
-          ) : category === 'stay' ? (
-            <>
-              <p style={{ fontWeight: 700, fontSize: 17 }}>{opt.name}</p>
-              <p className="muted" style={{ fontSize: 14, margin: '2px 0 6px' }}>
-                {opt.type} · {opt.area} {opt.rating ? <>· <Star size={12} fill="var(--clay)" color="var(--clay)" style={{ verticalAlign: -1 }} /> {opt.rating}</> : null}
-              </p>
-              <p style={{ fontSize: 14.5, color: 'var(--ink-soft)' }}>{opt.why}</p>
-              {(opt.amenities || []).length > 0 && (
-                <p className="muted" style={{ fontSize: 13, marginTop: 4 }}>{opt.amenities.join(' · ')}</p>
+              {buddies.length > 0 && (
+                <p style={{ marginTop: 8, display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 13.5, fontWeight: 600, color: 'var(--clay)' }}>
+                  <Star size={13} fill="var(--clay)" />
+                  {buddies[0]}{buddies.length > 1 ? ` +${buddies.length - 1} more` : ''} selected this flight!
+                </p>
               )}
-              <p style={{ marginTop: 8, display: 'flex', alignItems: 'baseline', gap: 14 }}>
-                <span className="serif" style={{ fontSize: 24, color: 'var(--pine)' }}>${opt.price_per_night}<span style={{ fontSize: 14 }}> / night</span></span>
-                <span className="muted" style={{ fontSize: 13 }}>≈ ${opt.total_per_person} per person total</span>
-                {opt.links?.booking && <a className="btn-quiet" href={opt.links.booking} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>see similar</a>}
-              </p>
-            </>
-          ) : category === 'itinerary' ? (
-            <>
-              <p className="serif" style={{ fontSize: 22, fontStyle: 'italic', color: 'var(--pine)' }}>{opt.title}</p>
-              <p style={{ fontSize: 14.5, color: 'var(--ink-soft)', margin: '4px 0' }}>{opt.personality}</p>
-              <p className="muted" style={{ fontSize: 13 }}>≈ ${opt.est_activities_cost_per_person} per person in activities</p>
-              <DayPeek days={opt.days || []} />
             </>
           ) : (
             <>
@@ -257,29 +330,39 @@ export default function Plan() {
           disabled={disabled}
         />
       </div>
-    ));
+      );
+    });
   }
 
   function renderFlights() {
     const cities = Object.keys(options.flights || {});
-    const myCity = (board.my_departure_city || '').toLowerCase();
-    const sorted = [...cities].sort((a, b) => (b.toLowerCase() === myCity) - (a.toLowerCase() === myCity));
-    return sorted.map(city => {
-      const isMine = city.toLowerCase() === myCity;
-      return (
-        <div key={city} style={{ marginBottom: 36 }}>
-          <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <PlaneTakeoff size={13} strokeWidth={2.5} /> From {city} {isMine && '— your flights'}
-          </p>
-          {!isMine && (
-            <p className="muted" style={{ fontSize: 13, fontStyle: 'italic' }}>
-              Travelers flying from {city} pick these.
+    const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const myCity = norm(board.my_departure_city);
+    const mine = cities.filter(c => norm(c) === myCity);
+    const shown = mine.length ? mine : cities; // fallback: no questionnaire city matched
+    const sameCityMates = trip.members.length > 1;
+    return (
+      <>
+        {shown.map(city => (
+          <div key={city} style={{ marginBottom: 36 }}>
+            <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <PlaneTakeoff size={13} strokeWidth={2.5} /> Your flights from {city}
             </p>
-          )}
-          {renderStars('flights', options.flights[city], { disabled: !isMine && Boolean(myCity) })}
-        </div>
-      );
-    });
+            {sameCityMates && (
+              <p className="muted" style={{ fontSize: 13, fontStyle: 'italic' }}>
+                Travel mates flying from {city} see these too — starring the same flight means flying together.
+              </p>
+            )}
+            {renderStars('flights', options.flights[city])}
+          </div>
+        ))}
+        {mine.length > 0 && cities.length > mine.length && (
+          <p className="muted" style={{ fontSize: 13.5, fontStyle: 'italic' }}>
+            Travelers from {cities.filter(c => !mine.includes(c)).join(', ')} are picking their own flights on their side.
+          </p>
+        )}
+      </>
+    );
   }
 
   function renderOverview() {
@@ -288,10 +371,10 @@ export default function Plan() {
         <section style={{ marginBottom: 52 }}>
           <p className="eyebrow" style={{ marginBottom: 14 }}>How this works</p>
           {[
-            ['Browse each tab', 'Flights, stay, itinerary, visits and events — all generated around the group\'s answers.'],
-            ['Star what you love', 'As many options as you like. Stars are votes; you can change them anytime before the final plan.'],
+            ['Browse each tab', 'Flights (yours are personal, from your city), stay, visits and events — all generated around the group\'s answers.'],
+            ['Star what you love', 'As many options as you like — the Visits and Events tabs suggest how many to pick for your pace. Stars are votes; change them anytime before the final plan.'],
             ['Finish every section', 'Lock in your picks — or tap “I don\'t mind” when you have no strong opinion.'],
-            [`When all ${trip.total_members} are done`, 'Rovyn drafts one final plan. Majority wins, and every decision comes with the vote count that made it.'],
+            [`When all ${trip.total_members} are done`, 'Rovyn builds the day-by-day itinerary from the group\'s starred picks. Majority wins, every decision comes with its vote count, and every slot stays editable until the group approves.'],
           ].map(([title, desc], i) => (
             <div key={title} style={{ display: 'flex', gap: 18, padding: '14px 0', borderTop: '1px solid var(--line-soft)' }}>
               <span className="serif" style={{ fontSize: 17, fontStyle: 'italic', color: 'var(--clay)', minWidth: 24 }}>{i + 1}.</span>
@@ -304,7 +387,7 @@ export default function Plan() {
         </section>
 
         <section style={{ marginBottom: 52 }}>
-          <p className="eyebrow" style={{ marginBottom: 14 }}>Your checklist — {doneCount} of 5 sections</p>
+          <p className="eyebrow" style={{ marginBottom: 14 }}>Your checklist — {doneCount} of {trip.categories_total} sections</p>
           {TABS.slice(1).map(({ key, label, Icon }) => {
             const st = catStatus(key);
             return (
@@ -348,12 +431,13 @@ export default function Plan() {
             <Sparkles size={13} strokeWidth={2.5} /> The final plan
           </p>
           {finalizing ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <Loader2 className="spin" size={22} strokeWidth={1.8} color="var(--pine)" />
-              <p className="serif muted" style={{ fontStyle: 'italic', fontSize: 17 }}>
-                Counting stars and drafting the plan…
-              </p>
-            </div>
+            <ThinkingLoader messages={[
+              'Rovyn is planning your trip…',
+              'Counting everyone’s stars…',
+              'Weaving your picks into the days…',
+              'Rovyn is thinking…',
+              'Balancing budgets and pace…',
+            ]} />
           ) : trip.all_curated ? (
             trip.is_leader ? (
               <>
@@ -370,7 +454,7 @@ export default function Plan() {
             )
           ) : (
             <p className="serif muted" style={{ fontStyle: 'italic', fontSize: 17 }}>
-              Unlocks when all {trip.total_members} travelers finish all 5 sections.
+              Unlocks when all {trip.total_members} travelers finish all {trip.categories_total} sections.
             </p>
           )}
         </section>
@@ -393,23 +477,23 @@ export default function Plan() {
         </p>
       )}
 
+      <Hero image={options.image} height={200} style={{ marginTop: 18 }} />
+
       <JourneyTracker status={trip.status} style={{ marginTop: 26 }} />
 
       {/* Tab bar */}
-      <div style={{ display: 'flex', gap: 26, borderBottom: '1px solid var(--line)', marginBottom: 34, flexWrap: 'wrap' }}>
+      <div className="tab-bar">
         {TABS.map(({ key, label, Icon }) => {
           const active = tab === key;
           const done = key !== 'overview' && catStatus(key);
           return (
             <button
               key={key}
+              className="tab-btn"
               onClick={() => setTab(key)}
               style={{
-                display: 'inline-flex', alignItems: 'center', gap: 7,
-                padding: '10px 2px 12px', fontSize: 14.5, fontWeight: 700,
                 color: active ? 'var(--ink)' : 'var(--muted)',
                 borderBottom: active ? '2px solid var(--pine)' : '2px solid transparent',
-                marginBottom: -1,
               }}
             >
               <Icon size={15} strokeWidth={2} />
@@ -427,7 +511,53 @@ export default function Plan() {
         {tab !== 'overview' && (
           <>
             <p className="muted" style={{ maxWidth: 560, marginBottom: 10 }}>{CATEGORY_INTRO[tab]}</p>
-            {tab === 'flights' ? renderFlights() : renderStars(tab, options[tab] || [])}
+            {tab === 'stay' && (
+              options.stay_source === 'liteapi' ? (
+                <p style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 10,
+                  fontSize: 13.5, fontWeight: 700, color: 'var(--pine)',
+                }}>
+                  <Check size={14} strokeWidth={2.6} />
+                  Real hotels with live prices and availability for your dates.
+                </p>
+              ) : (
+                <p style={{ marginBottom: 10, fontSize: 13.5, color: 'var(--clay)' }}>
+                  These stays and prices are AI estimates.
+                  {' '}Tip: a “City, Country” destination (e.g. “Porto Cervo, Italy”) lets Rovyn fetch real hotels with live prices.
+                </p>
+              )
+            )}
+            {tab === 'stay' && stayMedia === null && (
+              <p className="muted" style={{ fontSize: 13, fontStyle: 'italic', marginBottom: 10 }}>
+                Fetching photo galleries and guest reviews…
+              </p>
+            )}
+            {(tab === 'visits' || tab === 'events') && board.recommended && (() => {
+              const ids = new Set((options[tab] || []).map(o => o.id));
+              const mine = [...myStars].filter(id => ids.has(id)).length;
+              const target = board.recommended[tab];
+              return (
+                <p style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 10,
+                  fontSize: 14, fontWeight: 600, color: mine >= target ? 'var(--pine)' : 'var(--clay)',
+                }}>
+                  <Star size={14} fill="currentColor" />
+                  Aim for about {target} {tab} for your {PACE_LABEL[board.my_pace] || 'moderately busy'} pace — you've starred {mine}.
+                </p>
+              );
+            })()}
+            {tab === 'flights' ? renderFlights()
+              : tab === 'stay' ? (options.stay || []).map(opt => (
+                <StayCard
+                  key={opt.id}
+                  opt={opt}
+                  media={stayMedia?.[opt.id]}
+                  starred={myStars.has(opt.id)}
+                  count={counts[opt.id] || 0}
+                  onStar={() => star('stay', opt.id)}
+                />
+              ))
+              : renderStars(tab, options[tab] || [])}
             <CategoryFooter
               status={catStatus(tab)}
               busy={busy}

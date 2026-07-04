@@ -19,7 +19,8 @@ function Day({ day, index }) {
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay: Math.min(0.15 + index * 0.08, 0.7) }}
-      style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: 28, padding: '34px 0', borderTop: '1px solid var(--line-soft)' }}
+      className="day-row wide"
+      style={{ padding: '34px 0', borderTop: '1px solid var(--line-soft)' }}
     >
       <div>
         <div className="serif" style={{ fontSize: 26, color: 'var(--pine)' }}>Day {day.day}</div>
@@ -38,7 +39,7 @@ function Day({ day, index }) {
                 <p style={{ fontWeight: 600, fontSize: 15.5 }}>
                   {act.activity}
                   {act.bookable && (
-                    <span style={{ marginLeft: 10, fontSize: 12, color: 'var(--clay)', fontWeight: 700, letterSpacing: '0.06em' }}>
+                    <span style={{ marginLeft: 10, fontSize: 12, color: 'var(--clay)', fontWeight: 700, letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
                       BOOK AHEAD
                     </span>
                   )}

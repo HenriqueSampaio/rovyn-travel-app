@@ -5,3 +5,9 @@ python-dotenv==1.0.1
 pydantic==2.7.4
 python-multipart==0.0.9
 httpx==0.27.0
+certifi
+pycountry
+psycopg[binary]>=3.2
+psycopg-pool>=3.2
+PyJWT>=2.9
+cryptography>=42.0

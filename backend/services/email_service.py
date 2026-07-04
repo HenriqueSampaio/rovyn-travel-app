@@ -6,8 +6,14 @@ says so, so the UI can tell the user honestly.
 """
 import json
 import os
+import ssl
 import urllib.error
 import urllib.request
+
+import certifi
+
+# macOS system Pythons often lack root CAs; certifi's bundle works everywhere
+_SSL_CTX = ssl.create_default_context(cafile=certifi.where())
 
 
 def email_available() -> bool:
@@ -33,7 +39,7 @@ def send_email(to: str, subject: str, html: str) -> dict:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=15) as res:
+        with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as res:
             body = json.loads(res.read().decode() or "{}")
         return {"sent": True, "simulated": False, "id": body.get("id")}
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
@@ -42,11 +48,13 @@ def send_email(to: str, subject: str, html: str) -> dict:
 
 def receipt_html(trip_name: str, destination: str, traveler: str, items: list[dict],
                  total: float, group_size: int) -> str:
+    from html import escape
     rows = "".join(
-        f"<tr><td style='padding:8px 0;border-bottom:1px solid #eee'>{i['label']}</td>"
+        f"<tr><td style='padding:8px 0;border-bottom:1px solid #eee'>{escape(str(i['label']))}</td>"
         f"<td style='padding:8px 0;border-bottom:1px solid #eee;text-align:right'>${i['amount']:,.2f}</td></tr>"
         for i in items
     )
+    trip_name, destination, traveler = escape(trip_name), escape(destination), escape(traveler)
     return f"""
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#23312B">
       <h1 style="font-weight:400">Rovyn</h1>
