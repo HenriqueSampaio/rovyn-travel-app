@@ -13,7 +13,7 @@ A **journey tracker** at the top of every trip page shows where the group is:
 4. **Everyone fills the questionnaire.** Dates, budget, departure city, single-base vs multi-city, vibes, accommodation style, special requirements.
 5. **Destination.** Pinned by the leader, or: the AI proposes 5 destinations reconciling everyone's answers, the group votes, ties break toward the higher AI match score.
 6. **The planning board.** The leader opens the board and the AI generates concrete options in five tabs — **Flights** (3 per departure city), **Stay** (4 styles/price points), **Itinerary** (3 day-by-day variants with different personalities), **Visits** (6 sights) and **Events** (4 time-specific experiences). Every traveler:
-   - ⭐ **stars** everything they'd enjoy (stars are votes, changeable until the final plan is drafted),
+   - **stars** everything they'd enjoy (stars are votes, changeable until the final plan is drafted),
    - **locks in each section** — or taps **"I don't mind"** when they have no strong opinion,
    - follows their 5-section checklist; the Overview tab shows live group progress.
 7. **The final plan.** When all travelers finish all sections, the leader drafts the final plan. Winner selection is **deterministic majority rule** computed in code — the AI only weaves the winning choices into a coherent day-by-day schedule. A **"How the group decided"** section explains every call with real vote counts ("2 of 3 travelers with an opinion (67%) starred the boutique hotel…"). Every starred visit and event gets a slot.
