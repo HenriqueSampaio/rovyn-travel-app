@@ -31,11 +31,21 @@ from backend.db import IntegrityError, get_conn
 SUPABASE_URL = (os.environ.get("SUPABASE_URL") or "").strip().rstrip("/")
 SUPABASE_JWT_SECRET = (os.environ.get("SUPABASE_JWT_SECRET") or "").strip()
 
+# Dev/test escape hatch: keeps the legacy signup/login endpoints available
+# even when Supabase Auth is on — accounts are created instantly, with no
+# email verification, which is what you want for fake test accounts.
+# Never set this on a production deployment.
+ALLOW_LEGACY_AUTH = (os.environ.get("ALLOW_LEGACY_AUTH") or "").strip().lower() in ("1", "true", "yes", "on")
+
 _bearer = HTTPBearer(auto_error=False)
 
 
 def supabase_enabled() -> bool:
     return bool(SUPABASE_URL)
+
+
+def legacy_auth_allowed() -> bool:
+    return not supabase_enabled() or ALLOW_LEGACY_AUTH
 
 
 # ---------- legacy password auth ----------
@@ -196,16 +206,56 @@ def _ensure_supabase_user(claims: dict) -> dict:
 
 # ---------- request dependency ----------
 
+# Resolving a token costs a database round trip on every request, which adds
+# up fast when Postgres is remote. Verified tokens are cached in-process for
+# a short window; the TTL bounds how long a revoked session or an expired JWT
+# can outlive itself, and how stale a name/email edit can look.
+_USER_CACHE_TTL = 60.0  # seconds
+_USER_CACHE_MAX = 2000
+_user_cache: dict[str, tuple[float, dict]] = {}
+_user_cache_lock = threading.Lock()
+
+
+def _user_cache_get(token: str) -> dict | None:
+    with _user_cache_lock:
+        hit = _user_cache.get(token)
+        if hit is None:
+            return None
+        stamp, user = hit
+        if time.time() - stamp >= _USER_CACHE_TTL:
+            _user_cache.pop(token, None)
+            return None
+        return dict(user)
+
+
+def _user_cache_put(token: str, user: dict) -> None:
+    with _user_cache_lock:
+        if len(_user_cache) >= _USER_CACHE_MAX:
+            now = time.time()
+            expired = [k for k, (t, _) in _user_cache.items() if now - t >= _USER_CACHE_TTL]
+            for k in expired:
+                _user_cache.pop(k, None)
+            while len(_user_cache) >= _USER_CACHE_MAX:  # still full: drop oldest inserts
+                _user_cache.pop(next(iter(_user_cache)))
+        _user_cache[token] = (time.time(), dict(user))
+
+
 def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> dict:
     if credentials is None:
         raise HTTPException(status_code=401, detail="Not signed in.")
     token = credentials.credentials
 
+    cached = _user_cache_get(token)
+    if cached is not None:
+        return cached
+
     if supabase_enabled() and token.count(".") == 2:
         claims = verify_supabase_jwt(token)
-        return _ensure_supabase_user(claims)
+        user = _ensure_supabase_user(claims)
+        _user_cache_put(token, user)
+        return user
 
-    with get_conn() as conn:
+    with get_conn(readonly=True) as conn:
         row = conn.execute(
             """SELECT u.id, u.email, u.name FROM auth_sessions s
                JOIN users u ON u.id = s.user_id WHERE s.token = ?""",
@@ -213,4 +263,6 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
         ).fetchone()
     if row is None:
         raise HTTPException(status_code=401, detail="Session expired — please sign in again.")
-    return dict(row)
+    user = dict(row)
+    _user_cache_put(token, user)
+    return user

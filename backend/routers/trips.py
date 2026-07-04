@@ -9,7 +9,7 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException
 
 from backend.auth import get_current_user
-from backend.db import get_conn
+from backend.db import IS_POSTGRES, fetch_many, get_conn
 from backend.models import (
     ArrangeSlotsRequest, CreateTripRequest, CurationRequest, EditRequest, JoinTripRequest,
     PayRequest, QuestionnaireData, ReorderRequest, SlotEditRequest, StarRequest, VoteRequest,
@@ -39,12 +39,36 @@ def _load_trip(conn, trip_id: str):
     return trip
 
 
-def _require_member(conn, trip_id: str, user_id: str):
-    row = conn.execute(
-        "SELECT 1 FROM trip_members WHERE trip_id = ? AND user_id = ?", (trip_id, user_id)
+# The status payload only needs to know WHETHER the big AI blobs exist —
+# selecting them would ship megabytes of JSON per request from a remote DB.
+_LIGHT_TRIP_COLUMNS = """tr.id, tr.name, tr.invite_code, tr.status, tr.leader_id,
+           tr.destination, tr.selected_destination,
+           tr.recommendations_generating, tr.itinerary_generating,
+           tr.options_generating, tr.final_plan_generating,
+           (tr.recommendations IS NOT NULL) AS recommendations,
+           (tr.itinerary IS NOT NULL) AS itinerary,
+           (tr.options IS NOT NULL) AS options,
+           (tr.final_plan IS NOT NULL) AS final_plan"""
+
+
+def _member_trip(conn, trip_id: str, user_id: str, light: bool = False):
+    """Trip row + membership check in one query — one network round trip
+    instead of two, which matters when Postgres is remote.
+
+    light=True swaps the big JSON columns for existence booleans; only use
+    it where the payload never reads their contents."""
+    cols = _LIGHT_TRIP_COLUMNS if light else "tr.*"
+    trip = conn.execute(
+        f"""SELECT {cols}, EXISTS(SELECT 1 FROM trip_members tm
+                               WHERE tm.trip_id = tr.id AND tm.user_id = ?) AS is_member
+           FROM trips tr WHERE tr.id = ?""",
+        (user_id, trip_id),
     ).fetchone()
-    if row is None:
+    if trip is None:
+        raise HTTPException(status_code=404, detail="Trip not found.")
+    if not trip["is_member"]:
         raise HTTPException(status_code=403, detail="You are not a member of this trip.")
+    return trip
 
 
 def _questionnaire_rows(conn, trip_id: str) -> list[dict]:
@@ -57,27 +81,19 @@ def _decided_destination(trip) -> str | None:
 
 
 def _status_payload(conn, trip, user_id: str) -> dict:
-    members = conn.execute(
-        """SELECT u.id, u.name,
+    members, votes, progress_rows, pay_rows = fetch_many(conn, [
+        ("""SELECT u.id, u.name,
                   EXISTS(SELECT 1 FROM questionnaires q WHERE q.trip_id = t.trip_id AND q.user_id = u.id) AS submitted,
                   EXISTS(SELECT 1 FROM votes v WHERE v.trip_id = t.trip_id AND v.user_id = u.id) AS voted,
                   EXISTS(SELECT 1 FROM approvals a WHERE a.trip_id = t.trip_id AND a.user_id = u.id) AS approved,
                   EXISTS(SELECT 1 FROM payments p WHERE p.trip_id = t.trip_id AND p.user_id = u.id) AS paid
            FROM trip_members t JOIN users u ON u.id = t.user_id
-           WHERE t.trip_id = ? ORDER BY t.joined_at""",
-        (trip["id"],),
-    ).fetchall()
-    votes = conn.execute(
-        "SELECT user_id, destination_name FROM votes WHERE trip_id = ?", (trip["id"],)
-    ).fetchall()
-    progress_rows = conn.execute(
-        "SELECT user_id, category, status FROM category_progress WHERE trip_id = ?", (trip["id"],)
-    ).fetchall()
-    pay_modes = {
-        r["user_id"]: r["mode"] for r in conn.execute(
-            "SELECT user_id, mode FROM payments WHERE trip_id = ?", (trip["id"],)
-        )
-    }
+           WHERE t.trip_id = ? ORDER BY t.joined_at""", (trip["id"],)),
+        ("SELECT user_id, destination_name FROM votes WHERE trip_id = ?", (trip["id"],)),
+        ("SELECT user_id, category, status FROM category_progress WHERE trip_id = ?", (trip["id"],)),
+        ("SELECT user_id, mode FROM payments WHERE trip_id = ?", (trip["id"],)),
+    ])
+    pay_modes = {r["user_id"]: r["mode"] for r in pay_rows}
     tallies = Counter(v["destination_name"] for v in votes)
     my_vote = next((v["destination_name"] for v in votes if v["user_id"] == user_id), None)
 
@@ -132,19 +148,19 @@ def _status_payload(conn, trip, user_id: str) -> dict:
             "paid": bool(me and me["paid"]),
             "booking_mode": pay_modes.get(user_id),
         },
-        "has_recommendations": trip["recommendations"] is not None,
+        "has_recommendations": bool(trip["recommendations"]),
         "recommendations_generating": bool(trip["recommendations_generating"]),
         "itinerary_generating": bool(trip["itinerary_generating"]),
         "votes_cast": len(votes),
         "all_voted": total > 0 and len(votes) == total,
         "vote_tallies": dict(tallies),
         "selected_destination": trip["selected_destination"],
-        "has_itinerary": trip["itinerary"] is not None,
-        "has_options": trip["options"] is not None,
+        "has_itinerary": bool(trip["itinerary"]),
+        "has_options": bool(trip["options"]),
         "options_generating": bool(trip["options_generating"]),
         "all_curated": all_curated,
         "categories_total": len(CATEGORIES),
-        "has_final_plan": trip["final_plan"] is not None,
+        "has_final_plan": bool(trip["final_plan"]),
         "final_plan_generating": bool(trip["final_plan_generating"]),
         "approved_count": approved_count,
         "all_approved": total > 0 and approved_count == total,
@@ -157,12 +173,21 @@ def _status_payload(conn, trip, user_id: str) -> dict:
 # Trip CRUD
 # ---------------------------------------------------------------------------
 
+# The trip cards only need the plan's date window — extracting it in SQL
+# avoids shipping each trip's multi-hundred-KB plan JSON over the wire.
+_TRIP_DATES_SQL = (
+    "tr.final_plan::jsonb ->> 'dates' AS fp_dates, tr.options::jsonb ->> 'dates' AS opt_dates"
+    if IS_POSTGRES else
+    "json_extract(tr.final_plan, '$.dates') AS fp_dates, json_extract(tr.options, '$.dates') AS opt_dates"
+)
+
+
 @router.get("")
 def my_trips(user: dict = Depends(get_current_user)):
-    with get_conn() as conn:
+    with get_conn(readonly=True) as conn:
         rows = conn.execute(
-            """SELECT tr.id, tr.name, tr.invite_code, tr.status, tr.selected_destination, tr.destination, tr.leader_id,
-                      tr.final_plan, tr.options,
+            f"""SELECT tr.id, tr.name, tr.invite_code, tr.status, tr.selected_destination, tr.destination, tr.leader_id,
+                      {_TRIP_DATES_SQL},
                       (SELECT COUNT(*) FROM trip_members m WHERE m.trip_id = tr.id) AS member_count
                FROM trips tr JOIN trip_members tm ON tm.trip_id = tr.id
                WHERE tm.user_id = ? ORDER BY tr.created_at DESC""",
@@ -170,10 +195,10 @@ def my_trips(user: dict = Depends(get_current_user)):
         ).fetchall()
 
     def trip_dates(r) -> dict:
-        for col in ("final_plan", "options"):
+        for col in ("fp_dates", "opt_dates"):
             if r[col]:
-                d = json.loads(r[col]).get("dates") or {}
-                if d.get("start"):
+                d = json.loads(r[col])
+                if d and d.get("start"):
                     return {"start": d.get("start"), "end": d.get("end")}
         return {}
 
@@ -244,9 +269,8 @@ def join_trip(req: JoinTripRequest, user: dict = Depends(get_current_user)):
 
 @router.get("/{trip_id}")
 def trip_status(trip_id: str, user: dict = Depends(get_current_user)):
-    with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+    with get_conn(readonly=True) as conn:
+        trip = _member_trip(conn, trip_id, user["id"], light=True)
         return _status_payload(conn, trip, user["id"])
 
 
@@ -259,8 +283,7 @@ _TRIP_CHILD_TABLES = (
 @router.delete("/{trip_id}")
 def delete_trip(trip_id: str, user: dict = Depends(get_current_user)):
     with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+        trip = _member_trip(conn, trip_id, user["id"])
         if user["id"] != trip["leader_id"]:
             raise HTTPException(status_code=403, detail="Only the trip leader can delete a trip — you can leave it instead.")
         for table in _TRIP_CHILD_TABLES:
@@ -274,8 +297,7 @@ def delete_trip(trip_id: str, user: dict = Depends(get_current_user)):
 @router.post("/{trip_id}/leave")
 def leave_trip(trip_id: str, user: dict = Depends(get_current_user)):
     with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+        trip = _member_trip(conn, trip_id, user["id"])
         if user["id"] == trip["leader_id"]:
             raise HTTPException(status_code=400, detail="The leader can't leave — delete the trip instead.")
         paid = conn.execute(
@@ -295,8 +317,7 @@ def leave_trip(trip_id: str, user: dict = Depends(get_current_user)):
 @router.post("/{trip_id}/questionnaire")
 def submit_questionnaire(trip_id: str, data: QuestionnaireData, user: dict = Depends(get_current_user)):
     with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+        trip = _member_trip(conn, trip_id, user["id"])
         if trip["status"] != "waiting":
             raise HTTPException(status_code=400, detail="Questionnaires are closed — the trip has moved on.")
         conn.execute(
@@ -304,26 +325,26 @@ def submit_questionnaire(trip_id: str, data: QuestionnaireData, user: dict = Dep
                ON CONFLICT(trip_id, user_id) DO UPDATE SET data = excluded.data, submitted_at = excluded.submitted_at""",
             (trip_id, user["id"], json.dumps(data.model_dump()), _now()),
         )
-        total = conn.execute("SELECT COUNT(*) c FROM trip_members WHERE trip_id = ?", (trip_id,)).fetchone()["c"]
-        done = conn.execute("SELECT COUNT(*) c FROM questionnaires WHERE trip_id = ?", (trip_id,)).fetchone()["c"]
-    return {"success": True, "all_submitted": done == total}
+        counts = conn.execute(
+            """SELECT (SELECT COUNT(*) FROM trip_members WHERE trip_id = ?) AS total,
+                      (SELECT COUNT(*) FROM questionnaires WHERE trip_id = ?) AS done""",
+            (trip_id, trip_id),
+        ).fetchone()
+    return {"success": True, "all_submitted": counts["done"] == counts["total"]}
 
 
 @router.get("/{trip_id}/date-votes")
 def read_date_votes(trip_id: str, user: dict = Depends(get_current_user)):
     """Per-day tally of the date windows travel mates already submitted —
     feeds the availability heatmap on the questionnaire's date step."""
-    with get_conn() as conn:
-        _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
-        rows = conn.execute(
-            """SELECT q.user_id, q.data, u.name FROM questionnaires q
-               JOIN users u ON u.id = q.user_id WHERE q.trip_id = ?""",
-            (trip_id,),
-        ).fetchall()
-        total = conn.execute(
-            "SELECT COUNT(*) c FROM trip_members WHERE trip_id = ?", (trip_id,)
-        ).fetchone()["c"]
+    with get_conn(readonly=True) as conn:
+        _member_trip(conn, trip_id, user["id"])
+        rows, total_rows = fetch_many(conn, [
+            ("""SELECT q.user_id, q.data, u.name FROM questionnaires q
+               JOIN users u ON u.id = q.user_id WHERE q.trip_id = ?""", (trip_id,)),
+            ("SELECT COUNT(*) c FROM trip_members WHERE trip_id = ?", (trip_id,)),
+        ])
+        total = total_rows[0]["c"]
 
     counts: dict[str, int] = {}
     names: dict[str, list] = {}
@@ -352,9 +373,8 @@ def read_date_votes(trip_id: str, user: dict = Depends(get_current_user)):
 
 @router.get("/{trip_id}/recommendations")
 def read_recommendations(trip_id: str, user: dict = Depends(get_current_user)):
-    with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+    with get_conn(readonly=True) as conn:
+        trip = _member_trip(conn, trip_id, user["id"])
     return {
         "recommendations": json.loads(trip["recommendations"]) if trip["recommendations"] else None,
         "generating": bool(trip["recommendations_generating"]),
@@ -365,8 +385,7 @@ def read_recommendations(trip_id: str, user: dict = Depends(get_current_user)):
 @router.post("/{trip_id}/recommendations")
 def create_recommendations(trip_id: str, user: dict = Depends(get_current_user)):
     with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+        trip = _member_trip(conn, trip_id, user["id"])
         if trip["destination"]:
             raise HTTPException(status_code=400, detail="This trip already has a destination — head to the planning board.")
         if trip["recommendations"]:
@@ -399,8 +418,7 @@ def create_recommendations(trip_id: str, user: dict = Depends(get_current_user))
 @router.post("/{trip_id}/vote")
 def cast_vote(trip_id: str, req: VoteRequest, user: dict = Depends(get_current_user)):
     with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+        trip = _member_trip(conn, trip_id, user["id"])
         if not trip["recommendations"]:
             raise HTTPException(status_code=400, detail="Recommendations haven't been generated yet.")
         if trip["selected_destination"]:
@@ -447,8 +465,7 @@ def cast_vote(trip_id: str, req: VoteRequest, user: dict = Depends(get_current_u
 @router.post("/{trip_id}/options")
 def create_options(trip_id: str, user: dict = Depends(get_current_user)):
     with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+        trip = _member_trip(conn, trip_id, user["id"])
         if trip["options"]:
             return {"options": json.loads(trip["options"])}
         if user["id"] != trip["leader_id"]:
@@ -481,20 +498,15 @@ def create_options(trip_id: str, user: dict = Depends(get_current_user)):
 
 @router.get("/{trip_id}/options")
 def read_options(trip_id: str, user: dict = Depends(get_current_user)):
-    with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
-        stars = conn.execute(
-            """SELECT s.user_id, s.category, s.option_id, u.name
-               FROM stars s JOIN users u ON u.id = s.user_id WHERE s.trip_id = ?""",
-            (trip_id,),
-        ).fetchall()
-        progress = conn.execute(
-            "SELECT user_id, category, status FROM category_progress WHERE trip_id = ?", (trip_id,)
-        ).fetchall()
-        my_q_row = conn.execute(
-            "SELECT data FROM questionnaires WHERE trip_id = ? AND user_id = ?", (trip_id, user["id"])
-        ).fetchone()
+    with get_conn(readonly=True) as conn:
+        trip = _member_trip(conn, trip_id, user["id"])
+        stars, progress, my_q_rows = fetch_many(conn, [
+            ("""SELECT s.user_id, s.category, s.option_id, u.name
+               FROM stars s JOIN users u ON u.id = s.user_id WHERE s.trip_id = ?""", (trip_id,)),
+            ("SELECT user_id, category, status FROM category_progress WHERE trip_id = ?", (trip_id,)),
+            ("SELECT data FROM questionnaires WHERE trip_id = ? AND user_id = ?", (trip_id, user["id"])),
+        ])
+        my_q_row = my_q_rows[0] if my_q_rows else None
 
     star_counts = Counter(s["option_id"] for s in stars)
     star_names: dict[str, list] = {}
@@ -538,9 +550,8 @@ def read_stay_media(trip_id: str, user: dict = Depends(get_current_user)):
     Fetched from LiteAPI (real hotels) or Google Places (AI stays) on the
     first request, then cached on the trip — stay options never change once
     the board is generated, so the cache never goes stale."""
-    with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+    with get_conn(readonly=True) as conn:
+        trip = _member_trip(conn, trip_id, user["id"])
         if trip["stay_media"] is not None:
             return {"media": json.loads(trip["stay_media"])}
         if not trip["options"]:
@@ -568,8 +579,7 @@ def toggle_star(trip_id: str, req: StarRequest, user: dict = Depends(get_current
     if req.category not in CATEGORIES:
         raise HTTPException(status_code=400, detail="Unknown category.")
     with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+        trip = _member_trip(conn, trip_id, user["id"])
         if not trip["options"]:
             raise HTTPException(status_code=400, detail="The planning board isn't open yet.")
         if trip["final_plan"]:
@@ -608,8 +618,7 @@ def set_curation(trip_id: str, req: CurationRequest, user: dict = Depends(get_cu
     if req.status not in ("done", "no_preference", "reset"):
         raise HTTPException(status_code=400, detail="Status must be done, no_preference or reset.")
     with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+        trip = _member_trip(conn, trip_id, user["id"])
         if not trip["options"]:
             raise HTTPException(status_code=400, detail="The planning board isn't open yet.")
         if trip["final_plan"]:
@@ -654,15 +663,12 @@ def set_curation(trip_id: str, req: CurationRequest, user: dict = Depends(get_cu
 # ---------------------------------------------------------------------------
 
 def _build_tallies(conn, trip_id: str, options: dict) -> dict:
-    stars = conn.execute(
-        "SELECT user_id, category, option_id FROM stars WHERE trip_id = ?", (trip_id,)
-    ).fetchall()
-    progress = conn.execute(
-        "SELECT user_id, category, status FROM category_progress WHERE trip_id = ?", (trip_id,)
-    ).fetchall()
-    total = conn.execute(
-        "SELECT COUNT(*) c FROM trip_members WHERE trip_id = ?", (trip_id,)
-    ).fetchone()["c"]
+    stars, progress, total_rows = fetch_many(conn, [
+        ("SELECT user_id, category, option_id FROM stars WHERE trip_id = ?", (trip_id,)),
+        ("SELECT user_id, category, status FROM category_progress WHERE trip_id = ?", (trip_id,)),
+        ("SELECT COUNT(*) c FROM trip_members WHERE trip_id = ?", (trip_id,)),
+    ])
+    total = total_rows[0]["c"]
 
     tallies = {}
     for cat in CATEGORIES:
@@ -681,8 +687,7 @@ def _build_tallies(conn, trip_id: str, options: dict) -> dict:
 @router.post("/{trip_id}/finalize")
 def finalize_plan(trip_id: str, user: dict = Depends(get_current_user)):
     with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+        trip = _member_trip(conn, trip_id, user["id"])
         if trip["final_plan"]:
             return {"plan": json.loads(trip["final_plan"])}
         if user["id"] != trip["leader_id"]:
@@ -723,20 +728,14 @@ def _member_checks(conn, trip) -> list[dict]:
     flight_by_city = plan.get("flight_cost_by_city", {})
     avg_flight = round(sum(flight_by_city.values()) / len(flight_by_city)) if flight_by_city else 0
 
-    members = conn.execute(
-        """SELECT u.id, u.name, u.email FROM trip_members t JOIN users u ON u.id = t.user_id
-           WHERE t.trip_id = ? ORDER BY t.joined_at""",
-        (trip["id"],),
-    ).fetchall()
-    q_rows = conn.execute(
-        "SELECT user_id, data FROM questionnaires WHERE trip_id = ?", (trip["id"],)
-    ).fetchall()
+    members, q_rows, pay_rows = fetch_many(conn, [
+        ("""SELECT u.id, u.name, u.email FROM trip_members t JOIN users u ON u.id = t.user_id
+           WHERE t.trip_id = ? ORDER BY t.joined_at""", (trip["id"],)),
+        ("SELECT user_id, data FROM questionnaires WHERE trip_id = ?", (trip["id"],)),
+        ("SELECT user_id, amount_cents, paid_at FROM payments WHERE trip_id = ?", (trip["id"],)),
+    ])
     city_by_user = {r["user_id"]: json.loads(r["data"]).get("departure_city", "").strip() for r in q_rows}
-    payments = {
-        r["user_id"]: r for r in conn.execute(
-            "SELECT user_id, amount_cents, paid_at FROM payments WHERE trip_id = ?", (trip["id"],)
-        )
-    }
+    payments = {r["user_id"]: r for r in pay_rows}
 
     shared_items = [
         ("stay", f"Stay — {plan.get('stay', {}).get('name', 'accommodation')} (your equal share)"),
@@ -777,9 +776,8 @@ def _member_checks(conn, trip) -> list[dict]:
 
 @router.get("/{trip_id}/plan")
 def read_plan(trip_id: str, user: dict = Depends(get_current_user)):
-    with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+    with get_conn(readonly=True) as conn:
+        trip = _member_trip(conn, trip_id, user["id"])
         plan = json.loads(trip["final_plan"]) if trip["final_plan"] else None
         checks = _member_checks(conn, trip) if plan else []
         payload = _status_payload(conn, trip, user["id"])
@@ -832,8 +830,7 @@ def _replacement_pool(trip, plan: dict) -> list[dict]:
 @router.post("/{trip_id}/approve")
 def approve_plan(trip_id: str, user: dict = Depends(get_current_user)):
     with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+        trip = _member_trip(conn, trip_id, user["id"])
         if not trip["final_plan"]:
             raise HTTPException(status_code=400, detail="There is no final plan to approve yet.")
         if trip["status"] not in ("final_review", "approved"):
@@ -855,8 +852,7 @@ def edit_plan(trip_id: str, req: EditRequest, user: dict = Depends(get_current_u
     if not req.request.strip():
         raise HTTPException(status_code=400, detail="Describe the change you'd like.")
     with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+        trip = _member_trip(conn, trip_id, user["id"])
         if not trip["final_plan"]:
             raise HTTPException(status_code=400, detail="There is no final plan to edit yet.")
         payments = conn.execute("SELECT COUNT(*) c FROM payments WHERE trip_id = ?", (trip_id,)).fetchone()["c"]
@@ -891,8 +887,7 @@ def edit_plan(trip_id: str, req: EditRequest, user: dict = Depends(get_current_u
 @router.post("/{trip_id}/reorder-days")
 def reorder_days(trip_id: str, req: ReorderRequest, user: dict = Depends(get_current_user)):
     with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+        trip = _member_trip(conn, trip_id, user["id"])
         if not trip["final_plan"]:
             raise HTTPException(status_code=400, detail="There is no final plan to edit yet.")
         payments = conn.execute("SELECT COUNT(*) c FROM payments WHERE trip_id = ?", (trip_id,)).fetchone()["c"]
@@ -960,8 +955,7 @@ def edit_slot(trip_id: str, req: SlotEditRequest, user: dict = Depends(get_curre
     if req.action not in ("delete", "replace", "move_up", "move_down"):
         raise HTTPException(status_code=400, detail="Unknown action.")
     with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+        trip = _member_trip(conn, trip_id, user["id"])
         if not trip["final_plan"]:
             raise HTTPException(status_code=400, detail="There is no final plan to edit yet.")
         payments = conn.execute("SELECT COUNT(*) c FROM payments WHERE trip_id = ?", (trip_id,)).fetchone()["c"]
@@ -1029,8 +1023,7 @@ def arrange_day_slots(trip_id: str, req: ArrangeSlotsRequest, user: dict = Depen
     if sorted(req.order) != sorted(_SLOT_ORDER):
         raise HTTPException(status_code=400, detail="Order must contain morning, afternoon and evening exactly once.")
     with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+        trip = _member_trip(conn, trip_id, user["id"])
         if not trip["final_plan"]:
             raise HTTPException(status_code=400, detail="There is no final plan to edit yet.")
         payments = conn.execute("SELECT COUNT(*) c FROM payments WHERE trip_id = ?", (trip_id,)).fetchone()["c"]
@@ -1071,9 +1064,8 @@ def arrange_day_slots(trip_id: str, req: ArrangeSlotsRequest, user: dict = Depen
 
 @router.get("/{trip_id}/check")
 def read_check(trip_id: str, user: dict = Depends(get_current_user)):
-    with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+    with get_conn(readonly=True) as conn:
+        trip = _member_trip(conn, trip_id, user["id"])
         if not trip["final_plan"]:
             raise HTTPException(status_code=400, detail="No final plan yet.")
         checks = _member_checks(conn, trip)
@@ -1102,8 +1094,7 @@ def pay_share(trip_id: str, req: PayRequest | None = None, user: dict = Depends(
         raise HTTPException(status_code=400, detail="Unknown booking mode.")
 
     with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+        trip = _member_trip(conn, trip_id, user["id"])
         if trip["status"] not in ("approved", "booked"):
             raise HTTPException(status_code=400, detail="Everyone must approve the final plan before booking opens.")
         existing = conn.execute(
@@ -1157,9 +1148,8 @@ def pay_share(trip_id: str, req: PayRequest | None = None, user: dict = Depends(
 
 @router.get("/{trip_id}/receipt")
 def read_receipt(trip_id: str, user: dict = Depends(get_current_user)):
-    with get_conn() as conn:
-        _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+    with get_conn(readonly=True) as conn:
+        _member_trip(conn, trip_id, user["id"])
         row = conn.execute(
             "SELECT receipt, email_status FROM payments WHERE trip_id = ? AND user_id = ?",
             (trip_id, user["id"]),
@@ -1175,9 +1165,8 @@ def read_receipt(trip_id: str, user: dict = Depends(get_current_user)):
 
 @router.get("/{trip_id}/itinerary")
 def read_itinerary(trip_id: str, user: dict = Depends(get_current_user)):
-    with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+    with get_conn(readonly=True) as conn:
+        trip = _member_trip(conn, trip_id, user["id"])
     return {
         "itinerary": json.loads(trip["itinerary"]) if trip["itinerary"] else None,
         "generating": bool(trip["itinerary_generating"]),
@@ -1188,8 +1177,7 @@ def read_itinerary(trip_id: str, user: dict = Depends(get_current_user)):
 @router.post("/{trip_id}/itinerary")
 def create_itinerary(trip_id: str, user: dict = Depends(get_current_user)):
     with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+        trip = _member_trip(conn, trip_id, user["id"])
         if trip["itinerary"]:
             return {"itinerary": json.loads(trip["itinerary"])}
         if user["id"] != trip["leader_id"]:
@@ -1219,9 +1207,8 @@ def create_itinerary(trip_id: str, user: dict = Depends(get_current_user)):
 
 @router.get("/{trip_id}/hub")
 def booking_hub(trip_id: str, user: dict = Depends(get_current_user)):
-    with get_conn() as conn:
-        trip = _load_trip(conn, trip_id)
-        _require_member(conn, trip_id, user["id"])
+    with get_conn(readonly=True) as conn:
+        trip = _member_trip(conn, trip_id, user["id"])
         total = conn.execute("SELECT COUNT(*) c FROM trip_members WHERE trip_id = ?", (trip_id,)).fetchone()["c"]
     if not trip["itinerary"]:
         raise HTTPException(status_code=400, detail="No itinerary yet — generate one first.")

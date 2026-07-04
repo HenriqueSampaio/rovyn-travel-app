@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 
 from backend.auth import get_current_user
-from backend.db import get_conn
+from backend.db import fetch_many, get_conn
 from backend.models import (
     CommentRequest, CopyCheckRequest, CopyTripRequest, CreatePostRequest, LikeRequest,
 )
@@ -97,36 +97,58 @@ def _post_type(media_rows: list) -> str:
     return "photo"
 
 
+def _post_payloads(conn, posts, user_id: str) -> list[dict]:
+    """Payloads for a batch of posts in ONE pipelined query batch.
+
+    The per-post version of this (5 queries × N posts) made the feed
+    unusably slow against a remote Postgres."""
+    if not posts:
+        return []
+    ids = [p["id"] for p in posts]
+    ph = ", ".join(["?"] * len(ids))
+    author_ids = list({p["user_id"] for p in posts})
+    author_ph = ", ".join(["?"] * len(author_ids))
+
+    media_rows, like_rows, my_like_rows, comment_rows, author_rows = fetch_many(conn, [
+        (f"SELECT post_id, media_type, url FROM post_media WHERE post_id IN ({ph}) ORDER BY position", ids),
+        (f"SELECT post_id, COUNT(*) c FROM post_likes WHERE post_id IN ({ph}) GROUP BY post_id", ids),
+        (f"SELECT post_id FROM post_likes WHERE user_id = ? AND post_id IN ({ph})", [user_id, *ids]),
+        (f"SELECT post_id, COUNT(*) c FROM post_comments WHERE post_id IN ({ph}) GROUP BY post_id", ids),
+        (f"SELECT id, name FROM users WHERE id IN ({author_ph})", author_ids),
+    ])
+
+    media_by: dict[str, list] = {}
+    for m in media_rows:
+        media_by.setdefault(m["post_id"], []).append(m)
+    likes_by = {r["post_id"]: r["c"] for r in like_rows}
+    liked_by_me = {r["post_id"] for r in my_like_rows}
+    comments_by = {r["post_id"]: r["c"] for r in comment_rows}
+    name_by = {r["id"]: r["name"] for r in author_rows}
+
+    payloads = []
+    for post in posts:
+        media = media_by.get(post["id"], [])
+        payloads.append({
+            "id": post["id"],
+            "author_id": post["user_id"],
+            "author_name": name_by.get(post["user_id"], "Traveler"),
+            "is_mine": post["user_id"] == user_id,
+            "caption": post["caption"],
+            "destination": post["destination"],
+            "vibes": json.loads(post["vibes"]),
+            "has_trip": post["trip_snapshot"] is not None,
+            "post_type": _post_type(media),
+            "media": [{"media_type": m["media_type"], "url": m["url"]} for m in media],
+            "like_count": likes_by.get(post["id"], 0),
+            "liked_by_me": post["id"] in liked_by_me,
+            "comment_count": comments_by.get(post["id"], 0),
+            "created_at": post["created_at"],
+        })
+    return payloads
+
+
 def _post_payload(conn, post, user_id: str) -> dict:
-    media = conn.execute(
-        "SELECT media_type, url FROM post_media WHERE post_id = ? ORDER BY position", (post["id"],)
-    ).fetchall()
-    likes = conn.execute(
-        "SELECT COUNT(*) c FROM post_likes WHERE post_id = ?", (post["id"],)
-    ).fetchone()["c"]
-    liked = conn.execute(
-        "SELECT 1 FROM post_likes WHERE post_id = ? AND user_id = ?", (post["id"], user_id)
-    ).fetchone() is not None
-    comments = conn.execute(
-        "SELECT COUNT(*) c FROM post_comments WHERE post_id = ?", (post["id"],)
-    ).fetchone()["c"]
-    author = conn.execute("SELECT name FROM users WHERE id = ?", (post["user_id"],)).fetchone()
-    return {
-        "id": post["id"],
-        "author_id": post["user_id"],
-        "author_name": author["name"] if author else "Traveler",
-        "is_mine": post["user_id"] == user_id,
-        "caption": post["caption"],
-        "destination": post["destination"],
-        "vibes": json.loads(post["vibes"]),
-        "has_trip": post["trip_snapshot"] is not None,
-        "post_type": _post_type(media),
-        "media": [{"media_type": m["media_type"], "url": m["url"]} for m in media],
-        "like_count": likes,
-        "liked_by_me": liked,
-        "comment_count": comments,
-        "created_at": post["created_at"],
-    }
+    return _post_payloads(conn, [post], user_id)[0]
 
 
 @router.post("/posts")
@@ -168,7 +190,7 @@ def create_post(req: CreatePostRequest, user: dict = Depends(get_current_user)):
 
 @router.get("/posts/{post_id}")
 def read_post(post_id: str, user: dict = Depends(get_current_user)):
-    with get_conn() as conn:
+    with get_conn(readonly=True) as conn:
         post = conn.execute("SELECT * FROM posts WHERE id = ?", (post_id,)).fetchone()
         if post is None:
             raise HTTPException(status_code=404, detail="Post not found.")
@@ -200,18 +222,16 @@ def delete_post(post_id: str, user: dict = Depends(get_current_user)):
 # Feed — everything is public; ranking is tailored to the viewer's vibes
 # ---------------------------------------------------------------------------
 
-def _viewer_vibe_profile(conn, user_id: str) -> Counter:
-    rows = conn.execute("SELECT data FROM questionnaires WHERE user_id = ?", (user_id,)).fetchall()
-    return Counter(v for r in rows for v in json.loads(r["data"]).get("vibes", []))
-
-
 @router.get("/feed")
 def feed(limit: int = 20, offset: int = 0, user: dict = Depends(get_current_user)):
     limit = max(1, min(limit, 50))
-    with get_conn() as conn:
-        profile = _viewer_vibe_profile(conn, user["id"])
-        posts = conn.execute("SELECT * FROM posts ORDER BY created_at DESC").fetchall()
-        payloads = [_post_payload(conn, p, user["id"]) for p in posts]
+    with get_conn(readonly=True) as conn:
+        profile_rows, posts = fetch_many(conn, [
+            ("SELECT data FROM questionnaires WHERE user_id = ?", (user["id"],)),
+            ("SELECT * FROM posts ORDER BY created_at DESC", ()),
+        ])
+        profile = Counter(v for r in profile_rows for v in json.loads(r["data"]).get("vibes", []))
+        payloads = _post_payloads(conn, posts, user["id"])
 
     now = datetime.now(timezone.utc)
 
@@ -268,7 +288,7 @@ def like_post(post_id: str, req: LikeRequest, user: dict = Depends(get_current_u
 
 @router.get("/posts/{post_id}/comments")
 def read_comments(post_id: str, user: dict = Depends(get_current_user)):
-    with get_conn() as conn:
+    with get_conn(readonly=True) as conn:
         _require_post(conn, post_id)
         rows = conn.execute(
             """SELECT c.id, c.user_id, c.text, c.created_at, u.name
@@ -349,7 +369,7 @@ def _require_shared_trip(post) -> dict:
 
 @router.get("/posts/{post_id}/trip")
 def read_shared_trip(post_id: str, user: dict = Depends(get_current_user)):
-    with get_conn() as conn:
+    with get_conn(readonly=True) as conn:
         post = _require_post(conn, post_id)
         snapshot = _require_shared_trip(post)
         author = conn.execute("SELECT name FROM users WHERE id = ?", (post["user_id"],)).fetchone()

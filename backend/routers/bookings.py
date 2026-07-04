@@ -20,8 +20,9 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 
 from backend.auth import get_current_user
-from backend.db import get_conn
+from backend.db import fetch_many, get_conn
 from backend.models import BookingConfirmRequest
+from backend.routers.trips import _member_trip
 from backend.services import email_service, links
 
 router = APIRouter()
@@ -33,18 +34,6 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _load_member_trip(conn, trip_id: str, user_id: str):
-    trip = conn.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
-    if trip is None:
-        raise HTTPException(status_code=404, detail="Trip not found.")
-    member = conn.execute(
-        "SELECT 1 FROM trip_members WHERE trip_id = ? AND user_id = ?", (trip_id, user_id)
-    ).fetchone()
-    if member is None:
-        raise HTTPException(status_code=403, detail="You are not a member of this trip.")
-    return trip
-
-
 def _require_bookable(trip):
     if not trip["final_plan"]:
         raise HTTPException(status_code=400, detail="No final plan yet.")
@@ -52,25 +41,12 @@ def _require_bookable(trip):
         raise HTTPException(status_code=400, detail="The booking checklist opens once everyone approves the plan.")
 
 
-def _travelers_by_city(conn, trip_id: str) -> Counter:
-    rows = conn.execute("SELECT data FROM questionnaires WHERE trip_id = ?", (trip_id,)).fetchall()
-    return Counter(
-        json.loads(r["data"]).get("departure_city", "").strip().casefold()
-        for r in rows
-        if json.loads(r["data"]).get("departure_city", "").strip()
-    )
-
-
-def _checklist_from_plan(trip, conn) -> list[dict]:
+def _checklist_from_plan(trip, group_size: int, city_counts: Counter) -> list[dict]:
     """Deterministic checklist items derived from the CURRENT final plan."""
     plan = json.loads(trip["final_plan"])
     destination = plan.get("destination", "")
     dates = plan.get("dates", {})
     start, end = dates.get("start", ""), dates.get("end", "")
-    group_size = conn.execute(
-        "SELECT COUNT(*) c FROM trip_members WHERE trip_id = ?", (trip["id"],)
-    ).fetchone()["c"] or 1
-    city_counts = _travelers_by_city(conn, trip["id"])
 
     items = []
     for city, f in (plan.get("flights") or {}).items():
@@ -124,58 +100,65 @@ def _sync_checklist(conn, trip) -> None:
     - BOOKED rows that left the plan are kept but flagged stale — the traveler
       already holds a real reservation and must decide to cancel or keep it.
     """
-    current = {i["item_key"]: i for i in _checklist_from_plan(trip, conn)}
-    existing = {
-        r["item_key"]: r for r in conn.execute(
-            "SELECT item_key, status FROM bookings WHERE trip_id = ?", (trip["id"],)
-        )
-    }
+    count_rows, q_rows, existing_rows = fetch_many(conn, [
+        ("SELECT COUNT(*) c FROM trip_members WHERE trip_id = ?", (trip["id"],)),
+        ("SELECT data FROM questionnaires WHERE trip_id = ?", (trip["id"],)),
+        ("SELECT item_key, status FROM bookings WHERE trip_id = ?", (trip["id"],)),
+    ])
+    group_size = count_rows[0]["c"] or 1
+    city_counts = Counter(
+        json.loads(r["data"]).get("departure_city", "").strip().casefold()
+        for r in q_rows
+        if json.loads(r["data"]).get("departure_city", "").strip()
+    )
+    current = {i["item_key"]: i for i in _checklist_from_plan(trip, group_size, city_counts)}
+    existing = {r["item_key"]: r for r in existing_rows}
+
+    # Batched writes: executemany pipelines the rows in one round trip.
+    updates, inserts = [], []
     for key, item in current.items():
         if key in existing:
-            conn.execute(
-                """UPDATE bookings SET title = ?, link = ?, details = ?, scope = ?, stale = 0
-                   WHERE trip_id = ? AND item_key = ?""",
-                (item["title"], item["link"], json.dumps(item["details"]),
-                 item["scope"], trip["id"], key),
-            )
+            updates.append((item["title"], item["link"], json.dumps(item["details"]),
+                            item["scope"], trip["id"], key))
         else:
-            conn.execute(
-                """INSERT INTO bookings
-                   (trip_id, item_key, category, scope, title, provider, link, details, created_at)
-                   VALUES (?, ?, ?, ?, ?, 'self', ?, ?, ?)""",
-                (trip["id"], key, item["category"], item["scope"], item["title"],
-                 item["link"], json.dumps(item["details"]), _now()),
-            )
-    for key, row in existing.items():
-        if key not in current:
-            if row["status"] == "booked":
-                conn.execute(
-                    "UPDATE bookings SET stale = 1 WHERE trip_id = ? AND item_key = ?",
-                    (trip["id"], key),
-                )
-            else:
-                conn.execute(
-                    "DELETE FROM bookings WHERE trip_id = ? AND item_key = ?",
-                    (trip["id"], key),
-                )
+            inserts.append((trip["id"], key, item["category"], item["scope"], item["title"],
+                            item["link"], json.dumps(item["details"]), _now()))
+    gone = [key for key in existing if key not in current]
+    stale = [(trip["id"], k) for k in gone if existing[k]["status"] == "booked"]
+    drop = [(trip["id"], k) for k in gone if existing[k]["status"] != "booked"]
+
+    if updates:
+        conn.executemany(
+            """UPDATE bookings SET title = ?, link = ?, details = ?, scope = ?, stale = 0
+               WHERE trip_id = ? AND item_key = ?""",
+            updates,
+        )
+    if inserts:
+        conn.executemany(
+            """INSERT INTO bookings
+               (trip_id, item_key, category, scope, title, provider, link, details, created_at)
+               VALUES (?, ?, ?, ?, ?, 'self', ?, ?, ?)""",
+            inserts,
+        )
+    if stale:
+        conn.executemany("UPDATE bookings SET stale = 1 WHERE trip_id = ? AND item_key = ?", stale)
+    if drop:
+        conn.executemany("DELETE FROM bookings WHERE trip_id = ? AND item_key = ?", drop)
 
 
 @router.get("/{trip_id}/bookings")
 def list_bookings(trip_id: str, user: dict = Depends(get_current_user)):
     with get_conn() as conn:
-        trip = _load_member_trip(conn, trip_id, user["id"])
+        trip = _member_trip(conn, trip_id, user["id"])
         _require_bookable(trip)
         _sync_checklist(conn, trip)
-        rows = conn.execute(
-            """SELECT b.*, u.name AS booked_by_name
+        rows, my_q_rows = fetch_many(conn, [
+            ("""SELECT b.*, u.name AS booked_by_name
                FROM bookings b LEFT JOIN users u ON u.id = b.booked_by
-               WHERE b.trip_id = ? ORDER BY b.created_at, b.item_key""",
-            (trip_id,),
-        ).fetchall()
-        my_q = conn.execute(
-            "SELECT data FROM questionnaires WHERE trip_id = ? AND user_id = ?",
-            (trip_id, user["id"]),
-        ).fetchone()
+               WHERE b.trip_id = ? ORDER BY b.created_at, b.item_key""", (trip_id,)),
+            ("SELECT data FROM questionnaires WHERE trip_id = ? AND user_id = ?", (trip_id, user["id"])),
+        ])
+        my_q = my_q_rows[0] if my_q_rows else None
 
     my_city = ""
     if my_q:
@@ -213,7 +196,7 @@ def confirm_booking(trip_id: str, item_key: str, req: BookingConfirmRequest,
     if not confirmation:
         raise HTTPException(status_code=400, detail="Paste the confirmation code or reference you received.")
     with get_conn() as conn:
-        trip = _load_member_trip(conn, trip_id, user["id"])
+        trip = _member_trip(conn, trip_id, user["id"])
         _require_bookable(trip)
         row = conn.execute(
             "SELECT * FROM bookings WHERE trip_id = ? AND item_key = ?", (trip_id, item_key)
@@ -246,7 +229,7 @@ def confirm_booking(trip_id: str, item_key: str, req: BookingConfirmRequest,
 @router.post("/{trip_id}/bookings/{item_key:path}/unbook")
 def unbook(trip_id: str, item_key: str, user: dict = Depends(get_current_user)):
     with get_conn() as conn:
-        trip = _load_member_trip(conn, trip_id, user["id"])
+        trip = _member_trip(conn, trip_id, user["id"])
         _require_bookable(trip)
         row = conn.execute(
             "SELECT stale FROM bookings WHERE trip_id = ? AND item_key = ?", (trip_id, item_key)

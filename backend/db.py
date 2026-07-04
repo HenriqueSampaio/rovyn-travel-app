@@ -186,11 +186,20 @@ if IS_POSTGRES:
 
     IntegrityError = (sqlite3.IntegrityError, psycopg.IntegrityError)
 
+    # A remote Postgres (Supabase) makes every round trip expensive, so the
+    # pool keeps a few connections warm (opening one costs a full TCP+TLS+auth
+    # handshake) and TCP keepalives stop NATs/poolers from dropping idle ones.
     _pool = ConnectionPool(
         DATABASE_URL,
-        min_size=1,
+        min_size=int(os.environ.get("DB_POOL_MIN", "3")),
         max_size=int(os.environ.get("DB_POOL_SIZE", "10")),
-        kwargs={"row_factory": dict_row},
+        kwargs={
+            "row_factory": dict_row,
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 3,
+        },
         open=False,
     )
 
@@ -217,13 +226,46 @@ if IS_POSTGRES:
         def execute(self, sql, params=()):
             return self._conn.execute(_translate(sql), params)
 
+        def executemany(self, sql, seq_of_params):
+            # psycopg batches executemany through a pipeline internally,
+            # so this is one round trip instead of one per row.
+            return self._conn.executemany(_translate(sql), list(seq_of_params))
+
         def __getattr__(self, name):
             return getattr(self._conn, name)
 
     @contextmanager
-    def get_conn():
+    def get_conn(readonly: bool = False):
+        """Checkout a pooled connection.
+
+        readonly=True runs the block in autocommit: no BEGIN/COMMIT round
+        trips around SELECTs, which saves ~2 network round trips per request.
+        Only use it for blocks that never write.
+        """
         with _pool.connection() as conn:
-            yield _PgConn(conn)
+            if readonly:
+                conn.autocommit = True
+                try:
+                    yield _PgConn(conn)
+                finally:
+                    conn.autocommit = False
+            else:
+                yield _PgConn(conn)
+
+    _PIPELINE_OK = psycopg.Pipeline.is_supported()
+
+    def fetch_many(conn, queries):
+        """Run independent SELECTs and return their fetchall() lists.
+
+        The statements travel to Postgres in one libpq pipeline — one network
+        round trip instead of one per query. `queries` is [(sql, params), ...].
+        """
+        raw = conn._conn
+        if not _PIPELINE_OK:
+            return [conn.execute(sql, params).fetchall() for sql, params in queries]
+        with raw.pipeline():
+            cursors = [raw.execute(_translate(sql), tuple(params)) for sql, params in queries]
+        return [c.fetchall() for c in cursors]
 
     def _existing_columns(conn, table: str) -> set:
         rows = conn.execute(
@@ -259,13 +301,17 @@ else:
         return conn
 
     @contextmanager
-    def get_conn():
+    def get_conn(readonly: bool = False):  # readonly is a no-op for local SQLite
         conn = _raw_sqlite_conn()
         try:
             with conn:  # sqlite's own context manager: commit / rollback
                 yield conn
         finally:
             conn.close()
+
+    def fetch_many(conn, queries):
+        """SQLite is in-process — sequential execution is already free."""
+        return [conn.execute(sql, params).fetchall() for sql, params in queries]
 
     def init_db() -> None:
         conn = _raw_sqlite_conn()
