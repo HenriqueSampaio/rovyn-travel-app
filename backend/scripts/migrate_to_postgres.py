@@ -20,6 +20,9 @@ import sys
 from pathlib import Path
 
 import psycopg
+from dotenv import load_dotenv
+
+load_dotenv()  # picks up DATABASE_URL from Rovyn/.env
 
 SQLITE_PATH = Path(__file__).resolve().parent.parent / "data" / "rovyn.db"
 
