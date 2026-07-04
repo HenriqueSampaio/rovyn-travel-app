@@ -31,6 +31,15 @@ export default function Auth() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
+  // Dev deployments (ALLOW_LEGACY_AUTH on the backend) accept instant
+  // email/password accounts with no verification — ideal for test users.
+  const [cfg, setCfg] = useState(null);
+
+  useEffect(() => {
+    api.authConfig().then(setCfg).catch(() => {});
+  }, []);
+
+  const instantEmail = auth.mode !== 'supabase' || Boolean(cfg?.legacy);
 
   // A failed OAuth round-trip comes back with the reason in the URL hash.
   useEffect(() => {
@@ -55,7 +64,7 @@ export default function Auth() {
     setNotice('');
     setLoading(true);
     try {
-      if (auth.mode === 'supabase') {
+      if (auth.mode === 'supabase' && !instantEmail) {
         if (mode === 'signup') {
           if (!form.name.trim()) throw new Error('Please tell us your name.');
           const { data, error: err } = await supabase.auth.signUp({
@@ -207,6 +216,11 @@ export default function Auth() {
               {notice && (
                 <p className="serif" style={{ color: 'var(--pine)', fontSize: 15, fontStyle: 'italic', marginTop: 14 }}>
                   {notice}
+                </p>
+              )}
+              {auth.mode === 'supabase' && instantEmail && (
+                <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>
+                  Dev mode — email accounts are created instantly, no verification email.
                 </p>
               )}
 

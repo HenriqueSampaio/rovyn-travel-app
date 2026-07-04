@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 
 from backend.auth import (
-    create_session, get_current_user, hash_password, supabase_enabled, verify_password,
+    create_session, get_current_user, hash_password, legacy_auth_allowed,
+    supabase_enabled, verify_password,
 )
 from backend.db import IntegrityError, get_conn
 from backend.models import LoginRequest, SignupRequest
@@ -13,13 +14,21 @@ router = APIRouter()
 
 
 def _require_legacy_mode():
-    if supabase_enabled():
+    if not legacy_auth_allowed():
         # Passwords live in Supabase Auth on this deployment; these endpoints
-        # would mint tokens outside it, so they stay off.
+        # would mint tokens outside it, so they stay off — unless the
+        # ALLOW_LEGACY_AUTH dev flag opens them for instant test accounts.
         raise HTTPException(
             status_code=400,
             detail="This deployment signs in through Supabase — use the sign-in page.",
         )
+
+
+@router.get("/config")
+def auth_config():
+    """Which sign-in paths this deployment offers — the sign-in page reads
+    this to decide whether to show the instant (no-verification) email form."""
+    return {"supabase": supabase_enabled(), "legacy": legacy_auth_allowed()}
 
 
 @router.post("/signup")

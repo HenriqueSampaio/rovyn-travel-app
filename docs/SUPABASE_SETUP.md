@@ -112,6 +112,45 @@ Legacy passwords can't move into Supabase Auth (different hashing), but
 anyone who signs in through Supabase with the same email is automatically
 re-linked to their old trips on first request.
 
+## Dev vs production sign-in (email verification)
+
+Production (`main`, deployed) signs everyone in through Supabase Auth:
+email + password with **Confirm email** on, plus Google/Apple. That's the
+right bar for real users, but painful for testing — fake addresses can never
+receive the verification mail.
+
+For development, set in `Rovyn/.env`:
+
+```
+ALLOW_LEGACY_AUTH=1
+```
+
+This re-opens the app's built-in `/auth/signup` + `/auth/login` **alongside**
+Supabase Auth: accounts are created instantly (any email, no verification),
+and the sign-in page's email form switches to it automatically (it reads
+`GET /auth/config`), with Google/Apple buttons still working. The backend
+accepts both token kinds at once.
+
+The switch lives in the environment, not in the branch — dev and main run
+the same code, and a production deployment simply doesn't set the flag, so
+only verified Supabase sign-ins exist there. Accounts created this way are
+plain rows in `users`; if that person later signs in through Supabase with
+the same email, their data is re-keyed to the Supabase identity
+automatically.
+
+## Performance: put the database near you
+
+Every SQL statement travels to the Supabase region, so **round-trip time is
+the whole ballgame**: from Brazil to a `us-west-2` project each query costs
+~210 ms before the database does any work. Pick the region closest to you
+(and your users) when creating the project — e.g. `sa-east-1` (São Paulo)
+from Brazil — for ~10–30 ms round trips. A project's region can't be changed
+later; to move, create a new project in the right region, update
+`DATABASE_URL`/`SUPABASE_URL`/keys, and re-run the migration script (it's
+idempotent). The backend also keeps warm pooled connections, batches queries
+into pipelines, and caches token lookups, but physics still wins — keep the
+database close.
+
 ## Notes
 
 - **The anon key is public by design** — it only talks to Supabase Auth.

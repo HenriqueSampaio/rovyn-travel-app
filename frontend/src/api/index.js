@@ -26,7 +26,9 @@ if (supabase) {
 }
 
 function token() {
-  return supabase ? sbSession?.access_token : localStorage.getItem('rovyn_token');
+  // Supabase session first; otherwise a legacy token (the backend accepts
+  // both kinds concurrently — dev deployments allow instant legacy accounts).
+  return (supabase && sbSession?.access_token) || localStorage.getItem('rovyn_token');
 }
 
 async function req(path, options = {}) {
@@ -51,14 +53,14 @@ export const auth = {
     listeners.add(fn);
     return () => listeners.delete(fn);
   },
-  save({ token: t, user }) { // legacy mode only
+  save({ token: t, user }) { // legacy accounts only
     localStorage.setItem('rovyn_token', t);
     localStorage.setItem('rovyn_user', JSON.stringify(user));
+    notify();
   },
   user() {
-    if (supabase) {
-      const u = sbSession?.user;
-      if (!u) return null;
+    if (supabase && sbSession?.user) {
+      const u = sbSession.user;
       const meta = u.user_metadata || {};
       const name = (meta.full_name || meta.name || '').trim()
         || (u.email || '').split('@')[0] || 'Traveler';
@@ -66,7 +68,7 @@ export const auth = {
     }
     try { return JSON.parse(localStorage.getItem('rovyn_user')); } catch { return null; }
   },
-  isSignedIn() { return supabase ? Boolean(sbSession) : Boolean(token()); },
+  isSignedIn() { return Boolean(token()); },
   clear() {
     if (supabase) supabase.auth.signOut().catch(() => {});
     localStorage.removeItem('rovyn_token');
@@ -75,6 +77,7 @@ export const auth = {
 };
 
 export const api = {
+  authConfig: () => req('/auth/config'),
   signup: (email, password, name) =>
     req('/auth/signup', { method: 'POST', body: JSON.stringify({ email, password, name }) }),
   login: (email, password) =>
