@@ -2,22 +2,25 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion, Reorder, useDragControls } from 'framer-motion';
 import {
-  BedDouble, CalendarDays, Check, CheckCircle2, ClipboardCheck, Compass,
+  BedDouble, Bus, CalendarDays, Check, CheckCircle2, ClipboardCheck, Compass,
   CreditCard, ExternalLink, Globe, GripVertical, Landmark, Lightbulb, Loader2,
   Lock, Mail, MoonStar, PartyPopper, Pencil, PlaneTakeoff, Receipt, Scale,
-  Send, Star, Sun, Sunset, Ticket, Undo2, Users, Wallet, X,
+  Send, Ship, Star, Sun, Sunset, Ticket, TrainFront, Undo2, Users, Wallet, X,
 } from 'lucide-react';
 import { api, auth } from '../api/index.js';
-import { Page, Loading, ErrorText, JourneyTracker, Hero, Thumb, ThinkingLoader } from '../ui.jsx';
+import { Page, Loading, ErrorText, JourneyTracker, Hero, RouteTimeline, Thumb, ThinkingLoader } from '../ui.jsx';
 
 const COST_LABELS = {
   stay: 'Accommodation (your share)',
+  intercity_transport: 'Trains & flights between cities',
   itinerary_activities: 'Itinerary activities',
   visits: 'Starred visits & sights',
   events: 'Starred events',
   meals_estimate: 'Meals (estimate)',
   transport_estimate: 'Local transport (estimate)',
 };
+
+const MODE_ICONS = { train: TrainFront, flight: PlaneTakeoff, bus: Bus, ferry: Ship };
 
 const TABS = [
   { key: 'overview', label: 'Overview', Icon: Compass },
@@ -41,6 +44,8 @@ function sellerLabel(link) {
 const BOOKING_GROUPS = [
   { category: 'flight', label: 'Flights', Icon: PlaneTakeoff,
     hint: 'Each departure city books its own flight — anyone from that city can record it for the group.' },
+  { category: 'transport', label: 'Between cities', Icon: TrainFront,
+    hint: 'The group\'s chosen way to make each leg of the route — one booking covers everyone.' },
   { category: 'stay', label: 'Stay', Icon: BedDouble,
     hint: 'One booking for the whole group — usually made by one person.' },
   { category: 'visit', label: 'Visits', Icon: Landmark, hint: '' },
@@ -274,20 +279,45 @@ function DraggableDay({ day, onDragStart, onDragEnd, children }) {
   );
 }
 
+function fmtShort(iso) {
+  if (!iso) return '';
+  const d = new Date(`${iso}T00:00:00`);
+  return isNaN(d) ? iso : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function CityBand({ city, days }) {
+  const first = days[0];
+  const last = days[days.length - 1];
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap',
+      margin: '36px 0 2px', paddingBottom: 8, borderBottom: '2px solid var(--pine)',
+    }}>
+      <span className="serif" style={{ fontSize: 23, fontStyle: 'italic', color: 'var(--pine)' }}>
+        {city}
+      </span>
+      <span className="muted" style={{ fontSize: 12.5, fontWeight: 600 }}>
+        Day{days.length > 1 ? `s ${first.day}–${last.day}` : ` ${first.day}`}
+        {first.date ? ` · ${fmtShort(first.date)} → ${fmtShort(last.date)}` : ''}
+      </span>
+    </div>
+  );
+}
+
 function ItineraryDays({ plan, editable, busy, slotLocks, commitDays, commitSlots, deleteSlot }) {
   const days = plan.itinerary?.days || [];
-  const sig = JSON.stringify(days.map(d => [d.day, d.date, d.morning, d.afternoon, d.evening]));
-  const [middleIds, setMiddleIds] = useState(() => days.slice(1, -1).map(d => d.day));
+  const sig = JSON.stringify(days.map(d => [d.day, d.date, d.city, d.morning, d.afternoon, d.evening]));
+  const [runOrders, setRunOrders] = useState({});
   const [slotOrders, setSlotOrders] = useState({});
   const draggingRef = useRef(false);
-  const middleRef = useRef(middleIds);
-  middleRef.current = middleIds;
+  const runOrdersRef = useRef(runOrders);
+  runOrdersRef.current = runOrders;
   const slotOrdersRef = useRef(slotOrders);
   slotOrdersRef.current = slotOrders;
 
   useEffect(() => {
     if (!draggingRef.current) {
-      setMiddleIds(days.slice(1, -1).map(d => d.day));
+      setRunOrders({});
       setSlotOrders({});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -296,16 +326,43 @@ function ItineraryDays({ plan, editable, busy, slotLocks, commitDays, commitSlot
   if (days.length === 0) return null;
 
   const byId = Object.fromEntries(days.map(d => [d.day, d]));
-  const first = days[0];
-  const last = days.length > 1 ? days[days.length - 1] : null;
-  const canDragDays = editable && days.length >= 3;
   const locksFor = d => slotLocks?.[String(d.day)] || {};
+  const dayLocked = d => SLOT_KEYS.some(k => locksFor(d)[k]);
+  const multiCity = new Set(days.map(d => d.city).filter(Boolean)).size > 1;
+
+  // Days can be dragged only within their own city's stretch of the trip, and
+  // days that hold a fixed travel moment (arrival, transfer, departure) are
+  // pinned. Segments group the days by city; inside each, contiguous movable
+  // days form a drag run.
+  const isPinned = (d, idx) => idx === 0 || idx === days.length - 1 || dayLocked(d) || !editable;
+  const segments = [];
+  days.forEach((d, idx) => {
+    const cityKey = d.city || '';
+    let seg = segments[segments.length - 1];
+    if (!seg || seg.city !== cityKey) {
+      seg = { city: cityKey, days: [], items: [] };
+      segments.push(seg);
+    }
+    seg.days.push(d);
+    if (isPinned(d, idx)) {
+      seg.items.push({ kind: 'pinned', day: d });
+    } else {
+      let run = seg.items[seg.items.length - 1];
+      if (!run || run.kind !== 'run') {
+        run = { kind: 'run', key: `run-${segments.length}-${seg.items.length}`, ids: [] };
+        seg.items.push(run);
+      }
+      run.ids.push(d.day);
+    }
+  });
 
   const onDragStart = () => { draggingRef.current = true; };
 
   function daysDragEnd() {
     draggingRef.current = false;
-    const order = [first.day, ...middleRef.current, ...(last ? [last.day] : [])];
+    const order = segments.flatMap(seg => seg.items.flatMap(item =>
+      item.kind === 'pinned' ? [item.day.day] : (runOrdersRef.current[item.key] || item.ids)
+    ));
     if (JSON.stringify(order) !== JSON.stringify(days.map(d => d.day))) commitDays(order);
   }
 
@@ -323,13 +380,16 @@ function ItineraryDays({ plan, editable, busy, slotLocks, commitDays, commitSlot
     commitSlots(dayNum, order);
   }
 
+  const dayTag = d => {
+    if (d.day === days[0].day) return 'arrival';
+    if (days.length > 1 && d.day === days[days.length - 1].day) return 'departure';
+    if (dayLocked(d)) return 'travel day';
+    return null;
+  };
+
   const renderBody = (d, dragHandle) => (
     <>
-      <DayLabel
-        day={d}
-        handle={dragHandle}
-        tag={d.day === first.day ? 'arrival' : last && d.day === last.day ? 'departure' : null}
-      />
+      <DayLabel day={d} handle={dragHandle} tag={dayTag(d)} />
       <DayBody
         day={d} editable={editable} busy={busy} locks={locksFor(d)}
         slotOrder={slotOrders[d.day] || SLOT_KEYS}
@@ -343,24 +403,31 @@ function ItineraryDays({ plan, editable, busy, slotLocks, commitDays, commitSlot
 
   return (
     <div>
-      {/* Arrival day — pinned */}
-      <div className="day-row" style={DAY_ROW_STYLE}>{renderBody(first, null)}</div>
-
-      {/* Middle days — drag by the grip to reorder */}
-      {canDragDays ? (
-        <Reorder.Group as="div" axis="y" values={middleIds} onReorder={setMiddleIds} style={{ margin: 0, padding: 0 }}>
-          {middleIds.map(id => byId[id] && (
-            <DraggableDay key={id} day={byId[id]} onDragStart={onDragStart} onDragEnd={daysDragEnd}>
-              {handle => renderBody(byId[id], handle)}
-            </DraggableDay>
-          ))}
-        </Reorder.Group>
-      ) : (
-        days.slice(1, -1).map(d => <div key={d.day} className="day-row" style={DAY_ROW_STYLE}>{renderBody(d, null)}</div>)
-      )}
-
-      {/* Departure day — pinned */}
-      {last && <div className="day-row" style={DAY_ROW_STYLE}>{renderBody(last, null)}</div>}
+      {segments.map((seg, si) => (
+        <div key={`${seg.city}-${si}`}>
+          {multiCity && seg.city && <CityBand city={seg.city} days={seg.days} />}
+          {seg.items.map(item =>
+            item.kind === 'pinned' ? (
+              <div key={item.day.day} className="day-row" style={DAY_ROW_STYLE}>
+                {renderBody(item.day, null)}
+              </div>
+            ) : (
+              <Reorder.Group
+                key={item.key} as="div" axis="y"
+                values={runOrders[item.key] || item.ids}
+                onReorder={ids => setRunOrders(s => ({ ...s, [item.key]: ids }))}
+                style={{ margin: 0, padding: 0 }}
+              >
+                {(runOrders[item.key] || item.ids).map(id => byId[id] && (
+                  <DraggableDay key={id} day={byId[id]} onDragStart={onDragStart} onDragEnd={daysDragEnd}>
+                    {handle => renderBody(byId[id], handle)}
+                  </DraggableDay>
+                ))}
+              </Reorder.Group>
+            )
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -681,13 +748,20 @@ export default function FinalPlan() {
   function Itinerary() {
     return (
       <Section eyebrow={`Day by day — “${plan.itinerary?.title || 'the plan'}”`} Icon={Sun}>
+        {plan.route && (
+          <div style={{ margin: '4px 0 22px' }}>
+            <RouteTimeline route={plan.route} />
+          </div>
+        )}
         {editable && (
           <p className="muted" style={{ fontSize: 13.5, marginBottom: 8, fontStyle: 'italic' }}>
             This itinerary is yours to shape: drag whole days by their grip to reorder them, drag
             activities within a day to reshuffle the schedule, or remove one with ✕ (Rovyn will
             offer replacements). Moments marked <Lock size={11} style={{ verticalAlign: -1 }} /> —
-            arrival, check-in, check-out, departure — are pinned to the calendar and stay put.
-            Any change asks the group to re-approve.
+            arrival, check-in, check-out, departure{plan.route ? ', travel between cities' : ''} — are
+            pinned to the calendar and stay put.
+            {plan.route ? ' Days trade places only within their own city.' : ''}
+            {' '}Any change asks the group to re-approve.
           </p>
         )}
         <ItineraryDays
@@ -703,15 +777,24 @@ export default function FinalPlan() {
     );
   }
   function Travel() {
+    const routeCities = plan.route?.cities || [];
+    const stayCity = s => (s.city || '').split(',')[0].trim();
+    const cityWindow = s => {
+      const seg = routeCities.find(c => c.town === stayCity(s));
+      return seg ? `${seg.nights} night${seg.nights === 1 ? '' : 's'}${seg.start ? ` · ${fmtShort(seg.start)} → ${fmtShort(seg.end)}` : ''}` : '';
+    };
     return (
       <>
         {Object.keys(plan.flights || {}).length > 0 && (
-          <Section eyebrow="Flights — one per departure city" Icon={PlaneTakeoff}>
+          <Section eyebrow="Flights — round trip, one per departure city" Icon={PlaneTakeoff}>
             {Object.entries(plan.flights).map(([city, f]) => (
               <div key={city} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 16, padding: '13px 0', borderTop: '1px solid var(--line-soft)', flexWrap: 'wrap' }}>
                 <div>
                   <p style={{ fontWeight: 700, fontSize: 15 }}>From {city} — {f.airline}</p>
-                  <p className="muted" style={{ fontSize: 13.5 }}>{f.route} · out {f.depart} · back {f.return}</p>
+                  <p className="muted" style={{ fontSize: 13.5 }}>
+                    {f.route} · out {f.depart}
+                    {f.return_route ? <><br />{f.return_route} · back {f.return}</> : <> · back {f.return}</>}
+                  </p>
                 </div>
                 <span className="serif" style={{ fontSize: 22, color: 'var(--pine)' }}>${f.est_price_per_person}</span>
               </div>
@@ -719,9 +802,72 @@ export default function FinalPlan() {
           </Section>
         )}
 
+        {(plan.transport || []).length > 0 && (
+          <Section eyebrow="Between cities — the group travels together" Icon={TrainFront}>
+            {plan.transport.map(t => {
+              const ModeIcon = MODE_ICONS[(t.mode || '').toLowerCase()] || TrainFront;
+              return (
+                <div key={t.leg} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 16, padding: '13px 0', borderTop: '1px solid var(--line-soft)', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                    <ModeIcon size={17} strokeWidth={1.8} color="var(--pine)" style={{ marginTop: 2, flexShrink: 0 }} />
+                    <div>
+                      <p style={{ fontWeight: 700, fontSize: 15 }}>{t.leg}</p>
+                      <p className="muted" style={{ fontSize: 13.5, textTransform: 'capitalize' }}>
+                        {[t.mode, t.carrier].filter(Boolean).join(' · ')}
+                        {t.date ? ` · ${fmtShort(t.date)}` : ''}{t.depart ? ` · dep ${t.depart}` : ''}{t.duration ? ` · ${t.duration}` : ''}
+                      </p>
+                      {t.link && (
+                        <a className="btn-quiet" href={t.link} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>
+                          <ExternalLink size={12} /> compare on Rome2Rio
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                  <span className="serif" style={{ fontSize: 22, color: 'var(--pine)' }}>${t.est_price_per_person}</span>
+                </div>
+              );
+            })}
+          </Section>
+        )}
+
+        {(plan.stays || []).length > 0 && (
+          <Section eyebrow="Where you'll rest — city by city" Icon={BedDouble}>
+            {plan.stays.map(s => (
+              <div key={`${s.city}-${s.name}`} style={{ padding: '16px 0', borderTop: '1px solid var(--line-soft)' }}>
+                <p className="eyebrow" style={{ fontSize: 10.5, marginBottom: 8 }}>
+                  {stayCity(s)}{cityWindow(s) ? ` · ${cityWindow(s)}` : ''}
+                </p>
+                <Hero image={s.image} height={240} style={{ marginBottom: 12 }} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 16 }}>
+                  <div>
+                    <h2 style={{ fontSize: 21, marginBottom: 3 }}>{s.name}</h2>
+                    <p className="muted" style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {s.type}{s.area ? ` · ${s.area}` : ''}
+                      {s.rating ? <><Star size={12} fill="var(--clay)" color="var(--clay)" /> {s.rating}</> : null}
+                    </p>
+                    {(s.amenities || []).length > 0 && (
+                      <p className="muted" style={{ fontSize: 13, marginTop: 4 }}>{s.amenities.join(' · ')}</p>
+                    )}
+                    {s.official_website && (
+                      <a className="btn-quiet" href={s.official_website} target="_blank" rel="noreferrer"
+                         style={{ marginTop: 6, fontSize: 13 }}>
+                        <Globe size={12} /> Official website
+                      </a>
+                    )}
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div className="serif" style={{ fontSize: 23, color: 'var(--pine)' }}>${s.price_per_night}<span style={{ fontSize: 13 }}> / night</span></div>
+                    <div className="muted" style={{ fontSize: 12.5 }}>≈ ${s.total_per_person} per person for this city</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </Section>
+        )}
+
         {plan.stay?.name && (
           <Section eyebrow="Where you'll rest" Icon={BedDouble}>
-            <Hero image={plan.stay.image} height={180} style={{ marginBottom: 16 }} />
+            <Hero image={plan.stay.image} height={260} style={{ marginBottom: 16 }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 16 }}>
               <div>
                 <h2 style={{ fontSize: 24, marginBottom: 4 }}>{plan.stay.name}</h2>
@@ -753,7 +899,14 @@ export default function FinalPlan() {
               <div key={v.id || v.name} style={{ display: 'flex', gap: 14, padding: '11px 0', borderTop: '1px solid var(--line-soft)', alignItems: 'flex-start' }}>
                 <Thumb image={v.image} size={54} />
                 <div style={{ flex: 1 }}>
-                  <p style={{ fontWeight: 600, fontSize: 14.5 }}>{v.name}</p>
+                  <p style={{ fontWeight: 600, fontSize: 14.5 }}>
+                    {v.name}
+                    {plan.route && v.city && (
+                      <span className="muted" style={{ fontWeight: 600, fontSize: 12, marginLeft: 8 }}>
+                        · {(v.city || '').split(',')[0]}
+                      </span>
+                    )}
+                  </p>
                   <p className="muted" style={{ fontSize: 13 }}>{v.description}</p>
                 </div>
                 <span className="muted" style={{ fontSize: 13.5, whiteSpace: 'nowrap' }}>{v.cost_per_person > 0 ? `$${v.cost_per_person} pp` : 'free'}</span>
@@ -768,7 +921,14 @@ export default function FinalPlan() {
               <div key={e.id || e.name} style={{ display: 'flex', gap: 14, padding: '11px 0', borderTop: '1px solid var(--line-soft)', alignItems: 'flex-start' }}>
                 <Thumb image={e.image} size={54} />
                 <div style={{ flex: 1 }}>
-                  <p style={{ fontWeight: 600, fontSize: 14.5 }}>{e.name}</p>
+                  <p style={{ fontWeight: 600, fontSize: 14.5 }}>
+                    {e.name}
+                    {plan.route && e.city && (
+                      <span className="muted" style={{ fontWeight: 600, fontSize: 12, marginLeft: 8 }}>
+                        · {(e.city || '').split(',')[0]}
+                      </span>
+                    )}
+                  </p>
                   <p className="muted" style={{ fontSize: 13 }}>{e.description}{e.date_hint ? ` — ${e.date_hint}` : ''}</p>
                 </div>
                 <span className="muted" style={{ fontSize: 13.5, whiteSpace: 'nowrap' }}>{e.cost_per_person > 0 ? `$${e.cost_per_person} pp` : 'free'}</span>
@@ -913,6 +1073,8 @@ export default function FinalPlan() {
       )}
 
       <Hero image={plan.image} height={210} style={{ marginTop: 18 }} />
+
+      {plan.route && <RouteTimeline route={plan.route} style={{ marginTop: 22 }} />}
 
       <JourneyTracker status={status} style={{ marginTop: 26, marginBottom: 0 }} />
 
