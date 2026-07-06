@@ -1,13 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, ArrowRight, Backpack, Building2, Check, Coffee, Gauge, Home, Hotel,
-  Landmark, Mountain, Music, Palmtree, PlaneTakeoff, ShoppingBag, Shuffle,
-  TrainFront, TreePine, UtensilsCrossed, Waves, Flower2, Zap,
+  Landmark, MapPin, Mountain, Music, Palmtree, PlaneLanding, PlaneTakeoff, Plus,
+  ShoppingBag, Shuffle, Star, TrainFront, TreePine, UtensilsCrossed, Waves, Flower2, X, Zap,
 } from 'lucide-react';
 import { api } from '../api/index.js';
-import { Page, Field, ErrorText, CityInput } from '../ui.jsx';
+import { Page, Field, ErrorText, CityInput, ThinkingLoader } from '../ui.jsx';
 
 const VIBES = [
   { id: 'culture', label: 'Culture & history', Icon: Landmark },
@@ -192,10 +192,13 @@ export default function Questionnaire() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [dateVotes, setDateVotes] = useState(null);
+  const [cityIdeas, setCityIdeas] = useState(null); // suggestions + group picks for the multi-city panel
+  const [cityQuery, setCityQuery] = useState('');
+  const ideasRequested = useRef(false);
   const [form, setForm] = useState({
-    dateStart: '', dateEnd: '', departureCity: '',
+    dateStart: '', dateEnd: '', departureCity: '', returnElsewhere: false, returnCity: '',
     budgetMin: 500, budgetMax: 2000,
-    tripStyle: '', vibes: [], accommodation: '', pace: '', specialRequirements: '',
+    tripStyle: '', multiCityPicks: [], vibes: [], accommodation: '', pace: '', specialRequirements: '',
   });
 
   useEffect(() => {
@@ -203,6 +206,32 @@ export default function Questionnaire() {
       .then(setDateVotes)
       .catch(() => setDateVotes({ counts: {}, names: {}, submitted: 0, total_members: 0 }));
   }, [tripId]);
+
+  // Nearby-city ideas load the first time multi-city is chosen (the backend
+  // caches the AI suggestions on the trip, so this is cheap after the first ask)
+  useEffect(() => {
+    if (form.tripStyle !== 'multi-city' || ideasRequested.current) return;
+    ideasRequested.current = true;
+    api.cityIdeas(tripId)
+      .then(setCityIdeas)
+      .catch(() => setCityIdeas({ anchor: '', suggestions: [], group_picks: [] }));
+  }, [form.tripStyle, tripId]);
+
+  const sameTown = (a, b) =>
+    (a || '').split(',')[0].trim().toLowerCase() === (b || '').split(',')[0].trim().toLowerCase();
+
+  function addCityPick(label) {
+    const city = (label || '').trim();
+    if (!city) return;
+    setForm(f => sameTown(city, f.departureCity) || f.multiCityPicks.some(p => sameTown(p, city))
+      ? f
+      : { ...f, multiCityPicks: [...f.multiCityPicks, city] });
+    setCityQuery('');
+  }
+
+  function removeCityPick(city) {
+    setForm(f => ({ ...f, multiCityPicks: f.multiCityPicks.filter(p => p !== city) }));
+  }
 
   // Tap a calendar day: first tap opens your window, second closes it,
   // tapping earlier than the start restarts.
@@ -253,7 +282,9 @@ export default function Questionnaire() {
         travel_dates_start: form.dateStart,
         travel_dates_end: form.dateEnd,
         departure_city: form.departureCity.trim(),
+        return_city: form.returnElsewhere ? form.returnCity.trim() : '',
         trip_style: form.tripStyle || 'no-preference',
+        multi_city_picks: form.tripStyle === 'multi-city' ? form.multiCityPicks : [],
         vibes: form.vibes,
         accommodation_type: form.accommodation,
         pace: form.pace || 'moderately',
@@ -301,11 +332,39 @@ export default function Questionnaire() {
     2: (
       <>
         <h1 style={{ fontSize: 36, marginBottom: 10 }}>Where do you fly from?</h1>
-        <p className="muted" style={{ marginBottom: 40 }}>We'll link you straight to flight searches from home.</p>
+        <p className="muted" style={{ marginBottom: 40 }}>
+          Rovyn plans your whole round trip — out from home and back again.
+        </p>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <PlaneTakeoff size={22} strokeWidth={1.6} color="var(--pine)" />
           <CityInput placeholder="New York, United States" value={form.departureCity}
                      onChange={v => setForm(f => ({ ...f, departureCity: v }))} />
+        </div>
+        <div style={{ marginTop: 34 }}>
+          {form.returnElsewhere ? (
+            <>
+              <p className="eyebrow" style={{ fontSize: 11, marginBottom: 6 }}>And fly back to</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <PlaneLanding size={22} strokeWidth={1.6} color="var(--clay)" />
+                <CityInput placeholder="Where your return flight lands" value={form.returnCity}
+                           onChange={v => setForm(f => ({ ...f, returnCity: v }))} />
+                <button className="btn-quiet" title="Never mind — return home"
+                        onClick={() => setForm(f => ({ ...f, returnElsewhere: false, returnCity: '' }))}>
+                  <X size={14} />
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="muted" style={{ fontSize: 13.5 }}>
+                Your round trip ends where it starts{form.departureCity.trim() ? ` — back to ${form.departureCity.trim()}` : ''}.
+              </p>
+              <button className="btn-quiet" style={{ marginTop: 6 }}
+                      onClick={() => setForm(f => ({ ...f, returnElsewhere: true }))}>
+                <PlaneLanding size={14} /> I'm flying back somewhere else
+              </button>
+            </>
+          )}
         </div>
       </>
     ),
@@ -328,6 +387,123 @@ export default function Questionnaire() {
                      title={t.label} desc={t.desc}
                      onClick={() => setForm(f => ({ ...f, tripStyle: t.id }))} />
         ))}
+        <AnimatePresence initial={false}>
+          {form.tripStyle === 'multi-city' && (
+            <motion.div
+              key="multi-city-picker"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.3 }}
+              style={{ overflow: 'hidden' }}
+            >
+              <div style={{ paddingTop: 26 }}>
+                <p className="eyebrow" style={{ fontSize: 11, marginBottom: 4 }}>Cities on your wishlist</p>
+                <p className="muted" style={{ fontSize: 13.5, marginBottom: 14, maxWidth: 520 }}>
+                  Add the places you'd love the route to include — optional. Rovyn weighs the whole
+                  group's picks when it draws the route, the travel legs and the stays.
+                </p>
+
+                {form.multiCityPicks.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
+                    {form.multiCityPicks.map(c => (
+                      <button key={c} type="button" className="ext-link" onClick={() => removeCityPick(c)}
+                              title="Remove" style={{ padding: '7px 14px', fontSize: 13.5 }}>
+                        <MapPin size={12} /> {c} <X size={12} />
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 22 }}>
+                  <Plus size={18} strokeWidth={2} color="var(--pine)" />
+                  <CityInput placeholder="Add a city — start typing…" value={cityQuery}
+                             onChange={setCityQuery}
+                             onPick={s => addCityPick(s.label)}
+                             onCommit={addCityPick} />
+                </div>
+
+                {cityIdeas === null ? (
+                  <ThinkingLoader messages={[
+                    'Scouting cities nearby…',
+                    'Checking what pairs well…',
+                    'Rovyn is thinking…',
+                  ]} />
+                ) : (
+                  <>
+                    {(() => {
+                      const pickedByMe = c => form.multiCityPicks.some(p => sameTown(p, c));
+                      const groupOnly = (cityIdeas.group_picks || []).filter(g =>
+                        !pickedByMe(g.city) && !(g.names || []).includes('You'));
+                      const pickInfo = label => (cityIdeas.group_picks || []).find(g => sameTown(g.city, label));
+                      const suggestions = (cityIdeas.suggestions || []).filter(s => !pickedByMe(s.label || s.city));
+                      return (
+                        <>
+                          {groupOnly.length > 0 && (
+                            <div style={{ marginBottom: 20 }}>
+                              <p className="eyebrow" style={{ fontSize: 11, marginBottom: 2 }}>
+                                Your group is eyeing
+                              </p>
+                              {groupOnly.map(g => (
+                                <button key={g.city} type="button" className="opt-row"
+                                        onClick={() => addCityPick(g.city)}>
+                                  <Star size={16} strokeWidth={1.8} fill="var(--clay)" color="var(--clay)" />
+                                  <span style={{ flex: 1 }}>
+                                    <span className="opt-title" style={{ display: 'block', fontSize: 15.5 }}>{g.city}</span>
+                                    <span className="opt-desc">{g.names.join(', ')} want{g.names.length === 1 ? 's' : ''} this stop</span>
+                                  </span>
+                                  <Plus size={15} color="var(--pine)" />
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          {suggestions.length > 0 && (
+                            <div>
+                              <p className="eyebrow" style={{ fontSize: 11, marginBottom: 2 }}>
+                                {cityIdeas.anchor ? `Pairs well with ${cityIdeas.anchor.split(',')[0]}` : 'Ideas to consider'}
+                              </p>
+                              {suggestions.map(s => {
+                                const info = pickInfo(s.label || s.city);
+                                const others = (info?.names || []).filter(n => n !== 'You');
+                                return (
+                                  <button key={s.label || s.city} type="button" className="opt-row"
+                                          onClick={() => addCityPick(s.label || s.city)}>
+                                    <MapPin size={16} strokeWidth={1.8} color="var(--muted)" />
+                                    <span style={{ flex: 1 }}>
+                                      <span className="opt-title" style={{ display: 'block', fontSize: 15.5 }}>
+                                        {s.city}{s.country ? <span className="muted" style={{ fontWeight: 400 }}>, {s.country}</span> : null}
+                                      </span>
+                                      <span className="opt-desc">
+                                        {[s.travel_hint, s.why].filter(Boolean).join(' · ')}
+                                        {others.length > 0 && (
+                                          <span style={{ color: 'var(--clay)', fontWeight: 600 }}>
+                                            {s.travel_hint || s.why ? ' · ' : ''}{others.join(', ')} also want{others.length === 1 ? 's' : ''} this
+                                          </span>
+                                        )}
+                                      </span>
+                                    </span>
+                                    <Plus size={15} color="var(--pine)" />
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {suggestions.length === 0 && groupOnly.length === 0 && (
+                            <p className="serif muted" style={{ fontStyle: 'italic', fontSize: 15 }}>
+                              {cityIdeas.anchor
+                                ? 'No more ideas to offer — add any city with the search above.'
+                                : 'No destination is pinned yet, so add dream cities freely — Rovyn will weigh them once the group picks where to go.'}
+                            </p>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </>
     ),
     5: (

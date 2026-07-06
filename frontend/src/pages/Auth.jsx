@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight } from 'lucide-react';
 import { api, auth } from '../api/index.js';
 import { supabase } from '../lib/supabase.js';
-import { Wordmark, HorizonArt, Field, ErrorText } from '../ui.jsx';
+import { Wordmark, Field, ErrorText } from '../ui.jsx';
 
 /* Brand marks — lucide carries no logos, so two tiny inline paths. */
 function GoogleMark({ size = 16 }) {
@@ -112,8 +112,8 @@ export default function Auth() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'grid', gridTemplateRows: '1fr auto' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 28px' }}>
+    <div style={{ minHeight: '100vh' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: '48px 28px' }}>
         <div style={{ width: '100%', maxWidth: 460 }}>
           <motion.div
             initial={{ opacity: 0, y: 16 }}
@@ -232,7 +232,6 @@ export default function Auth() {
           </motion.div>
         </div>
       </div>
-      <HorizonArt />
     </div>
   );
 }

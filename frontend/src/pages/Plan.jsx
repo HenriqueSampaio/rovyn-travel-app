@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  ArrowRight, BedDouble, Check, Compass, Landmark,
-  MapPin, PlaneTakeoff, Quote, Sparkles, Star, Ticket, Users,
+  ArrowRight, BedDouble, Bus, Check, Compass, Landmark,
+  MapPin, PlaneTakeoff, Quote, Ship, Sparkles, Star, Ticket, TrainFront, Users,
 } from 'lucide-react';
 import { api, auth } from '../api/index.js';
-import { Page, Loading, ErrorText, JourneyTracker, Hero, PhotoCarousel, Thumb, ThinkingLoader } from '../ui.jsx';
+import { Page, Loading, ErrorText, JourneyTracker, Hero, PhotoCarousel, RouteTimeline, Thumb, ThinkingLoader } from '../ui.jsx';
 
 const TABS = [
   { key: 'overview', label: 'Overview', Icon: Compass },
@@ -15,13 +15,51 @@ const TABS = [
   { key: 'visits', label: 'Visits', Icon: Landmark },
   { key: 'events', label: 'Events', Icon: Ticket },
 ];
+const TRANSPORT_TAB = { key: 'transport', label: 'Transport', Icon: TrainFront };
 
 const CATEGORY_INTRO = {
-  flights: 'These flights are yours alone — they leave from your city. Star the ones that work for you; the most-starred flight among travelers from your city makes the plan, and your check reflects your own flight.',
+  flights: 'These round-trip flights are yours alone — they leave from your city and bring you home again. Star the ones that work for you; the most-starred flight among travelers from your city makes the plan, and your check reflects your own flight.',
+  transport: 'How the whole group moves between the route\'s cities — star your favorite way to make each leg. The most-starred option wins that leg for everyone.',
   stay: 'Star every place you\'d be happy sleeping in. The most-starred stay wins, and Rovyn explains the vote.',
   visits: 'Star every sight you don\'t want to miss — Rovyn builds the day-by-day itinerary from the group\'s picks.',
   events: 'Star the experiences you\'d actually show up for. Starred events get an evening (or their scheduled slot) in the plan.',
 };
+
+const MODE_ICONS = { train: TrainFront, flight: PlaneTakeoff, bus: Bus, ferry: Ship };
+
+/* Soft wash over a whole row/card once you've starred it — the star alone is
+   easy to miss when scanning a long list. */
+function starredWash(on, verticalPad = 22) {
+  return on
+    ? { background: 'rgba(190, 107, 63, 0.08)', margin: '0 -16px', borderRadius: 10,
+        padding: `${verticalPad}px 16px`, transition: 'background 0.25s ease' }
+    : { padding: `${verticalPad}px 0`, transition: 'background 0.25s ease' };
+}
+
+/* City switcher inside a category — one button per route city, like the tabs */
+function CityPills({ cities, value, onChange }) {
+  const pill = (active) => ({
+    padding: '7px 16px', borderRadius: 999, fontSize: 13.5, fontWeight: 700,
+    border: '1px solid', borderColor: active ? 'var(--pine)' : 'var(--line)',
+    background: active ? 'var(--pine)' : 'transparent',
+    color: active ? '#F6F2E8' : 'var(--ink-soft)',
+    transition: 'all 0.18s ease', whiteSpace: 'nowrap',
+  });
+  return (
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '6px 0 18px' }}>
+      <button type="button" style={pill(value === 'all')} onClick={() => onChange('all')}>
+        All cities
+      </button>
+      {cities.map(c => (
+        <button key={c.town} type="button" style={pill(value.toLowerCase() === c.town.toLowerCase())}
+                onClick={() => onChange(c.town)}>
+          {c.town}
+          <span style={{ fontWeight: 400, opacity: 0.75 }}> · {c.nights}n</span>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 const PACE_LABEL = { very: 'very busy', moderately: 'moderately busy', slightly: 'slightly busy' };
 
@@ -101,10 +139,10 @@ function GuestReviews({ media, fallbackRating }) {
 function StayCard({ opt, media, starred, count, onStar }) {
   const photos = media?.photos || [];
   return (
-    <div style={{ padding: '22px 0', borderTop: '1px solid var(--line-soft)' }}>
+    <div style={{ ...starredWash(starred), borderTop: '1px solid var(--line-soft)' }}>
       {photos.length > 0
-        ? <PhotoCarousel photos={photos} height={240} style={{ marginBottom: 16 }} />
-        : <Hero image={opt.image} height={200} style={{ marginBottom: 16 }} />}
+        ? <PhotoCarousel photos={photos} height={330} style={{ marginBottom: 16 }} />
+        : <Hero image={opt.image} height={300} style={{ marginBottom: 16 }} />}
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
         <div style={{ flex: 1 }}>
           <p style={{ fontWeight: 700, fontSize: 17 }}>
@@ -177,9 +215,19 @@ export default function Plan() {
   const [busy, setBusy] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [stayMedia, setStayMedia] = useState(null); // null = not loaded yet
+  const [cityFilter, setCityFilter] = useState('all'); // multi-city: which city a tab shows
   const pollRef = useRef(null);
   const starsInitialized = useRef(false);
   const stayMediaRequested = useRef(false);
+
+  // Entering a tab resets the city pills: Stay opens on the first city (you
+  // pick one stay per city), Visits/Events open on the full list.
+  const hasRoute = Boolean(board?.options?.route);
+  useEffect(() => {
+    if (!hasRoute) return;
+    setCityFilter(tab === 'stay' ? board.options.route.cities[0].town : 'all');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, hasRoute]);
 
   useEffect(() => {
     async function poll() {
@@ -224,6 +272,10 @@ export default function Plan() {
   if (!trip || !board?.options) return <Page><Loading text="Laying out the planning board…" /></Page>;
 
   const options = board.options;
+  const route = options.route;
+  const tabs = options.transport && route
+    ? [TABS[0], TABS[1], TRANSPORT_TAB, ...TABS.slice(2)]
+    : TABS;
   const myCats = trip.me.categories || {};
   const catStatus = c => myCats[c];
   const isSample = options.source === 'sample';
@@ -282,13 +334,13 @@ export default function Plan() {
     }
   }
 
-  const doneCount = TABS.slice(1).filter(t => catStatus(t.key)).length;
+  const doneCount = tabs.slice(1).filter(t => catStatus(t.key)).length;
 
   function renderStars(category, list, { disabled } = {}) {
     return list.map(opt => {
       const buddies = (board.star_names?.[opt.id] || []).filter(n => n !== me?.name);
       return (
-      <div key={opt.id} style={{ display: 'flex', gap: 16, padding: '22px 0', borderTop: '1px solid var(--line-soft)', alignItems: 'flex-start' }}>
+      <div key={opt.id} style={{ display: 'flex', gap: 16, ...starredWash(myStars.has(opt.id)), borderTop: '1px solid var(--line-soft)', alignItems: 'flex-start' }}>
         {category !== 'flights' && <Thumb image={opt.image} size={76} />}
         <div style={{ flex: 1 }}>
           {category === 'flights' ? (
@@ -296,6 +348,11 @@ export default function Plan() {
               <p style={{ fontWeight: 700, fontSize: 16 }}>{opt.airline}
                 <span className="muted" style={{ fontWeight: 400, marginLeft: 10, fontSize: 14 }}>{opt.route}</span>
               </p>
+              {opt.return_route && (
+                <p className="muted" style={{ fontSize: 13.5, margin: '2px 0 0' }}>
+                  return · {opt.return_route}
+                </p>
+              )}
               <p className="muted" style={{ fontSize: 14, margin: '4px 0' }}>
                 Out {opt.depart} · back {opt.return} · {opt.stops === 0 ? 'nonstop' : `${opt.stops} stop${opt.stops > 1 ? 's' : ''}`} · {opt.duration}
               </p>
@@ -314,7 +371,18 @@ export default function Plan() {
             </>
           ) : (
             <>
-              <p style={{ fontWeight: 700, fontSize: 16 }}>{opt.name}</p>
+              <p style={{ fontWeight: 700, fontSize: 16 }}>
+                {opt.name}
+                {route && opt.city && (
+                  <span style={{
+                    marginLeft: 10, fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
+                    color: 'var(--pine)', border: '1px solid var(--line)', borderRadius: 999,
+                    padding: '2px 9px', verticalAlign: 2, whiteSpace: 'nowrap', display: 'inline-block',
+                  }}>
+                    {opt.city.split(',')[0].trim().toUpperCase()}
+                  </span>
+                )}
+              </p>
               <p style={{ fontSize: 14.5, color: 'var(--ink-soft)', margin: '3px 0' }}>{opt.description}</p>
               <p className="muted" style={{ fontSize: 13 }}>
                 {opt.duration ? `${opt.duration} · ` : ''}{opt.date_hint ? `${opt.date_hint} · ` : ''}
@@ -341,8 +409,19 @@ export default function Plan() {
     const mine = cities.filter(c => norm(c) === myCity);
     const shown = mine.length ? mine : cities; // fallback: no questionnaire city matched
     const sameCityMates = trip.members.length > 1;
+    const openJaw = route && route.cities.length > 1
+      && route.cities[0].town !== route.cities[route.cities.length - 1].town;
     return (
       <>
+        {openJaw && (
+          <p style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 10,
+            fontSize: 13.5, fontWeight: 700, color: 'var(--pine)',
+          }}>
+            <PlaneTakeoff size={14} strokeWidth={2.4} />
+            Open-jaw round trip: land in {route.cities[0].town}, fly home from {route.cities[route.cities.length - 1].town}.
+          </p>
+        )}
         {shown.map(city => (
           <div key={city} style={{ marginBottom: 36 }}>
             <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
@@ -365,9 +444,125 @@ export default function Plan() {
     );
   }
 
+  function renderTransport() {
+    const legs = route?.legs || [];
+    return (
+      <>
+        {legs.map(leg => (
+          <div key={leg.key} style={{ marginBottom: 36 }}>
+            <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <TrainFront size={13} strokeWidth={2.5} /> {leg.key}
+              {leg.date && <span className="muted" style={{ letterSpacing: 0, textTransform: 'none', fontWeight: 600 }}>· {leg.date}</span>}
+            </p>
+            {(options.transport[leg.key] || []).map(opt => {
+              const ModeIcon = MODE_ICONS[(opt.mode || '').toLowerCase()] || TrainFront;
+              const buddies = (board.star_names?.[opt.id] || []).filter(n => n !== me?.name);
+              return (
+                <div key={opt.id} style={{ display: 'flex', gap: 16, ...starredWash(myStars.has(opt.id), 20), borderTop: '1px solid var(--line-soft)', alignItems: 'flex-start' }}>
+                  <ModeIcon size={20} strokeWidth={1.7} color="var(--pine)" style={{ marginTop: 2, flexShrink: 0 }} />
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontWeight: 700, fontSize: 16 }}>
+                      {opt.carrier || opt.mode}
+                      <span className="muted" style={{ fontWeight: 400, marginLeft: 10, fontSize: 14, textTransform: 'capitalize' }}>{opt.mode}</span>
+                    </p>
+                    <p className="muted" style={{ fontSize: 14, margin: '4px 0' }}>
+                      {opt.depart ? `Departs ${opt.depart} · ` : ''}{opt.duration}
+                    </p>
+                    <p style={{ fontSize: 14, color: 'var(--ink-soft)' }}>{opt.why}</p>
+                    <p style={{ marginTop: 6, display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
+                      <span className="serif" style={{ fontSize: 24, color: 'var(--pine)' }}>${opt.est_price_per_person}</span>
+                      <span className="muted" style={{ fontSize: 13 }}>per person, one way</span>
+                      {opt.link && <a className="btn-quiet" href={opt.link} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>compare on Rome2Rio</a>}
+                    </p>
+                    {buddies.length > 0 && (
+                      <p style={{ marginTop: 8, display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 13.5, fontWeight: 600, color: 'var(--clay)' }}>
+                        <Star size={13} fill="var(--clay)" />
+                        {buddies[0]}{buddies.length > 1 ? ` +${buddies.length - 1} more` : ''} starred this leg!
+                      </p>
+                    )}
+                  </div>
+                  <StarButton
+                    starred={myStars.has(opt.id)}
+                    count={counts[opt.id] || 0}
+                    onClick={() => star('transport', opt.id)}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </>
+    );
+  }
+
+  function renderStays() {
+    const stays = options.stay || [];
+    const card = opt => (
+      <StayCard
+        key={opt.id}
+        opt={opt}
+        media={stayMedia?.[opt.id]}
+        starred={myStars.has(opt.id)}
+        count={counts[opt.id] || 0}
+        onStar={() => star('stay', opt.id)}
+      />
+    );
+    if (!route) return stays.map(card);
+    const town = s => (s || '').split(',')[0].trim().toLowerCase();
+    const shownCities = cityFilter === 'all'
+      ? route.cities
+      : route.cities.filter(c => c.town.toLowerCase() === cityFilter.toLowerCase());
+    const grouped = shownCities.map(c => ({
+      city: c,
+      stays: stays.filter(o => town(o.city) === c.town.toLowerCase()),
+    }));
+    const leftovers = cityFilter === 'all'
+      ? stays.filter(o => !route.cities.some(c => town(o.city) === c.town.toLowerCase()))
+      : [];
+    return (
+      <>
+        {grouped.map(({ city, stays: cityStays }) => cityStays.length > 0 && (
+          <div key={city.city} style={{ marginBottom: 30 }}>
+            <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+              <BedDouble size={13} strokeWidth={2.5} /> {city.town}
+              <span className="muted" style={{ letterSpacing: 0, textTransform: 'none', fontWeight: 600 }}>
+                · {city.nights} night{city.nights === 1 ? '' : 's'}{city.start ? ` · ${city.start} → ${city.end}` : ''}
+              </span>
+            </p>
+            {cityStays.map(card)}
+          </div>
+        ))}
+        {leftovers.length > 0 && leftovers.map(card)}
+      </>
+    );
+  }
+
+  // Multi-city: which options a tab shows under the selected city pill
+  function byCity(list) {
+    if (!route || cityFilter === 'all') return list;
+    const target = cityFilter.toLowerCase();
+    return list.filter(o => (o.city || '').split(',')[0].trim().toLowerCase() === target);
+  }
+
   function renderOverview() {
     return (
       <>
+        {route && (
+          <section style={{ marginBottom: 52 }}>
+            <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+              <TrainFront size={13} strokeWidth={2.5} /> The route
+            </p>
+            <RouteTimeline route={route} style={{ maxWidth: 560 }} />
+            {route.reason && (
+              <p className="muted" style={{ fontSize: 13.5, marginTop: 12, maxWidth: 520 }}>{route.reason}</p>
+            )}
+            <p className="muted" style={{ fontSize: 13.5, marginTop: 6, maxWidth: 520 }}>
+              Drawn from the group's multi-city wishes. Star how you'd make each leg in the
+              Transport tab, and pick a stay for every city in the Stay tab.
+            </p>
+          </section>
+        )}
+
         <section style={{ marginBottom: 52 }}>
           <p className="eyebrow" style={{ marginBottom: 14 }}>How this works</p>
           {[
@@ -388,7 +583,7 @@ export default function Plan() {
 
         <section style={{ marginBottom: 52 }}>
           <p className="eyebrow" style={{ marginBottom: 14 }}>Your checklist — {doneCount} of {trip.categories_total} sections</p>
-          {TABS.slice(1).map(({ key, label, Icon }) => {
+          {tabs.slice(1).map(({ key, label, Icon }) => {
             const st = catStatus(key);
             return (
               <button key={key} className="opt-row" onClick={() => setTab(key)}>
@@ -479,11 +674,13 @@ export default function Plan() {
 
       <Hero image={options.image} height={200} style={{ marginTop: 18 }} />
 
+      {route && <RouteTimeline route={route} style={{ marginTop: 22 }} />}
+
       <JourneyTracker status={trip.status} style={{ marginTop: 26 }} />
 
       {/* Tab bar */}
       <div className="tab-bar">
-        {TABS.map(({ key, label, Icon }) => {
+        {tabs.map(({ key, label, Icon }) => {
           const active = tab === key;
           const done = key !== 'overview' && catStatus(key);
           return (
@@ -518,7 +715,9 @@ export default function Plan() {
                   fontSize: 13.5, fontWeight: 700, color: 'var(--pine)',
                 }}>
                   <Check size={14} strokeWidth={2.6} />
-                  Real hotels with live prices and availability for your dates.
+                  {options.stay_all_live === false
+                    ? 'Real hotels with live prices where marked LIVE PRICE — the rest are Rovyn estimates.'
+                    : 'Real hotels with live prices and availability for your dates.'}
                 </p>
               ) : (
                 <p style={{ marginBottom: 10, fontSize: 13.5, color: 'var(--clay)' }}>
@@ -526,6 +725,9 @@ export default function Plan() {
                   {' '}Tip: a “City, Country” destination (e.g. “Porto Cervo, Italy”) lets Rovyn fetch real hotels with live prices.
                 </p>
               )
+            )}
+            {route && ['stay', 'visits', 'events'].includes(tab) && (
+              <CityPills cities={route.cities} value={cityFilter} onChange={setCityFilter} />
             )}
             {tab === 'stay' && stayMedia === null && (
               <p className="muted" style={{ fontSize: 13, fontStyle: 'italic', marginBottom: 10 }}>
@@ -547,17 +749,9 @@ export default function Plan() {
               );
             })()}
             {tab === 'flights' ? renderFlights()
-              : tab === 'stay' ? (options.stay || []).map(opt => (
-                <StayCard
-                  key={opt.id}
-                  opt={opt}
-                  media={stayMedia?.[opt.id]}
-                  starred={myStars.has(opt.id)}
-                  count={counts[opt.id] || 0}
-                  onStar={() => star('stay', opt.id)}
-                />
-              ))
-              : renderStars(tab, options[tab] || [])}
+              : tab === 'transport' ? renderTransport()
+              : tab === 'stay' ? renderStays()
+              : renderStars(tab, byCity(options[tab] || []))}
             <CategoryFooter
               status={catStatus(tab)}
               busy={busy}

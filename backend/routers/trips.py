@@ -15,9 +15,9 @@ from backend.models import (
     PayRequest, QuestionnaireData, ReorderRequest, SlotEditRequest, StarRequest, VoteRequest,
 )
 from backend.services.ai_service import (
-    CATEGORIES, RevisionNotPossible, ai_available, generate_final_plan, generate_itinerary,
-    generate_trip_options, get_destination_recommendations, recommended_picks,
-    recompute_plan_costs, revise_final_plan,
+    RevisionNotPossible, ai_available, categories_for, generate_final_plan,
+    generate_itinerary, generate_trip_options, get_destination_recommendations,
+    recommended_picks, recompute_plan_costs, revise_final_plan, suggest_nearby_cities,
 )
 from backend.services.hotel_service import stay_media_for_options
 
@@ -42,7 +42,7 @@ def _load_trip(conn, trip_id: str):
 # The status payload only needs to know WHETHER the big AI blobs exist —
 # selecting them would ship megabytes of JSON per request from a remote DB.
 _LIGHT_TRIP_COLUMNS = """tr.id, tr.name, tr.invite_code, tr.status, tr.leader_id,
-           tr.destination, tr.selected_destination,
+           tr.destination, tr.selected_destination, tr.trip_mode,
            tr.recommendations_generating, tr.itinerary_generating,
            tr.options_generating, tr.final_plan_generating,
            (tr.recommendations IS NOT NULL) AS recommendations,
@@ -80,7 +80,13 @@ def _decided_destination(trip) -> str | None:
     return trip["selected_destination"] or trip["destination"]
 
 
+def _trip_categories(trip) -> list[str]:
+    """The board sections this trip curates — multi-city trips add transport."""
+    return categories_for(trip["trip_mode"])
+
+
 def _status_payload(conn, trip, user_id: str) -> dict:
+    categories = _trip_categories(trip)
     members, votes, progress_rows, pay_rows = fetch_many(conn, [
         ("""SELECT u.id, u.name,
                   EXISTS(SELECT 1 FROM questionnaires q WHERE q.trip_id = t.trip_id AND q.user_id = u.id) AS submitted,
@@ -109,9 +115,9 @@ def _status_payload(conn, trip, user_id: str) -> dict:
     my_progress = progress.get(user_id, {})
 
     def curated_count(uid: str) -> int:
-        return sum(1 for c in CATEGORIES if progress.get(uid, {}).get(c))
+        return sum(1 for c in categories if progress.get(uid, {}).get(c))
 
-    all_curated = total > 0 and all(curated_count(m["id"]) == len(CATEGORIES) for m in members)
+    all_curated = total > 0 and all(curated_count(m["id"]) == len(categories) for m in members)
 
     return {
         "id": trip["id"],
@@ -159,7 +165,8 @@ def _status_payload(conn, trip, user_id: str) -> dict:
         "has_options": bool(trip["options"]),
         "options_generating": bool(trip["options_generating"]),
         "all_curated": all_curated,
-        "categories_total": len(CATEGORIES),
+        "trip_mode": trip["trip_mode"] or "single",
+        "categories_total": len(categories),
         "has_final_plan": bool(trip["final_plan"]),
         "final_plan_generating": bool(trip["final_plan_generating"]),
         "approved_count": approved_count,
@@ -286,6 +293,8 @@ def delete_trip(trip_id: str, user: dict = Depends(get_current_user)):
         trip = _member_trip(conn, trip_id, user["id"])
         if user["id"] != trip["leader_id"]:
             raise HTTPException(status_code=403, detail="Only the trip leader can delete a trip — you can leave it instead.")
+        # bookings is trip-scoped (no user_id), so it can't ride the per-user loop
+        conn.execute("DELETE FROM bookings WHERE trip_id = ?", (trip_id,))
         for table in _TRIP_CHILD_TABLES:
             conn.execute(f"DELETE FROM {table} WHERE trip_id = ?", (trip_id,))
         # Feed posts keep working off their frozen snapshot; only the live link goes
@@ -365,6 +374,56 @@ def read_date_votes(trip_id: str, user: dict = Depends(get_current_user)):
             names.setdefault(iso, []).append(label)
             day += timedelta(days=1)
     return {"counts": counts, "names": names, "submitted": len(rows), "total_members": total}
+
+
+@router.get("/{trip_id}/city-ideas")
+def read_city_ideas(trip_id: str, user: dict = Depends(get_current_user)):
+    """Feeds the questionnaire's multi-city picker: nearby-city suggestions
+    (AI-generated once, then cached on the trip) plus the cities travel mates
+    have already picked — read fresh so the social hints update live."""
+    with get_conn(readonly=True) as conn:
+        trip = _member_trip(conn, trip_id, user["id"])
+        rows = conn.execute(
+            """SELECT q.user_id, q.data, u.name FROM questionnaires q
+               JOIN users u ON u.id = q.user_id WHERE q.trip_id = ?""",
+            (trip_id,),
+        ).fetchall()
+
+    anchor = _decided_destination(trip) or ""
+    picks: dict[str, dict] = {}
+    for r in rows:
+        data = json.loads(r["data"])
+        label = "You" if r["user_id"] == user["id"] else r["name"]
+        seen = set()
+        for city in data.get("multi_city_picks") or []:
+            city = (city or "").strip()
+            key = city.casefold()
+            if not city or key in seen:
+                continue
+            seen.add(key)
+            entry = picks.setdefault(key, {"city": city, "count": 0, "names": []})
+            entry["count"] += 1
+            entry["names"].append(label)
+    group_picks = sorted(picks.values(), key=lambda p: -p["count"])
+
+    cached = json.loads(trip["city_ideas"]) if trip["city_ideas"] else None
+    if cached and cached.get("anchor") == anchor:
+        suggestions = cached.get("suggestions") or []
+    else:
+        # One AI call per trip (per anchor) — the network fetch happens outside
+        # any DB connection, then the result is cached on the trip row.
+        suggestions = suggest_nearby_cities(anchor, trip_name=trip["name"])
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE trips SET city_ideas = ? WHERE id = ?",
+                (json.dumps({"anchor": anchor, "suggestions": suggestions}), trip_id),
+            )
+    return {
+        "anchor": anchor,
+        "suggestions": suggestions,
+        "group_picks": group_picks,
+        "ai_available": ai_available(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -490,8 +549,8 @@ def create_options(trip_id: str, user: dict = Depends(get_current_user)):
 
     with get_conn() as conn:
         conn.execute(
-            "UPDATE trips SET options = ?, options_generating = 0, status = 'curating' WHERE id = ?",
-            (json.dumps(options), trip_id),
+            "UPDATE trips SET options = ?, options_generating = 0, status = 'curating', trip_mode = ? WHERE id = ?",
+            (json.dumps(options), options.get("trip_mode") or "single", trip_id),
         )
     return {"options": options}
 
@@ -532,7 +591,7 @@ def read_options(trip_id: str, user: dict = Depends(get_current_user)):
         "options": options,
         "generating": bool(trip["options_generating"]),
         "ai_available": ai_available(),
-        "categories": CATEGORIES,
+        "categories": _trip_categories(trip),
         "star_counts": dict(star_counts),
         "star_names": star_names,
         "my_stars": [s["option_id"] for s in stars if s["user_id"] == user["id"]],
@@ -569,17 +628,17 @@ def read_stay_media(trip_id: str, user: dict = Depends(get_current_user)):
 
 
 def _valid_option_ids(options: dict, category: str) -> set[str]:
-    if category == "flights":
-        return {o["id"] for city_opts in (options.get("flights") or {}).values() for o in city_opts}
+    if category in ("flights", "transport"):  # both are keyed groups of options
+        return {o["id"] for group in (options.get(category) or {}).values() for o in group}
     return {o["id"] for o in options.get(category, [])}
 
 
 @router.post("/{trip_id}/star")
 def toggle_star(trip_id: str, req: StarRequest, user: dict = Depends(get_current_user)):
-    if req.category not in CATEGORIES:
-        raise HTTPException(status_code=400, detail="Unknown category.")
     with get_conn() as conn:
         trip = _member_trip(conn, trip_id, user["id"])
+        if req.category not in _trip_categories(trip):
+            raise HTTPException(status_code=400, detail="Unknown category.")
         if not trip["options"]:
             raise HTTPException(status_code=400, detail="The planning board isn't open yet.")
         if trip["final_plan"]:
@@ -613,12 +672,12 @@ def toggle_star(trip_id: str, req: StarRequest, user: dict = Depends(get_current
 
 @router.post("/{trip_id}/curation")
 def set_curation(trip_id: str, req: CurationRequest, user: dict = Depends(get_current_user)):
-    if req.category not in CATEGORIES:
-        raise HTTPException(status_code=400, detail="Unknown category.")
     if req.status not in ("done", "no_preference", "reset"):
         raise HTTPException(status_code=400, detail="Status must be done, no_preference or reset.")
     with get_conn() as conn:
         trip = _member_trip(conn, trip_id, user["id"])
+        if req.category not in _trip_categories(trip):
+            raise HTTPException(status_code=400, detail="Unknown category.")
         if not trip["options"]:
             raise HTTPException(status_code=400, detail="The planning board isn't open yet.")
         if trip["final_plan"]:
@@ -671,7 +730,7 @@ def _build_tallies(conn, trip_id: str, options: dict) -> dict:
     total = total_rows[0]["c"]
 
     tallies = {}
-    for cat in CATEGORIES:
+    for cat in categories_for(options.get("trip_mode")):
         counts = Counter(s["option_id"] for s in stars if s["category"] == cat)
         nopref = sum(1 for p in progress if p["category"] == cat and p["status"] == "no_preference")
         active = sum(1 for p in progress if p["category"] == cat and p["status"] == "done")
@@ -737,8 +796,15 @@ def _member_checks(conn, trip) -> list[dict]:
     city_by_user = {r["user_id"]: json.loads(r["data"]).get("departure_city", "").strip() for r in q_rows}
     payments = {r["user_id"]: r for r in pay_rows}
 
+    stays = plan.get("stays") or []
+    stay_label = (
+        f"Stays in {len(stays)} cities — {', '.join(s.get('name', '?') for s in stays)} (your equal share)"
+        if stays else
+        f"Stay — {(plan.get('stay') or {}).get('name', 'accommodation')} (your equal share)"
+    )
     shared_items = [
-        ("stay", f"Stay — {plan.get('stay', {}).get('name', 'accommodation')} (your equal share)"),
+        ("stay", stay_label),
+        ("intercity_transport", "Trains & flights between cities (your equal share)"),
         ("itinerary_activities", f"Itinerary activities — “{plan.get('itinerary', {}).get('title', 'the plan')}”"),
         ("visits", "Starred visits & sights"),
         ("events", "Starred events"),
@@ -906,6 +972,23 @@ def reorder_days(trip_id: str, req: ReorderRequest, user: dict = Depends(get_cur
             )
 
         by_number = {d.get("day"): d for d in days}
+        # Multi-city plans: days can only trade places inside their own city's
+        # segment, and days holding fixed travel moments (a transfer, arrival,
+        # departure) can't move at all.
+        for position, old_day in enumerate(req.order):
+            moved_day = by_number[old_day]
+            if moved_day.get("city") and moved_day.get("city") != days[position].get("city"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Days can only be reordered within the same city — the route between cities is fixed.",
+                )
+            if old_day != days[position].get("day") and any(
+                _slot_locked(moved_day.get(slot, "")) for slot in _SLOT_ORDER
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="That day holds a fixed travel moment (transfer, check-in or check-out) — it stays put.",
+                )
         dates_in_sequence = [d.get("date") for d in days]  # calendar stays fixed
         reordered = []
         for position, old_day in enumerate(req.order):
@@ -929,7 +1012,8 @@ _FREE_SLOT = "Free time — recharge or wander."
 
 # Fixed-schedule moments that can't be moved, replaced or deleted.
 _LOCKED_SLOT_RE = re.compile(
-    r"check[\s-]?in|check[\s-]?out|arriv|departure|depart\b|airport|flight home|drop bags",
+    r"check[\s-]?in|check[\s-]?out|arriv|departure|depart\b|airport|flight home|drop bags"
+    r"|(?:train|bus|ferry|flight)\s+to\s|transfer",
     re.IGNORECASE,
 )
 

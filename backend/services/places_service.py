@@ -106,3 +106,22 @@ def suggest_cities(query: str, limit: int = 8) -> list[dict]:
     if len(query) < 2:
         return []
     return _google_suggest(query, limit) or _offline_suggest(query, limit)
+
+
+def cities_in_country(country: str, limit: int = 8, exclude: set[str] | None = None) -> list[dict]:
+    """Biggest cities of a country (population-ranked) — the offline stand-in
+    for 'cities near X' when no AI key is configured. Multi-city routes rarely
+    leave the country, so same-country major cities are a sane starting menu."""
+    country_cf = (country or "").strip().casefold()
+    if not country_cf:
+        return []
+    exclude_cf = {e.strip().casefold() for e in (exclude or set())}
+    out = []
+    for name, _ascii_lower, name_lower, country_name, _pop in _load():
+        if country_name.casefold() != country_cf or name_lower in exclude_cf:
+            continue
+        out.append({"city": name, "country": country_name,
+                    "label": f"{name}, {country_name}", "travel_hint": "", "why": ""})
+        if len(out) >= limit:
+            break
+    return out

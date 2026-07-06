@@ -12,6 +12,7 @@ reviews for stays that don't come from LiteAPI.
 import json
 import os
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -54,19 +55,35 @@ def _lite_request(path: str, payload: dict | None = None, params: dict | None = 
     url = _LITE_BASE + path
     if params:
         url += "?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode() if payload is not None else None,
-        headers={
-            "X-API-Key": os.environ.get("LITEAPI_API_KEY", ""),
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "Rovyn/1.0 (group trip planner)",
-        },
-        method="POST" if payload is not None else "GET",
-    )
-    with urllib.request.urlopen(req, timeout=20, context=_SSL_CTX) as res:
-        return json.loads(res.read().decode())
+
+    # Multi-city boards search several cities back to back, which can brush
+    # LiteAPI's rate limit — retry throttles/hiccups with a short backoff
+    # instead of silently degrading a whole city to AI estimates.
+    last_err = None
+    for attempt in range(3):
+        if attempt:
+            time.sleep(1.2 * attempt)
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode() if payload is not None else None,
+            headers={
+                "X-API-Key": os.environ.get("LITEAPI_API_KEY", ""),
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "Rovyn/1.0 (group trip planner)",
+            },
+            method="POST" if payload is not None else "GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=20, context=_SSL_CTX) as res:
+                return json.loads(res.read().decode())
+        except urllib.error.HTTPError as exc:
+            last_err = exc
+            if exc.code not in (429, 500, 502, 503, 504):
+                raise  # 4xx like a bad request won't improve with retries
+        except (urllib.error.URLError, TimeoutError) as exc:
+            last_err = exc
+    raise last_err
 
 
 def _split_place(destination: str) -> tuple[str, str]:
@@ -344,7 +361,8 @@ def stay_media_for_options(stays: list[dict], destination: str) -> dict:
             except Exception:
                 pass
         if not reviews:
-            google = _google_place_reviews(opt.get("name", ""), destination)
+            # Multi-city stays carry their own city — search reviews there
+            google = _google_place_reviews(opt.get("name", ""), opt.get("city") or destination)
             if google:
                 reviews = google["reviews"]
                 rating10 = rating10 or google["rating10"]
