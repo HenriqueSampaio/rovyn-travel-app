@@ -679,7 +679,9 @@ export default function Plan() {
             ['Browse each tab', 'Flights (yours are personal, from your city), stay, visits and events — all generated around the group\'s answers.'],
             ['Star what you love', 'As many options as you like — the Visits and Events tabs suggest how many to pick for your pace. Stars are votes; change them anytime before the final plan.'],
             ['Finish every section', 'Lock in your picks — or tap “I don\'t mind” when you have no strong opinion.'],
-            [`When all ${trip.total_members} are done`, 'Rovyn builds the day-by-day itinerary from the group\'s starred picks. Majority wins, every decision comes with its vote count, and every slot stays editable until the group approves.'],
+            trip.solo
+              ? ['When you\'re done', 'Rovyn builds the day-by-day itinerary from your starred picks. Every slot stays editable until you approve.']
+              : [`When all ${trip.total_members} are done`, 'Rovyn builds the day-by-day itinerary from the group\'s starred picks. Majority wins, every decision comes with its vote count, and every slot stays editable until the group approves.'],
           ].map(([title, desc], i) => (
             <div key={title} style={{ display: 'flex', gap: 18, padding: '14px 0', borderTop: '1px solid var(--line-soft)' }}>
               <span className="serif" style={{ fontSize: 17, fontStyle: 'italic', color: 'var(--clay)', minWidth: 24 }}>{i + 1}.</span>
@@ -713,6 +715,7 @@ export default function Plan() {
           })}
         </section>
 
+        {!trip.solo && (
         <section style={{ marginBottom: 52 }}>
           <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
             <Users size={13} strokeWidth={2.5} /> Group progress
@@ -729,6 +732,7 @@ export default function Plan() {
             </div>
           ))}
         </section>
+        )}
 
         <hr className="rule" style={{ marginBottom: 36 }} />
         <section>
@@ -747,8 +751,9 @@ export default function Plan() {
             trip.is_leader ? (
               <>
                 <p className="muted" style={{ marginBottom: 18, maxWidth: 470 }}>
-                  Everyone has finished starring. Rovyn will merge the group's votes into one plan —
-                  majority wins, every call explained.
+                  {trip.solo
+                    ? 'You\'ve finished starring. Rovyn will weave your picks into the final plan — every call explained.'
+                    : 'Everyone has finished starring. Rovyn will merge the group\'s votes into one plan — majority wins, every call explained.'}
                 </p>
                 <button className="btn" onClick={finalize}>Draft the final plan <ArrowRight size={16} /></button>
               </>
@@ -759,7 +764,9 @@ export default function Plan() {
             )
           ) : (
             <p className="serif muted" style={{ fontStyle: 'italic', fontSize: 17 }}>
-              Unlocks when all {trip.total_members} travelers finish all {trip.categories_total} sections.
+              {trip.solo
+                ? `Unlocks when you finish all ${trip.categories_total} sections.`
+                : `Unlocks when all ${trip.total_members} travelers finish all ${trip.categories_total} sections.`}
             </p>
           )}
         </section>

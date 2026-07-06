@@ -84,8 +84,8 @@ export const api = {
     req('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
 
   myTrips: () => req('/trips'),
-  createTrip: (name, destination = '') =>
-    req('/trips', { method: 'POST', body: JSON.stringify({ name, destination }) }),
+  createTrip: (name, destination = '', solo = false) =>
+    req('/trips', { method: 'POST', body: JSON.stringify({ name, destination, solo }) }),
   joinTrip: (inviteCode) =>
     req('/trips/join', { method: 'POST', body: JSON.stringify({ invite_code: inviteCode }) }),
   tripStatus: (tripId) => req(`/trips/${tripId}`),
@@ -100,6 +100,12 @@ export const api = {
   getRecommendations: (tripId) => req(`/trips/${tripId}/recommendations`),
   generateRecommendations: (tripId) =>
     req(`/trips/${tripId}/recommendations`, { method: 'POST' }),
+  moreRecommendations: (tripId) =>
+    req(`/trips/${tripId}/recommendations/more`, { method: 'POST' }),
+  addRouteStop: (tripId, destinationName, city) =>
+    req(`/trips/${tripId}/recommendations/add-stop`, {
+      method: 'POST', body: JSON.stringify({ destination_name: destinationName, city }),
+    }),
 
   castVote: (tripId, destinationName) =>
     req(`/trips/${tripId}/vote`, { method: 'POST', body: JSON.stringify({ destination_name: destinationName }) }),

@@ -50,6 +50,7 @@ export default function Dashboard() {
   const inviteLink = `${window.location.origin}/join/${trip.invite_code}`;
   const progress = trip.total_members ? trip.submitted_count / trip.total_members : 0;
   const fixed = trip.destination_fixed;
+  const solo = trip.solo;
 
   function copy(text, which) {
     navigator.clipboard.writeText(text);
@@ -76,7 +77,7 @@ export default function Dashboard() {
 
   return (
     <Page>
-      <p className="eyebrow">{trip.is_leader ? 'You lead this trip' : 'You are traveling on'}</p>
+      <p className="eyebrow">{solo ? 'Your solo trip' : trip.is_leader ? 'You lead this trip' : 'You are traveling on'}</p>
       <h1 style={{ fontSize: 44, margin: '10px 0 6px' }}>{trip.name}</h1>
       <p className="muted" style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
         {fixed && (
@@ -84,7 +85,11 @@ export default function Dashboard() {
             <MapPin size={14} /> {trip.decided_destination}
           </span>
         )}
-        <span>{trip.total_members} traveler{trip.total_members === 1 ? '' : 's'} · {trip.submitted_count} of {trip.total_members} preferences shared</span>
+        <span>
+          {solo
+            ? trip.me.submitted ? 'Your preferences are in' : 'Waiting on your preferences'
+            : `${trip.total_members} traveler${trip.total_members === 1 ? '' : 's'} · ${trip.submitted_count} of ${trip.total_members} preferences shared`}
+        </span>
       </p>
 
       <JourneyTracker status={trip.status} style={{ marginTop: 26 }} />
@@ -98,7 +103,8 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Travelers */}
+      {/* Travelers — a solo journey has no roster to show */}
+      {!solo && (
       <section style={{ marginBottom: 60 }}>
         <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <Users size={13} strokeWidth={2.5} /> Travelers
@@ -119,6 +125,7 @@ export default function Dashboard() {
           </div>
         ))}
       </section>
+      )}
 
       {/* My questionnaire */}
       {!trip.me.submitted && (
@@ -127,8 +134,9 @@ export default function Dashboard() {
             <ClipboardList size={13} strokeWidth={2.5} /> Your turn
           </p>
           <p className="muted" style={{ marginBottom: 20, maxWidth: 440 }}>
-            Tell the group your dates, budget and travel style — it takes two minutes
-            and shapes where you all end up.
+            {solo
+              ? 'Set your dates, budget and travel style — it takes two minutes and shapes the whole plan.'
+              : 'Tell the group your dates, budget and travel style — it takes two minutes and shapes where you all end up.'}
           </p>
           <button className="btn" onClick={() => navigate(`/trips/${tripId}/questionnaire`)}>
             Share my preferences <ArrowRight size={16} />
@@ -136,7 +144,8 @@ export default function Dashboard() {
         </section>
       )}
 
-      {/* Invite */}
+      {/* Invite — solo journeys take no company */}
+      {!solo && (
       <section style={{ marginBottom: 60 }}>
         <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
           <Link2 size={13} strokeWidth={2.5} /> Bring more people
@@ -155,6 +164,7 @@ export default function Dashboard() {
           </div>
         </div>
       </section>
+      )}
 
       <hr className="rule" style={{ marginBottom: 44 }} />
 
@@ -171,7 +181,7 @@ export default function Dashboard() {
             'Pricing options for your dates…',
             'Almost there…',
           ] : [
-            'Reading everyone’s answers…',
+            solo ? 'Reading your answers…' : 'Reading everyone’s answers…',
             'Rovyn is scouting destinations…',
             'Matching budgets, dates and vibes…',
             'Rovyn is thinking…',
@@ -181,11 +191,13 @@ export default function Dashboard() {
             <>
               <p className="muted" style={{ marginBottom: 20, maxWidth: 460 }}>
                 {fixed
-                  ? `Everyone's preferences are in. Rovyn will lay out flights, stays, itineraries, visits and events for ${trip.decided_destination} — then everyone stars what they love.`
-                  : 'Everyone\'s preferences are in. Rovyn will propose five destinations tuned to the whole group, ready for a vote.'}
+                  ? `${solo ? 'Your preferences are in' : "Everyone's preferences are in"}. Rovyn will lay out flights, stays, itineraries, visits and events for ${trip.decided_destination} — then ${solo ? 'star what you love' : 'everyone stars what they love'}.`
+                  : solo
+                    ? 'Your preferences are in. Rovyn will propose five destinations tuned to you — pick your favorite.'
+                    : 'Everyone\'s preferences are in. Rovyn will propose five destinations tuned to the whole group, ready for a vote.'}
               </p>
               <button className="btn" onClick={generate}>
-                {fixed ? 'Open the planning board' : 'Reveal our destinations'} <ArrowRight size={16} />
+                {fixed ? 'Open the planning board' : solo ? 'Reveal my destinations' : 'Reveal our destinations'} <ArrowRight size={16} />
               </button>
             </>
           ) : (
@@ -195,7 +207,9 @@ export default function Dashboard() {
           )
         ) : (
           <p className="serif muted" style={{ fontStyle: 'italic', fontSize: 17 }}>
-            Unlocks once all {trip.total_members} traveler{trip.total_members === 1 ? ' has' : 's have'} shared preferences.
+            {solo
+              ? 'Unlocks once you share your preferences.'
+              : `Unlocks once all ${trip.total_members} traveler${trip.total_members === 1 ? ' has' : 's have'} shared preferences.`}
           </p>
         )}
         <ErrorText>{error}</ErrorText>
