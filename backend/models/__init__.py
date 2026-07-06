@@ -51,6 +51,14 @@ class CurationRequest(BaseModel):
     status: str  # "done" | "no_preference" | "reset"
 
 
+class RouteNightsRequest(BaseModel):
+    nights: dict[str, int]  # town → nights, covering every city on the route
+
+
+class RouteLockRequest(BaseModel):
+    locked: bool
+
+
 class EditRequest(BaseModel):
     request: str
 

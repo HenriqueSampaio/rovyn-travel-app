@@ -117,6 +117,10 @@ export const api = {
     req(`/trips/${tripId}/star`, { method: 'POST', body: JSON.stringify({ category, option_id: optionId, starred }) }),
   setCuration: (tripId, category, status) =>
     req(`/trips/${tripId}/curation`, { method: 'POST', body: JSON.stringify({ category, status }) }),
+  setRouteNights: (tripId, nights) =>
+    req(`/trips/${tripId}/route/nights`, { method: 'POST', body: JSON.stringify({ nights }) }),
+  setRouteLock: (tripId, locked) =>
+    req(`/trips/${tripId}/route/lock`, { method: 'POST', body: JSON.stringify({ locked }) }),
 
   // Final plan, approval, payment
   finalizePlan: (tripId) => req(`/trips/${tripId}/finalize`, { method: 'POST' }),

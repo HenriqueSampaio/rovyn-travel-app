@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  ArrowRight, BedDouble, Bus, Check, Compass, Landmark,
-  MapPin, PlaneTakeoff, Quote, Ship, Sparkles, Star, Ticket, TrainFront, Users,
+  ArrowRight, BedDouble, Bus, Check, Compass, Landmark, Lock, LockOpen,
+  MapPin, Minus, PlaneTakeoff, Plus, Quote, Ship, Sparkles, Star, Ticket, TrainFront, Users,
 } from 'lucide-react';
 import { api, auth } from '../api/index.js';
 import { Page, Loading, ErrorText, JourneyTracker, Hero, PhotoCarousel, RouteTimeline, Thumb, ThinkingLoader } from '../ui.jsx';
@@ -57,6 +57,104 @@ function CityPills({ cities, value, onChange }) {
           <span style={{ fontWeight: 400, opacity: 0.75 }}> · {c.nights}n</span>
         </button>
       ))}
+    </div>
+  );
+}
+
+/* Nights-per-city steppers under the route. Rovyn suggests the split; any
+   traveler can rebalance it until the leader locks it (the leader always can).
+   The draft lives HERE, not in board state — polling overwrites the board
+   every few seconds and would clobber a half-finished edit. */
+function RouteSplitEditor({ route, isLeader, onApply, onLock }) {
+  const cities = route.cities || [];
+  const total = route.duration_days || cities.reduce((s, c) => s + c.nights, 0);
+  const serverSplit = cities.map(c => c.nights).join('|');
+  const [draft, setDraft] = useState(cities.map(c => c.nights));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  // The server split changed — someone applied theirs; drop the local draft
+  useEffect(() => {
+    setDraft(cities.map(c => c.nights));
+    setErr('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverSplit]);
+
+  const locked = Boolean(route.locked);
+  const canEdit = isLeader || !locked;
+  const allocated = draft.reduce((s, n) => s + n, 0);
+  const dirty = draft.join('|') !== serverSplit;
+  const bump = (i, delta) => setDraft(d => d.map((n, j) => (j === i ? Math.max(1, n + delta) : n)));
+
+  async function run(fn) {
+    setBusy(true);
+    setErr('');
+    try {
+      await fn();
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const stepBtn = disabled => ({
+    width: 26, height: 26, borderRadius: 999, border: '1px solid var(--line)',
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+    color: 'var(--ink-soft)', background: 'transparent',
+    opacity: disabled ? 0.35 : 1, flexShrink: 0,
+  });
+
+  return (
+    <div style={{ marginTop: 16, maxWidth: 560 }}>
+      <p className="serif muted" style={{ fontStyle: 'italic', fontSize: 15 }}>
+        Rovyn's suggested split{route.split_adjusted_by ? ` — adjusted by ${route.split_adjusted_by}` : ''}.
+      </p>
+      {canEdit ? (
+        <>
+          {cities.map((c, i) => (
+            <div key={c.town} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '8px 0', borderTop: '1px dashed var(--line-soft)' }}>
+              <span style={{ flex: 1, fontWeight: 700, fontSize: 14.5 }}>{c.town}</span>
+              <button type="button" title="One night fewer" style={stepBtn(busy || draft[i] <= 1)}
+                      disabled={busy || draft[i] <= 1} onClick={() => bump(i, -1)}>
+                <Minus size={13} strokeWidth={2.4} />
+              </button>
+              <span style={{ minWidth: 62, textAlign: 'center', fontSize: 14 }}>
+                {draft[i]} night{draft[i] === 1 ? '' : 's'}
+              </span>
+              <button type="button" title="One night more" style={stepBtn(busy)}
+                      disabled={busy} onClick={() => bump(i, 1)}>
+                <Plus size={13} strokeWidth={2.4} />
+              </button>
+            </div>
+          ))}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginTop: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13.5, fontWeight: 600, color: allocated === total ? 'var(--pine)' : 'var(--clay)' }}>
+              {allocated} of {total} nights allocated
+            </span>
+            <button className="btn-quiet" disabled={busy || !dirty || allocated !== total}
+                    onClick={() => run(() => onApply(Object.fromEntries(cities.map((c, i) => [c.town, draft[i]]))))}>
+              Apply the new split
+            </button>
+          </div>
+        </>
+      ) : (
+        <p className="muted" style={{ fontSize: 13.5, marginTop: 8, display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+          <Lock size={13} strokeWidth={2.2} /> The trip leader locked the day split.
+        </p>
+      )}
+      {isLeader && (
+        <p style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <button className="btn-quiet" style={{ fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 7 }}
+                  disabled={busy} onClick={() => run(() => onLock(!locked))}>
+            {locked
+              ? <><LockOpen size={13} strokeWidth={2.2} /> Unlock the day split</>
+              : <><Lock size={13} strokeWidth={2.2} /> Lock the day split</>}
+          </button>
+          {locked && <span className="muted" style={{ fontSize: 13 }}>Locked — only you can adjust it.</span>}
+        </p>
+      )}
+      {err && <p style={{ color: 'var(--clay)', fontSize: 13.5, marginTop: 8 }}>{err}</p>}
     </div>
   );
 }
@@ -553,6 +651,18 @@ export default function Plan() {
               <TrainFront size={13} strokeWidth={2.5} /> The route
             </p>
             <RouteTimeline route={route} style={{ maxWidth: 560 }} />
+            <RouteSplitEditor
+              route={route}
+              isLeader={trip.is_leader}
+              onApply={async nights => {
+                const res = await api.setRouteNights(tripId, nights);
+                setBoard(b => ({ ...b, options: res.options }));
+              }}
+              onLock={async locked => {
+                const res = await api.setRouteLock(tripId, locked);
+                setBoard(b => ({ ...b, options: res.options }));
+              }}
+            />
             {route.reason && (
               <p className="muted" style={{ fontSize: 13.5, marginTop: 12, maxWidth: 520 }}>{route.reason}</p>
             )}

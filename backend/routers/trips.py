@@ -12,7 +12,8 @@ from backend.auth import get_current_user
 from backend.db import IS_POSTGRES, fetch_many, get_conn
 from backend.models import (
     ArrangeSlotsRequest, CreateTripRequest, CurationRequest, EditRequest, JoinTripRequest,
-    PayRequest, QuestionnaireData, ReorderRequest, SlotEditRequest, StarRequest, VoteRequest,
+    PayRequest, QuestionnaireData, ReorderRequest, RouteLockRequest, RouteNightsRequest,
+    SlotEditRequest, StarRequest, VoteRequest,
 )
 from backend.services.ai_service import (
     RevisionNotPossible, ai_available, categories_for, generate_final_plan,
@@ -715,6 +716,80 @@ def set_curation(trip_id: str, req: CurationRequest, user: dict = Depends(get_cu
         trip = _load_trip(conn, trip_id)
         payload = _status_payload(conn, trip, user["id"])
     return {"success": True, "me": payload["me"], "all_curated": payload["all_curated"]}
+
+
+@router.post("/{trip_id}/route/nights")
+def set_route_nights(trip_id: str, req: RouteNightsRequest, user: dict = Depends(get_current_user)):
+    """Rebalance the nights of a multi-city route. Rovyn suggests the split;
+    any traveler may adjust it until the leader locks it or the plan is drafted.
+    City ORDER never changes here, so leg keys and option ids stay stable."""
+    from backend.services.ai_service import (
+        _aggregate_preferences, _attach_option_links, _duration_days, _route_with_dates,
+    )
+
+    with get_conn() as conn:
+        trip = _member_trip(conn, trip_id, user["id"])
+        if not trip["options"]:
+            raise HTTPException(status_code=400, detail="The planning board isn't open yet.")
+        if trip["final_plan"] or trip["final_plan_generating"]:
+            raise HTTPException(status_code=400, detail="The final plan is drafted — the day split is settled. Use 'Request a change' instead.")
+        options = json.loads(trip["options"])
+        route = options.get("route")
+        if not route:
+            raise HTTPException(status_code=400, detail="This trip has one home base — there's no day split to adjust.")
+        if route.get("locked") and user["id"] != trip["leader_id"]:
+            raise HTTPException(status_code=403, detail="The trip leader locked the day split — ask them for the change.")
+
+        cities = route["cities"]
+        # "Porto" and "Porto, Portugal" name the same stop — key by bare town
+        wanted = {t.split(",")[0].strip().casefold(): n for t, n in req.nights.items()}
+        if set(wanted) != {c["town"].casefold() for c in cities} or len(wanted) != len(req.nights):
+            raise HTTPException(status_code=400, detail="Set nights for each of the route's cities — no more, no less.")
+        if any(n < 1 for n in wanted.values()):
+            raise HTTPException(status_code=400, detail="Every city keeps at least one night.")
+        duration = route.get("duration_days") or _duration_days(options.get("dates", {}))
+        allocated = sum(wanted.values())
+        if allocated != duration:
+            raise HTTPException(status_code=400, detail=f"The split must use exactly {duration} nights — you allocated {allocated}.")
+
+        # Stay prices cover one city's segment — rescale them with its length
+        old_nights = {c["town"].casefold(): c["nights"] for c in cities}
+        for opt in options.get("stay", []):
+            town = (opt.get("city") or "").split(",")[0].strip().casefold()
+            old, new = old_nights.get(town), wanted.get(town)
+            if old and new and old != new and isinstance(opt.get("total_per_person"), (int, float)):
+                opt["total_per_person"] = round(opt["total_per_person"] * new / old)
+
+        for c in cities:
+            c["nights"] = wanted[c["town"].casefold()]
+        options["route"] = _route_with_dates(cities, options.get("dates", {}), duration, route.get("reason", ""))
+        options["route"]["locked"] = bool(route.get("locked"))
+        options["route"]["split_adjusted_by"] = user["name"]
+
+        # Booking links carry per-city date windows — re-derive them for the new split
+        prefs = _aggregate_preferences(_questionnaire_rows(conn, trip_id))
+        destination = options.get("destination") or _decided_destination(trip) or ""
+        _attach_option_links(options, prefs, destination)
+
+        conn.execute("UPDATE trips SET options = ? WHERE id = ?", (json.dumps(options), trip_id))
+    return {"options": options}
+
+
+@router.post("/{trip_id}/route/lock")
+def set_route_lock(trip_id: str, req: RouteLockRequest, user: dict = Depends(get_current_user)):
+    with get_conn() as conn:
+        trip = _member_trip(conn, trip_id, user["id"])
+        if user["id"] != trip["leader_id"]:
+            raise HTTPException(status_code=403, detail="Only the trip leader can lock or unlock the day split.")
+        if not trip["options"]:
+            raise HTTPException(status_code=400, detail="The planning board isn't open yet.")
+        options = json.loads(trip["options"])
+        route = options.get("route")
+        if not route:
+            raise HTTPException(status_code=400, detail="This trip has one home base — there's no day split to lock.")
+        route["locked"] = bool(req.locked)
+        conn.execute("UPDATE trips SET options = ? WHERE id = ?", (json.dumps(options), trip_id))
+    return {"options": options}
 
 
 # ---------------------------------------------------------------------------
