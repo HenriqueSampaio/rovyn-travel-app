@@ -52,6 +52,8 @@ CREATE TABLE IF NOT EXISTS trips (
     final_plan                 TEXT,
     final_plan_generating      INTEGER NOT NULL DEFAULT 0,
     stay_media                 TEXT,
+    trip_mode                  TEXT,
+    city_ideas                 TEXT,
     created_at                 TEXT NOT NULL
 );
 
@@ -175,6 +177,8 @@ _COLUMN_MIGRATIONS = [
     ("trips", "final_plan", "TEXT"),
     ("trips", "final_plan_generating", "INTEGER NOT NULL DEFAULT 0"),
     ("trips", "stay_media", "TEXT"),
+    ("trips", "trip_mode", "TEXT"),      # 'single' | 'multi' — set when the board is generated
+    ("trips", "city_ideas", "TEXT"),     # cached nearby-city suggestions for the questionnaire
     ("bookings", "stale", "INTEGER NOT NULL DEFAULT 0"),
     ("payments", "mode", "TEXT NOT NULL DEFAULT 'full'"),
 ]

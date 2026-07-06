@@ -95,6 +95,7 @@ export const api = {
   submitQuestionnaire: (tripId, data) =>
     req(`/trips/${tripId}/questionnaire`, { method: 'POST', body: JSON.stringify(data) }),
   getDateVotes: (tripId) => req(`/trips/${tripId}/date-votes`),
+  cityIdeas: (tripId) => req(`/trips/${tripId}/city-ideas`),
 
   getRecommendations: (tripId) => req(`/trips/${tripId}/recommendations`),
   generateRecommendations: (tripId) =>

@@ -61,17 +61,35 @@ def _checklist_from_plan(trip, group_size: int, city_counts: Counter) -> list[di
             "details": f,
         })
 
-    stay = plan.get("stay") or {}
-    if stay.get("name"):
-        # Primary link is the BOOKABLE one (dates + party prefilled, affiliate-
-        # tagged); the official website is shown separately in the UI.
+    for leg in plan.get("transport") or []:
+        title_bits = [p for p in (leg.get("mode"), leg.get("carrier")) if p]
         items.append({
-            "item_key": f"stay:{stay['name']}",
+            "item_key": f"transport:{leg.get('leg', '?')}",
+            "category": "transport",
+            "scope": "group",
+            "title": f"{leg.get('leg', 'Intercity leg')} — {' · '.join(title_bits)}".strip(" —"),
+            "link": links.safe_url(leg.get("link"))
+                    or links.rome2rio(leg.get("from", ""), leg.get("to", "")),
+            "details": leg,
+        })
+
+    # One stay per route city on multi-city trips; the single stay otherwise.
+    # Primary link is the BOOKABLE one (dates + party prefilled, affiliate-
+    # tagged); the official website is shown separately in the UI.
+    for stay in (plan.get("stays") or ([plan["stay"]] if plan.get("stay") else [])):
+        if not stay.get("name"):
+            continue
+        city = (stay.get("city") or "").strip()
+        town = city.split(",")[0].strip()
+        items.append({
+            "item_key": f"stay:{town + ':' if town else ''}{stay['name']}",
             "category": "stay",
             "scope": "group",
-            "title": f"Stay — {stay['name']}",
+            "title": f"Stay{f' in {town}' if town else ''} — {stay['name']}",
             "link": links.safe_url((stay.get("links") or {}).get("booking"))
-                    or links.booking_stays(destination, start, end, group_size),
+                    or links.booking_stays(city or destination,
+                                           stay.get("check_in") or start,
+                                           stay.get("check_out") or end, group_size),
             "details": stay,
         })
 

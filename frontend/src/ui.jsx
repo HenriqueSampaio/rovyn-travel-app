@@ -105,8 +105,10 @@ export function Loading({ text = 'One moment…' }) {
 
 /* City input with autocomplete — typo-proofs destination/departure fields.
    Suggestions come from /places/suggest (Google Places when configured,
-   otherwise the bundled GeoNames world-city list). Free text still allowed. */
-export function CityInput({ value, onChange, placeholder, autoFocus }) {
+   otherwise the bundled GeoNames world-city list). Free text still allowed.
+   onPick fires when a suggestion is chosen; onCommit fires on a plain Enter —
+   both let pickers (multi-city wishlist) add-and-clear in one gesture. */
+export function CityInput({ value, onChange, placeholder, autoFocus, onPick, onCommit }) {
   const [suggestions, setSuggestions] = useState([]);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
@@ -142,9 +144,16 @@ export function CityInput({ value, onChange, placeholder, autoFocus }) {
     onChange(s.label);
     setOpen(false);
     setSuggestions([]);
+    onPick?.(s);
   }
 
   function onKeyDown(e) {
+    if (e.key === 'Enter' && (!open || active < 0) && onCommit) {
+      e.preventDefault();
+      if (value.trim()) onCommit(value.trim());
+      setOpen(false);
+      return;
+    }
     if (!open || suggestions.length === 0) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -300,6 +309,41 @@ export function JourneyTracker({ status, style }) {
 export function ErrorText({ children }) {
   if (!children) return null;
   return <p style={{ color: 'var(--clay)', fontSize: 14, marginTop: 14 }}>{children}</p>;
+}
+
+/* Multi-city route at a glance: one band per city, width proportional to the
+   nights spent there, with dates underneath. Reads route = {cities: [...]}
+   as produced by the backend's route planner. */
+export function RouteTimeline({ route, style }) {
+  const cities = route?.cities || [];
+  if (cities.length < 2) return null;
+  const fmt = iso => {
+    if (!iso) return '';
+    const d = new Date(`${iso}T00:00:00`);
+    return isNaN(d) ? '' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  };
+  const shades = ['var(--pine)', 'var(--clay)'];
+  return (
+    <div style={{ display: 'flex', gap: 3, alignItems: 'stretch', ...style }}>
+      {cities.map((c, i) => (
+        <div key={`${c.city}-${i}`} style={{ flex: `${Math.max(c.nights, 1)} 1 0`, minWidth: 0 }}>
+          <div style={{
+            height: 5, borderRadius: 99, background: shades[i % shades.length],
+            opacity: i % 2 ? 0.75 : 0.9,
+          }} />
+          <p style={{
+            fontWeight: 700, fontSize: 13.5, marginTop: 7,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            {c.town || (c.city || '').split(',')[0]}
+          </p>
+          <p className="muted" style={{ fontSize: 11.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {c.nights} night{c.nights === 1 ? '' : 's'}{c.start ? ` · ${fmt(c.start)} → ${fmt(c.end)}` : ''}
+          </p>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 /* Wide place photo with photographer credit (renders nothing without an image) */

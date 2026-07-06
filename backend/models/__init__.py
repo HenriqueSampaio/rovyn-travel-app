@@ -27,7 +27,9 @@ class QuestionnaireData(BaseModel):
     travel_dates_start: str
     travel_dates_end: str
     departure_city: str = ""
+    return_city: str = ""  # where the traveler flies home to; "" = same as departure
     trip_style: str = "no-preference"  # "single-city" | "multi-city" | "no-preference"
+    multi_city_picks: list[str] = Field(default_factory=list)  # cities this traveler wants on a multi-city route
     vibes: list[str]
     accommodation_type: str
     pace: str = "moderately"  # "very" | "moderately" | "slightly" (busy)

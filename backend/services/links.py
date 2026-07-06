@@ -49,7 +49,11 @@ def booking_stays(destination: str, check_in: str, check_out: str, adults: int) 
     return _with_affiliate(url, {"aid": os.environ.get("BOOKING_AFFILIATE_AID")})
 
 
-def expedia_flights(origin: str, destination: str, depart: str, return_: str, adults: int) -> str:
+def expedia_flights(origin: str, destination: str, depart: str, return_: str, adults: int,
+                    return_from: str = "", return_to: str = "") -> str:
+    """Round-trip search. The return leg defaults to destination → origin;
+    open-jaw trips (multi-city routes, or travelers going home to a different
+    city) override it with return_from / return_to."""
     def us_date(iso: str) -> str:
         parts = iso.split("-")
         if len(parts) == 3:
@@ -57,13 +61,21 @@ def expedia_flights(origin: str, destination: str, depart: str, return_: str, ad
         return iso
 
     leg1 = f"from:{origin},to:{destination},departure:{us_date(depart)}TANYT"
-    leg2 = f"from:{destination},to:{origin},departure:{us_date(return_)}TANYT"
+    leg2 = f"from:{return_from or destination},to:{return_to or origin},departure:{us_date(return_)}TANYT"
     url = (
         "https://www.expedia.com/Flights-Search?trip=roundtrip"
         f"&leg1={quote(leg1)}&leg2={quote(leg2)}"
         f"&passengers=adults:{adults}&mode=search"
     )
     return _with_affiliate(url, {"affcid": os.environ.get("EXPEDIA_AFFILIATE_ID")})
+
+
+def rome2rio(origin: str, destination: str) -> str:
+    """Every way to travel between two cities (train, flight, bus, ferry) —
+    the go-to comparison page for intercity legs on multi-city routes."""
+    def slug(place: str) -> str:
+        return quote(place.split(",")[0].strip().replace(" ", "-"))
+    return f"https://www.rome2rio.com/map/{slug(origin)}/{slug(destination)}"
 
 
 def getyourguide_tours(destination: str, date_from: str, date_to: str) -> str:
