@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { motion, animate, useTransform } from 'framer-motion';
-import { swipeProgress } from './ui.jsx';
+import { swipeProgress, InSwipeDeck, Nav } from './ui.jsx';
 import Trips from './pages/Trips.jsx';
 import Feed from './pages/Feed.jsx';
 import Wishlist from './pages/Wishlist.jsx';
@@ -74,7 +74,10 @@ export default function SwipeShell() {
         if (Math.abs(dx) < 12 && Math.abs(dy) < 12) return; // not decided yet
         if (Math.abs(dx) <= Math.abs(dy)) { g = null; return; } // vertical — let it scroll
         g.locked = true;
-        setShift(window.scrollY);
+        // Shift the incoming page down so its top meets the visible area
+        // (the track starts below the static nav, hence the offset)
+        const trackTop = el.getBoundingClientRect().top + window.scrollY;
+        setShift(Math.max(0, window.scrollY - trackTop));
         setDragging(true);
       }
       e.preventDefault();
@@ -117,8 +120,16 @@ export default function SwipeShell() {
   }, [index, navigate]);
 
   return (
-    <div ref={ref} style={{ overflow: 'hidden', touchAction: 'pan-y' }}>
-      <motion.div style={{ display: 'flex', width: '300%', x }}>
+    <>
+      {/* The nav stays put — only the content below it slides */}
+      <div className="page" style={{ minHeight: 0 }}>
+        <div className="page-inner" style={{ maxWidth: 680, paddingBottom: 0 }}>
+          <Nav />
+        </div>
+      </div>
+      <div ref={ref} className="swipe-deck" style={{ overflow: 'hidden', touchAction: 'pan-y' }}>
+        <InSwipeDeck.Provider value={true}>
+          <motion.div style={{ display: 'flex', width: '300%', x }}>
         {PAGES.map((Comp, i) => {
           const active = i === index;
           return (
@@ -137,7 +148,9 @@ export default function SwipeShell() {
             </div>
           );
         })}
-      </motion.div>
-    </div>
+          </motion.div>
+        </InSwipeDeck.Provider>
+      </div>
+    </>
   );
 }
