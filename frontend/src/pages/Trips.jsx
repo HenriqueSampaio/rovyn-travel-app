@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowRight, CheckCircle2, Compass, LogOut, Plus, Ticket, Trash2, Crown, Users } from 'lucide-react';
+import { ArrowRight, Check, CheckCircle2, Compass, LogOut, MapPin, Plus, Ticket, Trash2, Crown, Users } from 'lucide-react';
 import { api } from '../api/index.js';
 import { Page, Field, Loading, ErrorText, CityInput } from '../ui.jsx';
 
@@ -24,6 +24,36 @@ function Countdown({ dates }) {
   );
 }
 
+// How the trip's destination gets decided: pinned by the creator, or
+// suggested by Rovyn from the questionnaires and voted on by the group.
+const DESTINATION_MODES = [
+  {
+    id: 'known',
+    Icon: MapPin,
+    title: 'We know where we’re going',
+    desc: 'Pin the destination now — the group plans around it',
+  },
+  {
+    id: 'suggest',
+    Icon: Compass,
+    title: 'Let Rovyn suggest destinations',
+    desc: 'Five matched places to vote on, drawn from everyone’s answers',
+  },
+];
+
+function ModeRow({ selected, onClick, Icon, title, desc }) {
+  return (
+    <button className={`opt-row${selected ? ' selected' : ''}`} onClick={onClick} type="button">
+      <Icon size={18} strokeWidth={1.7} color={selected ? 'var(--pine)' : 'var(--muted)'} />
+      <span style={{ flex: 1 }}>
+        <span className="opt-title" style={{ display: 'block', fontSize: 15.5 }}>{title}</span>
+        <span className="opt-desc">{desc}</span>
+      </span>
+      {selected && <Check size={16} strokeWidth={2.4} color="var(--pine)" />}
+    </button>
+  );
+}
+
 const STATUS_LABEL = {
   waiting: 'Gathering preferences',
   voting: 'Voting on destinations',
@@ -38,6 +68,7 @@ export default function Trips() {
   const navigate = useNavigate();
   const [trips, setTrips] = useState(null);
   const [name, setName] = useState('');
+  const [destMode, setDestMode] = useState('known');
   const [destination, setDestination] = useState('');
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
@@ -70,7 +101,8 @@ export default function Trips() {
     setBusy(true);
     setError('');
     try {
-      const t = await api.createTrip(name.trim(), destination.trim());
+      // Empty destination is the API's signal for suggestion mode
+      const t = await api.createTrip(name.trim(), destMode === 'suggest' ? '' : destination.trim());
       navigate(`/trips/${t.id}`);
     } catch (err) {
       setError(err.message);
@@ -171,15 +203,25 @@ export default function Trips() {
           <Field label="Trip name">
             <input placeholder="Summer in the Algarve" value={name} onChange={e => setName(e.target.value)} />
           </Field>
-          <Field label="Destination — optional">
-            <CityInput placeholder="Hvar, Croatia" value={destination} onChange={setDestination} />
-          </Field>
-          <p className="muted" style={{ fontSize: 13, marginTop: -16, marginBottom: 24 }}>
-            {destination.trim()
-              ? 'The group will plan around this destination — no destination vote.'
-              : 'Leave blank and Rovyn will propose destinations for the group to vote on.'}
-          </p>
-          <button className="btn" disabled={busy || !name.trim()}>
+          <p className="eyebrow" style={{ fontSize: 11, marginBottom: 4 }}>Destination</p>
+          {DESTINATION_MODES.map(m => (
+            <ModeRow key={m.id} selected={destMode === m.id} Icon={m.Icon}
+                     title={m.title} desc={m.desc}
+                     onClick={() => setDestMode(m.id)} />
+          ))}
+          {destMode === 'known' ? (
+            <div style={{ marginTop: 22 }}>
+              <Field label="Where to?">
+                <CityInput placeholder="Hvar, Croatia" value={destination} onChange={setDestination} />
+              </Field>
+            </div>
+          ) : (
+            <p className="muted" style={{ fontSize: 13, margin: '18px 0 28px', maxWidth: 400 }}>
+              Once everyone answers the questionnaire, Rovyn proposes five destinations
+              matched to the group's vibes, budget and dates — then you all vote.
+            </p>
+          )}
+          <button className="btn" disabled={busy || !name.trim() || (destMode === 'known' && !destination.trim())}>
             Create <ArrowRight size={16} />
           </button>
         </form>

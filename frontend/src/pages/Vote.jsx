@@ -165,11 +165,24 @@ export default function Vote() {
               {dest.why_it_matches}
             </p>
 
-            {dest.suggested_route && (
+            {Array.isArray(dest.route) && dest.route.length > 1 ? (
+              // Structured multi-city route — the trip this card is pitching
+              <p className="muted" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', columnGap: 9, rowGap: 4, fontSize: 14, marginBottom: 22 }}>
+                <Route size={15} strokeWidth={1.8} />
+                {dest.route.map((stop, j) => (
+                  <span key={`${stop.city}-${j}`} title={stop.why || undefined} style={{ whiteSpace: 'nowrap' }}>
+                    <span style={{ color: 'var(--ink-soft)', fontWeight: 600 }}>
+                      {(stop.city || '').split(',')[0].trim()}
+                    </span>
+                    {' '}{stop.nights}n{j < dest.route.length - 1 ? '  →' : ''}
+                  </span>
+                ))}
+              </p>
+            ) : dest.suggested_route ? (
               <p className="muted" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, marginBottom: 22 }}>
                 <Route size={15} strokeWidth={1.8} /> {dest.suggested_route}
               </p>
-            )}
+            ) : null}
 
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 26 }}>
               {dest.links?.stays?.airbnb && (

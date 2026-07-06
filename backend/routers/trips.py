@@ -408,7 +408,11 @@ def read_city_ideas(trip_id: str, user: dict = Depends(get_current_user)):
     group_picks = sorted(picks.values(), key=lambda p: -p["count"])
 
     cached = json.loads(trip["city_ideas"]) if trip["city_ideas"] else None
-    if cached and cached.get("anchor") == anchor:
+    if not anchor:
+        # No destination yet — nothing to suggest around. Skip the cache both
+        # ways: don't serve a stale anchorless entry, don't write one either.
+        suggestions = []
+    elif cached and cached.get("anchor") == anchor:
         suggestions = cached.get("suggestions") or []
     else:
         # One AI call per trip (per anchor) — the network fetch happens outside
@@ -541,8 +545,17 @@ def create_options(trip_id: str, user: dict = Depends(get_current_user)):
             raise HTTPException(status_code=400, detail="Not everyone has submitted their questionnaire yet.")
         conn.execute("UPDATE trips SET options_generating = 1 WHERE id = ?", (trip_id,))
 
+    # The route the group voted for seeds the board — the winning card's
+    # promise, not a re-derivation (None when the winner was single-base).
+    suggested_route = None
+    if trip["recommendations"] and trip["selected_destination"]:
+        rec = next((r for r in json.loads(trip["recommendations"])
+                    if r.get("name") == trip["selected_destination"]), None)
+        suggested_route = (rec or {}).get("route")
+
     try:
-        options = generate_trip_options(destination, responses, trip_name=trip["name"])
+        options = generate_trip_options(destination, responses, trip_name=trip["name"],
+                                        suggested_route=suggested_route)
     except Exception as exc:
         with get_conn() as conn:
             conn.execute("UPDATE trips SET options_generating = 0 WHERE id = ?", (trip_id,))
