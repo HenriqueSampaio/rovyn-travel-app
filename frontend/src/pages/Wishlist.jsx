@@ -6,6 +6,44 @@ import { api } from '../api/index.js';
 import { Page, Loading, ErrorText } from '../ui.jsx';
 import { timeAgo } from './Feed.jsx';
 
+/* At-a-glance itinerary: one dot per day on a connected line, with the
+   day's theme underneath. Scrolls sideways when the trip runs long —
+   data-noswipe keeps that scroll from triggering page-swipe navigation. */
+function ItineraryTimeline({ days }) {
+  if (!days?.length) return null;
+  return (
+    <div className="itin-strip" data-noswipe style={{ marginTop: 16 }}>
+      {days.map((d, i) => (
+        <div key={d.day ?? i} style={{ flex: '0 0 auto', width: 104 }}>
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+            <span style={{
+              width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+              background: i === 0 ? 'var(--clay)' : 'var(--pine)',
+            }} />
+            {i < days.length - 1 && (
+              <span style={{ flex: 1, height: 1, background: 'var(--line)', margin: '0 5px' }} />
+            )}
+          </div>
+          <p style={{
+            fontSize: 10.5, fontWeight: 700, letterSpacing: '0.14em',
+            textTransform: 'uppercase', color: 'var(--pine)',
+          }}>
+            Day {d.day ?? i + 1}
+          </p>
+          {d.theme && (
+            <p className="muted" style={{
+              fontSize: 11.5, lineHeight: 1.35, marginTop: 2, paddingRight: 12,
+              display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+            }}>
+              {d.theme}
+            </p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function Wishlist() {
   const navigate = useNavigate();
   const [items, setItems] = useState(null);
@@ -95,6 +133,7 @@ export default function Wishlist() {
                     {item.summary || `“${item.title}”`}
                   </p>
                 )}
+                <ItineraryTimeline days={item.days} />
               </div>
               {confirmId === item.id ? (
                 <span style={{ display: 'inline-flex', gap: 14, alignItems: 'center' }} onClick={e => e.stopPropagation()}>
