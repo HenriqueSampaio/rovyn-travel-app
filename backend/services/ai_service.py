@@ -251,13 +251,20 @@ def _attach_links(rec: dict, prefs: dict) -> dict:
 # Destination recommendations
 # ---------------------------------------------------------------------------
 
-def get_destination_recommendations(responses: list[dict], trip_name: str = "") -> list[dict]:
+def get_destination_recommendations(responses: list[dict], trip_name: str = "",
+                                    exclude: list[str] | None = None) -> list[dict]:
+    """exclude lists destination names already offered — "give us more ideas"
+    re-runs this and must come back with five different places."""
     prefs = _aggregate_preferences(responses)
+    exclude = [e for e in (exclude or []) if (e or "").strip()]
 
     if ai_available():
-        recommendations = _ai_recommendations(prefs, trip_name)
+        recommendations = _ai_recommendations(prefs, trip_name, exclude)
     else:
-        recommendations = _sample_recommendations(prefs)
+        recommendations = _sample_recommendations(prefs, exclude)
+    # The model is asked to avoid repeats, never trusted to
+    seen = {e.casefold() for e in exclude}
+    recommendations = [r for r in recommendations if (r.get("name") or "").casefold() not in seen]
     _finalize_rec_routes(recommendations, prefs)
 
     for rec in recommendations:
@@ -302,7 +309,7 @@ def _finalize_rec_routes(recommendations: list[dict], prefs: dict) -> None:
         )
 
 
-def _ai_recommendations(prefs: dict, trip_name: str = "") -> list[dict]:
+def _ai_recommendations(prefs: dict, trip_name: str = "", exclude: list[str] | None = None) -> list[dict]:
     budget = prefs["budget_range"]
     dates = prefs["travel_dates"]
     duration = _duration_days(dates)
@@ -342,7 +349,16 @@ def _ai_recommendations(prefs: dict, trip_name: str = "") -> list[dict]:
             "in the same region), unless it clearly conflicts with the group's budget or dates."
         )
 
-    prompt = f"""You are an expert travel planner. A group of {prefs['group_size']} people wants to travel together.
+    exclude_note = ""
+    if exclude:
+        exclude_note = (
+            f"\n- The group already saw and passed on: {', '.join(exclude)}. Recommend 5 COMPLETELY "
+            "DIFFERENT destinations — no repeats, and reach for different countries or regions where sensible."
+        )
+
+    traveler_line = ("A solo traveler is planning a trip." if prefs["group_size"] == 1
+                     else f"A group of {prefs['group_size']} people wants to travel together.")
+    prompt = f"""You are an expert travel planner. {traveler_line}
 
 Group profile:
 - Budget per person: ${budget['min']}–${budget['max']} USD (total trip, flights excluded)
@@ -351,7 +367,7 @@ Group profile:
 - Desired vibes (most voted first): {vibes}
 - {trip_style_note}
 - Preferred accommodation: {prefs['preferred_accommodation']}
-- Special requirements: {requirements}{name_note}
+- Special requirements: {requirements}{name_note}{exclude_note}
 
 Recommend exactly 5 travel destinations that suit this entire group. Weigh nature/outdoors, nightlife/party, and cultural interests according to the vibes above, and factor in reasonable flight access from the departure cities. "why_it_matches" must tie each pick to THIS group's vibes, budget and dates.{route_rule}
 
@@ -375,8 +391,9 @@ Respond with ONLY a valid JSON array (no markdown, no extra text):
     return _ask_claude(prompt, max_tokens=6000 if want_routes else 4096)
 
 
-def _sample_recommendations(prefs: dict) -> list[dict]:
-    """Deterministic demo data used when ANTHROPIC_API_KEY is not configured."""
+def _sample_recommendations(prefs: dict, exclude: list[str] | None = None) -> list[dict]:
+    """Deterministic demo data used when ANTHROPIC_API_KEY is not configured.
+    The pool holds two batches' worth so "give us more ideas" works offline."""
     budget = prefs["budget_range"]
     lo = budget["min"] or 500
     hi = budget["max"] or 2000
@@ -396,7 +413,24 @@ def _sample_recommendations(prefs: dict) -> list[dict]:
         ("Chiang Mai", "Thailand", 82, "Temples, jungle treks and night markets on a backpacker budget.",
          ["Old-city temples", "Doi Inthanon trek", "Sunday night market", "Thai cooking class"],
          "Chiang Mai (3 nights) -> Pai (2 nights)", "Pai, Thailand"),
+        ("Athens", "Greece", 89, "Ancient stones by day, Aegean ferries and rooftop bars by night.",
+         ["Acropolis at opening time", "Plaka tavernas", "Ferry to the Cyclades", "Lycabettus sunset"],
+         "Athens (3 nights) -> Santorini (2 nights)", "Santorini, Greece"),
+        ("Kyoto", "Japan", 88, "Temples at dawn, izakayas at night, bullet-train side trips.",
+         ["Fushimi Inari gates", "Arashiyama bamboo grove", "Gion at dusk", "Nishiki market"],
+         "Kyoto (3 nights) -> Osaka (2 nights)", "Osaka, Japan"),
+        ("Budapest", "Hungary", 86, "Thermal baths, ruin bars and grand river views on a kind budget.",
+         ["Széchenyi baths", "Ruin-bar crawl", "Danube at night", "Castle-hill walk"],
+         "Budapest (3 nights) -> Vienna (2 nights)", "Vienna, Austria"),
+        ("Cartagena", "Colombia", 84, "Caribbean color, walled-city nights and island beach days.",
+         ["Walled old town", "Rosario Islands boat day", "Getsemaní street life", "Sunset at Café del Mar"],
+         "Cartagena (3 nights) -> Santa Marta (2 nights)", "Santa Marta, Colombia"),
+        ("Marrakesh", "Morocco", 83, "Souks, riads and desert stars a short hop from Europe.",
+         ["Jemaa el-Fnaa at dusk", "Jardin Majorelle", "Atlas foothills day trip", "Hammam afternoon"],
+         "Marrakesh (3 nights) -> Essaouira (2 nights)", "Essaouira, Morocco"),
     ]
+    skip = {(e or "").casefold() for e in exclude or []}
+    samples = [s for s in samples if s[0].casefold() not in skip][:5]
     recs = []
     for name, country, score, tagline, highlights, route, partner in samples:
         rec = {

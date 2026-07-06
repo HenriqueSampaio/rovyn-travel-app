@@ -11,9 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from backend.auth import get_current_user
 from backend.db import IS_POSTGRES, fetch_many, get_conn
 from backend.models import (
-    ArrangeSlotsRequest, CreateTripRequest, CurationRequest, EditRequest, JoinTripRequest,
-    PayRequest, QuestionnaireData, ReorderRequest, RouteLockRequest, RouteNightsRequest,
-    SlotEditRequest, StarRequest, VoteRequest,
+    AddRouteStopRequest, ArrangeSlotsRequest, CreateTripRequest, CurationRequest, EditRequest,
+    JoinTripRequest, PayRequest, QuestionnaireData, ReorderRequest, RouteLockRequest,
+    RouteNightsRequest, SlotEditRequest, StarRequest, VoteRequest,
 )
 from backend.services.ai_service import (
     RevisionNotPossible, ai_available, categories_for, generate_final_plan,
@@ -43,7 +43,7 @@ def _load_trip(conn, trip_id: str):
 # The status payload only needs to know WHETHER the big AI blobs exist —
 # selecting them would ship megabytes of JSON per request from a remote DB.
 _LIGHT_TRIP_COLUMNS = """tr.id, tr.name, tr.invite_code, tr.status, tr.leader_id,
-           tr.destination, tr.selected_destination, tr.trip_mode,
+           tr.destination, tr.selected_destination, tr.trip_mode, tr.solo,
            tr.recommendations_generating, tr.itinerary_generating,
            tr.options_generating, tr.final_plan_generating,
            (tr.recommendations IS NOT NULL) AS recommendations,
@@ -128,6 +128,7 @@ def _status_payload(conn, trip, user_id: str) -> dict:
         "leader_id": trip["leader_id"],
         "is_leader": user_id == trip["leader_id"],
         "destination_fixed": bool(trip["destination"]),
+        "solo": bool(trip["solo"]),
         "decided_destination": _decided_destination(trip),
         "members": [
             {
@@ -238,16 +239,17 @@ def create_trip(req: CreateTripRequest, user: dict = Depends(get_current_user)):
         while conn.execute("SELECT 1 FROM trips WHERE invite_code = ?", (code,)).fetchone():
             code = _generate_invite_code()
         conn.execute(
-            """INSERT INTO trips (id, name, invite_code, leader_id, destination, selected_destination, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO trips (id, name, invite_code, leader_id, destination, selected_destination, solo, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (trip_id, req.name.strip(), code, user["id"],
-             destination or None, destination or None, _now()),
+             destination or None, destination or None, 1 if req.solo else 0, _now()),
         )
         conn.execute(
             "INSERT INTO trip_members (trip_id, user_id, joined_at) VALUES (?, ?, ?)",
             (trip_id, user["id"], _now()),
         )
-    return {"id": trip_id, "invite_code": code, "name": req.name.strip(), "destination": destination or None}
+    return {"id": trip_id, "invite_code": code, "name": req.name.strip(),
+            "destination": destination or None, "solo": req.solo}
 
 
 @router.post("/join")
@@ -263,6 +265,8 @@ def join_trip(req: JoinTripRequest, user: dict = Depends(get_current_user)):
         ).fetchone()
         if already:
             return {"id": trip["id"], "name": trip["name"], "already_member": True}
+        if trip["solo"]:
+            raise HTTPException(status_code=400, detail="That's a solo journey — invites are closed for it.")
         if trip["status"] != "waiting":
             raise HTTPException(
                 status_code=400,
@@ -474,6 +478,111 @@ def create_recommendations(trip_id: str, user: dict = Depends(get_current_user))
     with get_conn() as conn:
         conn.execute(
             "UPDATE trips SET recommendations = ?, recommendations_generating = 0, status = 'voting' WHERE id = ?",
+            (json.dumps(recommendations), trip_id),
+        )
+    return {"recommendations": recommendations}
+
+
+_MAX_RECOMMENDATIONS = 15
+
+
+@router.post("/{trip_id}/recommendations/more")
+def more_recommendations(trip_id: str, user: dict = Depends(get_current_user)):
+    """Five fresh ideas when nothing on the ballot clicks. Any traveler can
+    ask (disliking every option shouldn't need the leader), the total is
+    capped so the ballot stays votable, and new ideas only ever APPEND —
+    votes already cast keep pointing at their cards."""
+    with get_conn() as conn:
+        trip = _member_trip(conn, trip_id, user["id"])
+        if not trip["recommendations"]:
+            raise HTTPException(status_code=400, detail="Recommendations haven't been generated yet.")
+        if trip["selected_destination"]:
+            raise HTTPException(status_code=400, detail="Voting has closed — a destination was already selected.")
+        if trip["recommendations_generating"]:
+            raise HTTPException(status_code=409, detail="Rovyn is already out looking for more ideas.")
+        current = json.loads(trip["recommendations"])
+        if len(current) >= _MAX_RECOMMENDATIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Rovyn has offered its {_MAX_RECOMMENDATIONS} best ideas — vote for the closest fit, "
+                       "or add a stop to the route that comes closest.",
+            )
+        responses = _questionnaire_rows(conn, trip_id)
+        conn.execute("UPDATE trips SET recommendations_generating = 1 WHERE id = ?", (trip_id,))
+
+    try:
+        extra = get_destination_recommendations(
+            responses, trip_name=trip["name"],
+            exclude=[r.get("name", "") for r in current],
+        )
+    except Exception as exc:
+        with get_conn() as conn:
+            conn.execute("UPDATE trips SET recommendations_generating = 0 WHERE id = ?", (trip_id,))
+        raise HTTPException(status_code=502, detail=f"Recommendation generation failed: {exc}")
+
+    with get_conn() as conn:
+        # Re-read under the lock — belt and braces against concurrent writers
+        trip = _load_trip(conn, trip_id)
+        current = json.loads(trip["recommendations"]) if trip["recommendations"] else []
+        seen = {(r.get("name") or "").casefold() for r in current}
+        fresh = [r for r in extra if (r.get("name") or "").casefold() not in seen]
+        combined = (current + fresh)[:_MAX_RECOMMENDATIONS]
+        conn.execute(
+            "UPDATE trips SET recommendations = ?, recommendations_generating = 0 WHERE id = ?",
+            (json.dumps(combined), trip_id),
+        )
+    return {"recommendations": combined}
+
+
+@router.post("/{trip_id}/recommendations/add-stop")
+def add_recommendation_stop(trip_id: str, req: AddRouteStopRequest, user: dict = Depends(get_current_user)):
+    """Add one stop to a recommended route before the vote closes — liking a
+    route except for one missing city shouldn't force a full re-roll. The
+    nights rebalance in code; the stop count stays within the trip's cap."""
+    from backend.services.ai_service import _normalize_route_cities, _same_town
+
+    city = req.city.strip()
+    if not city:
+        raise HTTPException(status_code=400, detail="Name the city you'd like on the route.")
+    with get_conn() as conn:
+        trip = _member_trip(conn, trip_id, user["id"])
+        if not trip["recommendations"]:
+            raise HTTPException(status_code=400, detail="Recommendations haven't been generated yet.")
+        if trip["selected_destination"]:
+            raise HTTPException(status_code=400, detail="Voting has closed — a destination was already selected.")
+        if trip["recommendations_generating"]:
+            raise HTTPException(status_code=409, detail="Rovyn is adding more ideas — try again in a moment.")
+        recommendations = json.loads(trip["recommendations"])
+        rec = next((r for r in recommendations if r.get("name") == req.destination_name), None)
+        if rec is None:
+            raise HTTPException(status_code=400, detail="That destination is not one of the recommendations.")
+        route = rec.get("route")
+        if not isinstance(route, list) or len(route) < 2:
+            raise HTTPException(status_code=400, detail="That suggestion is a single home base — stops can only be added to multi-city routes.")
+        if any(_same_town(c.get("city", ""), city) for c in route):
+            raise HTTPException(status_code=400, detail=f"{city.split(',')[0].strip()} is already on that route.")
+
+        # Rec routes always sum to the trip's night count, so the route IS the duration
+        duration = sum(c.get("nights") or 0 for c in route)
+        max_cities = max(2, min(4, duration // 2))
+        if len(route) >= max_cities:
+            raise HTTPException(
+                status_code=400,
+                detail=f"A {duration}-night trip fits at most {max_cities} stops — this route is full.",
+            )
+        # Per-city hotel search & links downstream need "City, Country"
+        if "," not in city and rec.get("country"):
+            city = f"{city}, {rec['country']}"
+        cities = _normalize_route_cities(
+            route + [{"city": city, "nights": 2, "why": f"Added by {user['name']}."}], "", duration)
+        if not any(_same_town(c["city"], city) for c in cities):
+            raise HTTPException(status_code=400, detail="The trip is too short to fit another stop.")
+        rec["route"] = cities
+        rec["suggested_route"] = " -> ".join(
+            f"{c['city']} ({c['nights']} night{'s' if c['nights'] != 1 else ''})" for c in cities
+        )
+        conn.execute(
+            "UPDATE trips SET recommendations = ? WHERE id = ?",
             (json.dumps(recommendations), trip_id),
         )
     return {"recommendations": recommendations}

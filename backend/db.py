@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS trips (
     stay_media                 TEXT,
     trip_mode                  TEXT,
     city_ideas                 TEXT,
+    solo                       INTEGER NOT NULL DEFAULT 0,
     created_at                 TEXT NOT NULL
 );
 
@@ -179,6 +180,7 @@ _COLUMN_MIGRATIONS = [
     ("trips", "stay_media", "TEXT"),
     ("trips", "trip_mode", "TEXT"),      # 'single' | 'multi' — set when the board is generated
     ("trips", "city_ideas", "TEXT"),     # cached nearby-city suggestions for the questionnaire
+    ("trips", "solo", "INTEGER NOT NULL DEFAULT 0"),  # one traveler — no invites, tailored copy
     ("bookings", "stale", "INTEGER NOT NULL DEFAULT 0"),
     ("payments", "mode", "TEXT NOT NULL DEFAULT 'full'"),
 ]

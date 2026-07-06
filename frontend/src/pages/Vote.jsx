@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  ArrowRight, BedDouble, Check, MapPin, PlaneTakeoff, Route, Ticket, Trophy, Vote as VoteIcon,
+  ArrowRight, BedDouble, Check, MapPin, PlaneTakeoff, Plus, Route, Sparkles, Ticket, Trophy, Vote as VoteIcon, X,
 } from 'lucide-react';
 import { api } from '../api/index.js';
-import { Page, Loading, ErrorText, Hero, ThinkingLoader } from '../ui.jsx';
+import { Page, Loading, ErrorText, Hero, ThinkingLoader, CityInput } from '../ui.jsx';
 
 export default function Vote() {
   const navigate = useNavigate();
@@ -14,7 +14,12 @@ export default function Vote() {
   const [trip, setTrip] = useState(null);
   const [error, setError] = useState('');
   const [building, setBuilding] = useState(false);
+  const [moreBusy, setMoreBusy] = useState(false);
+  const [addingFor, setAddingFor] = useState(null); // rec whose add-a-stop form is open
+  const [stopQuery, setStopQuery] = useState('');
+  const [stopErr, setStopErr] = useState(null);     // { name, message }
   const pollRef = useRef(null);
+  const prevGenRef = useRef(false);
 
   useEffect(() => {
     api.getRecommendations(tripId)
@@ -31,7 +36,15 @@ export default function Vote() {
         if (data.has_options) {
           clearInterval(pollRef.current);
           navigate(`/trips/${tripId}/plan`);
+          return;
         }
+        // A travel mate asked Rovyn for more ideas — pull the grown list when it lands
+        if (prevGenRef.current && !data.recommendations_generating) {
+          api.getRecommendations(tripId)
+            .then(d => d.recommendations && setRecs(d.recommendations))
+            .catch(() => {});
+        }
+        prevGenRef.current = Boolean(data.recommendations_generating);
       } catch {
         /* transient */
       }
@@ -64,8 +77,36 @@ export default function Vote() {
     }
   }
 
+  async function more() {
+    setMoreBusy(true);
+    setError('');
+    try {
+      const res = await api.moreRecommendations(tripId);
+      setRecs(res.recommendations);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setMoreBusy(false);
+    }
+  }
+
+  async function addStop(destName, label) {
+    const city = (label || '').trim();
+    if (!city) return;
+    setStopErr(null);
+    try {
+      const res = await api.addRouteStop(tripId, destName, city);
+      setRecs(res.recommendations);
+      setAddingFor(null);
+      setStopQuery('');
+    } catch (err) {
+      setStopErr({ name: destName, message: err.message });
+    }
+  }
+
   if (!recs || !trip) return <Page><Loading text="Gathering destinations…" /></Page>;
 
+  const solo = trip.solo;
   const winner = trip.selected_destination;
   const tallies = trip.vote_tallies || {};
   const isSample = recs.some(r => r.source === 'sample');
@@ -74,17 +115,21 @@ export default function Vote() {
     <Page width={760}>
       <p className="eyebrow">{trip.name}</p>
       <h1 style={{ fontSize: 42, margin: '10px 0 10px' }}>
-        {winner ? <>Next stop, <em style={{ color: 'var(--pine)' }}>{winner}</em></> : 'Cast your vote'}
+        {winner
+          ? <>Next stop, <em style={{ color: 'var(--pine)' }}>{winner}</em></>
+          : solo ? 'Pick your destination' : 'Cast your vote'}
       </h1>
       <p className="muted" style={{ marginBottom: isSample ? 10 : 40, maxWidth: 520 }}>
         {winner
-          ? 'The group has decided.'
-          : `${trip.votes_cast} of ${trip.total_members} votes in — you can change yours until the last vote lands.`}
+          ? solo ? 'Decided — pack your bags.' : 'The group has decided.'
+          : solo
+            ? 'Your pick decides it — choose the trip that calls to you.'
+            : `${trip.votes_cast} of ${trip.total_members} votes in — you can change yours until the last vote lands.`}
       </p>
       {isSample && (
         <p style={{ color: 'var(--clay)', fontSize: 14, marginBottom: 40 }}>
           These are sample destinations — add ANTHROPIC_API_KEY to Rovyn/.env for matches
-          tailored to your group's answers.
+          tailored to {solo ? 'your answers' : 'your group\'s answers'}.
         </p>
       )}
 
@@ -155,7 +200,7 @@ export default function Vote() {
               <div style={{ flex: 1, minWidth: 120, maxWidth: 260, height: 2, background: 'var(--line-soft)' }}>
                 <div style={{ width: `${dest.match_score}%`, height: '100%', background: 'var(--pine)' }} />
               </div>
-              <span className="muted" style={{ fontSize: 13 }}>{dest.match_score}% group match</span>
+              <span className="muted" style={{ fontSize: 13 }}>{dest.match_score}% {solo ? 'match' : 'group match'}</span>
               <span className="muted" style={{ fontSize: 13 }}>
                 · ${(dest.estimated_budget_per_person?.min || 0).toLocaleString()}–{(dest.estimated_budget_per_person?.max || 0).toLocaleString()} pp
               </span>
@@ -183,6 +228,35 @@ export default function Vote() {
                 <Route size={15} strokeWidth={1.8} /> {dest.suggested_route}
               </p>
             ) : null}
+
+            {/* Love the route but missing a city? Add a stop before the vote closes.
+                Hidden when the trip's night count can't fit another one. */}
+            {!winner && Array.isArray(dest.route) && dest.route.length > 1 && (() => {
+              const nights = dest.route.reduce((s, c) => s + (c.nights || 0), 0);
+              const capacity = Math.max(2, Math.min(4, Math.floor(nights / 2)));
+              if (dest.route.length >= capacity) return null;
+              return addingFor === dest.name ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '-6px 0 22px', maxWidth: 440 }}>
+                  <Plus size={16} strokeWidth={2.2} color="var(--pine)" style={{ flexShrink: 0 }} />
+                  <CityInput placeholder="Which city belongs on this route?" value={stopQuery}
+                             onChange={setStopQuery}
+                             onPick={s => addStop(dest.name, s.label)}
+                             onCommit={v => addStop(dest.name, v)} />
+                  <button type="button" className="btn-quiet" title="Never mind"
+                          onClick={() => { setAddingFor(null); setStopQuery(''); setStopErr(null); }}>
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : (
+                <button type="button" className="btn-quiet" style={{ fontSize: 13, margin: '-6px 0 22px' }}
+                        onClick={() => { setAddingFor(dest.name); setStopQuery(''); setStopErr(null); }}>
+                  <Plus size={13} strokeWidth={2.4} /> Add a stop to this route
+                </button>
+              );
+            })()}
+            {stopErr?.name === dest.name && (
+              <p style={{ color: 'var(--clay)', fontSize: 13.5, margin: '-12px 0 20px' }}>{stopErr.message}</p>
+            )}
 
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 26 }}>
               {dest.links?.stays?.airbnb && (
@@ -213,13 +287,38 @@ export default function Vote() {
                   {mine ? <><Check size={15} strokeWidth={2.4} /> Your vote</> : <><VoteIcon size={15} /> Vote {dest.name}</>}
                 </button>
               ) : null}
-              <span className="muted" style={{ fontSize: 13, fontStyle: 'italic' }}>
-                {votes} vote{votes === 1 ? '' : 's'}
-              </span>
+              {!solo && (
+                <span className="muted" style={{ fontSize: 13, fontStyle: 'italic' }}>
+                  {votes} vote{votes === 1 ? '' : 's'}
+                </span>
+              )}
             </div>
           </motion.article>
         );
       })}
+
+      {/* Nothing on the ballot clicking? Rovyn will scout another batch. */}
+      {!winner && (
+        <div style={{ padding: '38px 0 8px', borderTop: '1px solid var(--line)' }}>
+          {moreBusy || trip.recommendations_generating ? (
+            <ThinkingLoader messages={[
+              'Rovyn is out scouting again…',
+              'Skipping what you already saw…',
+              'Matching budgets, dates and vibes…',
+              'Rovyn is thinking…',
+            ]} />
+          ) : (
+            <>
+              <p className="serif muted" style={{ fontStyle: 'italic', fontSize: 17, marginBottom: 14 }}>
+                {solo ? 'None of these calling to you?' : 'Nothing here the group loves?'}
+              </p>
+              <button className="btn-quiet" onClick={more}>
+                <Sparkles size={15} /> Ask Rovyn for five more ideas
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </Page>
   );
 }
