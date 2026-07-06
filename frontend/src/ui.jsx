@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence, animate, motionValue, useTransform } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Check, ChevronLeft, ChevronRight, Compass, LogOut, Loader2, MapPin } from 'lucide-react';
@@ -128,11 +128,16 @@ export function Nav() {
   );
 }
 
+/* True inside the SwipeShell deck: the shell renders one static Nav above
+   the sliding track, so pages in the deck must not render their own. */
+export const InSwipeDeck = createContext(false);
+
 export function Page({ children, width = 680, nav = true }) {
+  const inDeck = useContext(InSwipeDeck);
   return (
     <div className="page">
       <div className="page-inner" style={{ maxWidth: width }}>
-        {nav && <Nav />}
+        {nav && !inDeck && <Nav />}
         <motion.div
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}

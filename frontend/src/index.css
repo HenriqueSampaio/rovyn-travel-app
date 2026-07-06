@@ -150,6 +150,10 @@ a { color: var(--pine); text-decoration: none; }
 .opt-row.selected .opt-title { font-family: var(--serif); font-style: italic; font-size: 19px; }
 .opt-row .opt-desc { font-size: 13.5px; color: var(--muted); }
 
+/* Inside the swipe deck the nav is rendered once above the track, so the
+   pages don't each need to fill a whole viewport on their own */
+.swipe-deck .page { min-height: 0; }
+
 /* Mini itinerary timeline (wishlist rows) — sideways-scrolling day strip */
 .itin-strip {
   display: flex;
