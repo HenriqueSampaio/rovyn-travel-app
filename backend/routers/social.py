@@ -473,6 +473,7 @@ def copy_trip(post_id: str, req: CopyTripRequest, user: dict = Depends(get_curre
 
 def _wishlist_payload(item) -> dict:
     plan = normalize_snapshot(json.loads(item["trip_snapshot"]))
+    days = (plan.get("itinerary") or {}).get("days") or []
     return {
         "id": item["id"],
         "post_id": item["post_id"],
@@ -482,6 +483,11 @@ def _wishlist_payload(item) -> dict:
         "duration_days": plan.get("duration_days"),
         "title": (plan.get("itinerary") or {}).get("title"),
         "summary": plan.get("summary"),
+        # Compact day list so the wishlist can draw an at-a-glance timeline
+        "days": [
+            {"day": d.get("day"), "theme": d.get("theme") or d.get("morning") or ""}
+            for d in days
+        ],
         "added_at": item["added_at"],
     }
 
