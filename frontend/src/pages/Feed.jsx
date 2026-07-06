@@ -30,7 +30,7 @@ function MediaCarousel({ media }) {
   const many = media.length > 1;
   const item = media[index];
   return (
-    <div style={{
+    <div data-noswipe style={{
       position: 'relative', borderRadius: 14, overflow: 'hidden',
       background: 'var(--bg-soft)', border: '1px solid var(--line-soft)',
     }}>
