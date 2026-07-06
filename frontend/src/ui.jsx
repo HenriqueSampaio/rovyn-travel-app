@@ -69,7 +69,47 @@ export function Nav() {
   );
 }
 
+/* Swipe navigation between the three top-level pages (touch devices).
+   Swipe left moves forward through the order, swipe right moves back.
+   Ignores gestures that start on media/inputs ([data-noswipe]) and
+   anything more vertical than horizontal, so scrolling stays untouched. */
+const SWIPE_ORDER = ['/trips', '/feed', '/wishlist'];
+
+function useSwipeNav() {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  useEffect(() => {
+    const idx = SWIPE_ORDER.indexOf(pathname);
+    if (idx === -1) return;
+    let startX = 0, startY = 0, tracking = false;
+    function onStart(e) {
+      if (e.touches.length !== 1) return;
+      if (e.target.closest('[data-noswipe], input, textarea, select, video')) return;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      tracking = true;
+    }
+    function onEnd(e) {
+      if (!tracking) return;
+      tracking = false;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+      if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+      const next = SWIPE_ORDER[idx + (dx < 0 ? 1 : -1)];
+      if (next) navigate(next);
+    }
+    window.addEventListener('touchstart', onStart, { passive: true });
+    window.addEventListener('touchend', onEnd, { passive: true });
+    return () => {
+      window.removeEventListener('touchstart', onStart);
+      window.removeEventListener('touchend', onEnd);
+    };
+  }, [pathname, navigate]);
+}
+
 export function Page({ children, width = 680, nav = true }) {
+  useSwipeNav();
   return (
     <div className="page">
       <div className="page-inner" style={{ maxWidth: width }}>

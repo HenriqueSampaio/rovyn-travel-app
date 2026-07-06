@@ -6,70 +6,30 @@ import { api } from '../api/index.js';
 import { Page, Loading, ErrorText } from '../ui.jsx';
 import { timeAgo } from './Feed.jsx';
 
-function WishlistCard({ item, onRemove }) {
-  const navigate = useNavigate();
-
-  async function remove() {
-    if (!window.confirm(`Remove ${item.destination || 'this trip'} from your wishlist?`)) return;
-    await api.removeWishlistItem(item.id);
-    onRemove(item.id);
-  }
-
-  return (
-    <motion.article
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4 }}
-      style={{
-        padding: '24px 26px', borderRadius: 14, border: '1px solid var(--line)',
-        marginBottom: 20, background: 'rgba(46,93,79,0.03)',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
-        <p className="serif" style={{ fontSize: 22, fontWeight: 600, flex: 1 }}>
-          {item.destination || 'A trip worth keeping'}
-        </p>
-        <span className="muted" style={{ fontSize: 12.5, whiteSpace: 'nowrap' }}>
-          saved {timeAgo(item.added_at)}
-        </span>
-        <button onClick={remove} title="Remove from wishlist" style={{ color: 'var(--muted)' }}>
-          <Trash2 size={15} />
-        </button>
-      </div>
-
-      <p className="muted" style={{ fontSize: 13.5, margin: '6px 0 0', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <MapPin size={13} /> {item.author_name}'s itinerary
-        </span>
-        {item.duration_days && (
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <CalendarDays size={13} /> {item.duration_days} day{item.duration_days === 1 ? '' : 's'}
-          </span>
-        )}
-      </p>
-
-      {(item.summary || item.title) && (
-        <p className="serif" style={{ fontSize: 15, fontStyle: 'italic', color: 'var(--ink-soft)', marginTop: 12 }}>
-          {item.summary || `“${item.title}”`}
-        </p>
-      )}
-
-      <button className="btn" style={{ marginTop: 18 }}
-              onClick={() => navigate(`/wishlist/${item.id}/trip`)}>
-        Open itinerary <ArrowRight size={15} />
-      </button>
-    </motion.article>
-  );
-}
-
 export default function Wishlist() {
   const navigate = useNavigate();
   const [items, setItems] = useState(null);
   const [error, setError] = useState('');
+  const [confirmId, setConfirmId] = useState(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api.getWishlist().then(d => setItems(d.items)).catch(err => setError(err.message));
   }, []);
+
+  async function remove(item) {
+    setBusy(true);
+    setError('');
+    try {
+      await api.removeWishlistItem(item.id);
+      setItems(xs => xs.filter(x => x.id !== item.id));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setConfirmId(null);
+      setBusy(false);
+    }
+  }
 
   if (items === null && !error) return <Page width={560}><Loading text="Opening your wishlist…" /></Page>;
 
@@ -77,7 +37,7 @@ export default function Wishlist() {
     <Page width={560}>
       <p className="eyebrow">Your wishlist</p>
       <h1 style={{ fontSize: 38, margin: '10px 0 8px' }}>Trips for someday</h1>
-      <p className="muted" style={{ fontSize: 14.5, marginBottom: 40 }}>
+      <p className="muted" style={{ fontSize: 14.5, marginBottom: 48 }}>
         Itineraries you saved from the feed. When the time is right, open one and
         copy it onto your own dates.
       </p>
@@ -97,10 +57,70 @@ export default function Wishlist() {
         </div>
       )}
 
-      {items && items.map(item => (
-        <WishlistCard key={item.id} item={item}
-                      onRemove={id => setItems(xs => xs.filter(x => x.id !== id))} />
-      ))}
+      {items && items.length > 0 && (
+        <div>
+          <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <Bookmark size={13} strokeWidth={2.5} /> Saved · {items.length}
+          </p>
+          {items.map((item, i) => (
+            <motion.div
+              key={item.id}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.06, duration: 0.4 }}
+              className="opt-row"
+              style={{ cursor: 'pointer' }}
+              onClick={() => navigate(`/wishlist/${item.id}/trip`)}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="opt-title serif" style={{ fontSize: 22 }}>
+                  {item.destination || 'A trip worth keeping'}
+                </div>
+                <div className="opt-desc" style={{ display: 'flex', alignItems: 'center', gap: '2px 14px', flexWrap: 'wrap', marginTop: 4 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
+                    <MapPin size={13} /> {item.author_name}'s itinerary
+                  </span>
+                  {item.duration_days && (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
+                      <CalendarDays size={13} /> {item.duration_days} day{item.duration_days === 1 ? '' : 's'}
+                    </span>
+                  )}
+                  <span style={{ whiteSpace: 'nowrap' }}>saved {timeAgo(item.added_at)}</span>
+                </div>
+                {(item.summary || item.title) && (
+                  <p className="serif" style={{
+                    fontSize: 14.5, fontStyle: 'italic', color: 'var(--ink-soft)', marginTop: 6,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {item.summary || `“${item.title}”`}
+                  </p>
+                )}
+              </div>
+              {confirmId === item.id ? (
+                <span style={{ display: 'inline-flex', gap: 14, alignItems: 'center' }} onClick={e => e.stopPropagation()}>
+                  <button
+                    disabled={busy}
+                    onClick={() => remove(item)}
+                    style={{ color: 'var(--clay)', fontWeight: 700, fontSize: 13.5, whiteSpace: 'nowrap' }}
+                  >
+                    Remove?
+                  </button>
+                  <button className="muted" style={{ fontSize: 13.5 }} onClick={() => setConfirmId(null)}>cancel</button>
+                </span>
+              ) : (
+                <button
+                  title="Remove from wishlist"
+                  onClick={e => { e.stopPropagation(); setConfirmId(item.id); }}
+                  style={{ color: 'var(--muted)', padding: 6, marginRight: 4 }}
+                >
+                  <Trash2 size={16} strokeWidth={1.8} />
+                </button>
+              )}
+              <ArrowRight size={18} color="var(--pine)" />
+            </motion.div>
+          ))}
+        </div>
+      )}
     </Page>
   );
 }
