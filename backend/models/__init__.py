@@ -110,6 +110,10 @@ class LikeRequest(BaseModel):
     liked: bool
 
 
+class SaveRequest(BaseModel):
+    saved: bool
+
+
 class CopyCheckRequest(BaseModel):
     start_date: str  # YYYY-MM-DD — when the copier wants to travel
     end_date: str

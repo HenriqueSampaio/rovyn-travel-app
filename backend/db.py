@@ -167,6 +167,18 @@ CREATE TABLE IF NOT EXISTS post_comments (
     text       TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS wishlist_items (
+    id            TEXT PRIMARY KEY,
+    user_id       TEXT NOT NULL REFERENCES users(id),
+    post_id       TEXT NOT NULL,  -- no FK: the saved snapshot outlives the post
+    author_name   TEXT NOT NULL,
+    destination   TEXT,
+    caption       TEXT NOT NULL DEFAULT '',
+    trip_snapshot TEXT NOT NULL,
+    added_at      TEXT NOT NULL,
+    UNIQUE (user_id, post_id)
+);
 """
 
 # Columns added after the first release; applied to pre-existing databases.

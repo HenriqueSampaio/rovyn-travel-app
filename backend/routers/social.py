@@ -10,6 +10,7 @@ from backend.auth import get_current_user
 from backend.db import fetch_many, get_conn
 from backend.models import (
     CommentRequest, CopyCheckRequest, CopyTripRequest, CreatePostRequest, LikeRequest,
+    SaveRequest,
 )
 from backend.services.ai_service import (
     adapt_copied_plan, ai_available, normalize_snapshot,
@@ -109,12 +110,13 @@ def _post_payloads(conn, posts, user_id: str) -> list[dict]:
     author_ids = list({p["user_id"] for p in posts})
     author_ph = ", ".join(["?"] * len(author_ids))
 
-    media_rows, like_rows, my_like_rows, comment_rows, author_rows = fetch_many(conn, [
+    media_rows, like_rows, my_like_rows, comment_rows, author_rows, my_saved_rows = fetch_many(conn, [
         (f"SELECT post_id, media_type, url FROM post_media WHERE post_id IN ({ph}) ORDER BY position", ids),
         (f"SELECT post_id, COUNT(*) c FROM post_likes WHERE post_id IN ({ph}) GROUP BY post_id", ids),
         (f"SELECT post_id FROM post_likes WHERE user_id = ? AND post_id IN ({ph})", [user_id, *ids]),
         (f"SELECT post_id, COUNT(*) c FROM post_comments WHERE post_id IN ({ph}) GROUP BY post_id", ids),
         (f"SELECT id, name FROM users WHERE id IN ({author_ph})", author_ids),
+        (f"SELECT post_id FROM wishlist_items WHERE user_id = ? AND post_id IN ({ph})", [user_id, *ids]),
     ])
 
     media_by: dict[str, list] = {}
@@ -124,6 +126,7 @@ def _post_payloads(conn, posts, user_id: str) -> list[dict]:
     liked_by_me = {r["post_id"] for r in my_like_rows}
     comments_by = {r["post_id"]: r["c"] for r in comment_rows}
     name_by = {r["id"]: r["name"] for r in author_rows}
+    saved_by_me = {r["post_id"] for r in my_saved_rows}
 
     payloads = []
     for post in posts:
@@ -141,6 +144,7 @@ def _post_payloads(conn, posts, user_id: str) -> list[dict]:
             "media": [{"media_type": m["media_type"], "url": m["url"]} for m in media],
             "like_count": likes_by.get(post["id"], 0),
             "liked_by_me": post["id"] in liked_by_me,
+            "saved_by_me": post["id"] in saved_by_me,
             "comment_count": comments_by.get(post["id"], 0),
             "created_at": post["created_at"],
         })
@@ -372,10 +376,14 @@ def read_shared_trip(post_id: str, user: dict = Depends(get_current_user)):
     with get_conn(readonly=True) as conn:
         post = _require_post(conn, post_id)
         snapshot = _require_shared_trip(post)
-        author = conn.execute("SELECT name FROM users WHERE id = ?", (post["user_id"],)).fetchone()
+        author, saved = fetch_many(conn, [
+            ("SELECT name FROM users WHERE id = ?", (post["user_id"],)),
+            ("SELECT 1 FROM wishlist_items WHERE user_id = ? AND post_id = ?", (user["id"], post_id)),
+        ])
     return {
         "post_id": post["id"],
-        "author_name": author["name"] if author else "Traveler",
+        "author_name": author[0]["name"] if author else "Traveler",
+        "saved_by_me": bool(saved),
         "destination": post["destination"],
         "caption": post["caption"],
         "plan": normalize_snapshot(snapshot),
@@ -415,38 +423,151 @@ def copy_check(post_id: str, req: CopyCheckRequest, user: dict = Depends(get_cur
     return {"report": result["report"], "plan": result["plan"], "ai_available": ai_available()}
 
 
-@router.post("/posts/{post_id}/copy")
-def copy_trip(post_id: str, req: CopyTripRequest, user: dict = Depends(get_current_user)):
-    """Create the copier's own trip from the adapted plan they reviewed."""
-    import random
-    import string
-
+def _validate_adapted_plan(req: CopyTripRequest) -> None:
     _validate_copy_dates(req.start_date, req.end_date)
     if not isinstance(req.adapted_plan, dict) or not (req.adapted_plan.get("itinerary") or {}).get("days"):
         raise HTTPException(status_code=400, detail="Run the feasibility check first — no adapted plan to copy.")
 
+
+def _create_trip_from_plan(conn, user_id: str, req: CopyTripRequest, fallback_destination: str | None) -> dict:
+    import random
+    import string
+
+    destination = req.adapted_plan.get("destination") or fallback_destination or "Copied trip"
+    name = req.name.strip() or f"{destination} (copied)"
+    plan = dict(req.adapted_plan)
+    plan["dates"] = {"start": req.start_date, "end": req.end_date}
+
+    code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    while conn.execute("SELECT 1 FROM trips WHERE invite_code = ?", (code,)).fetchone():
+        code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+
+    trip_id = str(uuid.uuid4())
+    conn.execute(
+        """INSERT INTO trips (id, name, invite_code, leader_id, destination, selected_destination,
+                              status, final_plan, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'final_review', ?, ?)""",
+        (trip_id, name, code, user_id, destination, destination, json.dumps(plan), _now()),
+    )
+    conn.execute(
+        "INSERT INTO trip_members (trip_id, user_id, joined_at) VALUES (?, ?, ?)",
+        (trip_id, user_id, _now()),
+    )
+    return {"id": trip_id, "name": name, "invite_code": code}
+
+
+@router.post("/posts/{post_id}/copy")
+def copy_trip(post_id: str, req: CopyTripRequest, user: dict = Depends(get_current_user)):
+    """Create the copier's own trip from the adapted plan they reviewed."""
+    _validate_adapted_plan(req)
     with get_conn() as conn:
         post = _require_post(conn, post_id)
         _require_shared_trip(post)
+        return _create_trip_from_plan(conn, user["id"], req, post["destination"])
 
-        destination = req.adapted_plan.get("destination") or post["destination"] or "Copied trip"
-        name = req.name.strip() or f"{destination} (copied)"
-        plan = dict(req.adapted_plan)
-        plan["dates"] = {"start": req.start_date, "end": req.end_date}
 
-        code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
-        while conn.execute("SELECT 1 FROM trips WHERE invite_code = ?", (code,)).fetchone():
-            code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+# ---------------------------------------------------------------------------
+# Wishlist: save a post's itinerary now, copy it whenever the time is right.
+# Items carry their own snapshot, so they keep working after the post is gone.
+# ---------------------------------------------------------------------------
 
-        trip_id = str(uuid.uuid4())
-        conn.execute(
-            """INSERT INTO trips (id, name, invite_code, leader_id, destination, selected_destination,
-                                  status, final_plan, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, 'final_review', ?, ?)""",
-            (trip_id, name, code, user["id"], destination, destination, json.dumps(plan), _now()),
+def _wishlist_payload(item) -> dict:
+    plan = normalize_snapshot(json.loads(item["trip_snapshot"]))
+    return {
+        "id": item["id"],
+        "post_id": item["post_id"],
+        "author_name": item["author_name"],
+        "destination": item["destination"] or plan.get("destination"),
+        "caption": item["caption"],
+        "duration_days": plan.get("duration_days"),
+        "title": (plan.get("itinerary") or {}).get("title"),
+        "summary": plan.get("summary"),
+        "added_at": item["added_at"],
+    }
+
+
+def _require_wishlist_item(conn, item_id: str, user_id: str):
+    item = conn.execute(
+        "SELECT * FROM wishlist_items WHERE id = ? AND user_id = ?", (item_id, user_id)
+    ).fetchone()
+    if item is None:
+        raise HTTPException(status_code=404, detail="This trip isn't on your wishlist.")
+    return item
+
+
+@router.get("/wishlist")
+def read_wishlist(user: dict = Depends(get_current_user)):
+    with get_conn(readonly=True) as conn:
+        rows = conn.execute(
+            "SELECT * FROM wishlist_items WHERE user_id = ? ORDER BY added_at DESC", (user["id"],)
+        ).fetchall()
+    return {"items": [_wishlist_payload(r) for r in rows]}
+
+
+@router.post("/posts/{post_id}/wishlist")
+def toggle_wishlist(post_id: str, req: SaveRequest, user: dict = Depends(get_current_user)):
+    with get_conn() as conn:
+        if req.saved:
+            post = _require_post(conn, post_id)
+            _require_shared_trip(post)  # only trip-backed posts can be wished for
+            author = conn.execute("SELECT name FROM users WHERE id = ?", (post["user_id"],)).fetchone()
+            conn.execute(
+                """INSERT INTO wishlist_items (id, user_id, post_id, author_name, destination, caption,
+                                               trip_snapshot, added_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING""",
+                (str(uuid.uuid4()), user["id"], post_id,
+                 author["name"] if author else "Traveler",
+                 post["destination"], post["caption"], post["trip_snapshot"], _now()),
+            )
+        else:
+            conn.execute(
+                "DELETE FROM wishlist_items WHERE user_id = ? AND post_id = ?", (user["id"], post_id)
+            )
+    return {"success": True, "saved_by_me": req.saved}
+
+
+@router.delete("/wishlist/{item_id}")
+def remove_wishlist_item(item_id: str, user: dict = Depends(get_current_user)):
+    with get_conn() as conn:
+        _require_wishlist_item(conn, item_id, user["id"])
+        conn.execute("DELETE FROM wishlist_items WHERE id = ?", (item_id,))
+    return {"success": True}
+
+
+@router.get("/wishlist/{item_id}/trip")
+def read_wishlist_trip(item_id: str, user: dict = Depends(get_current_user)):
+    with get_conn(readonly=True) as conn:
+        item = _require_wishlist_item(conn, item_id, user["id"])
+    return {
+        "item_id": item["id"],
+        "author_name": item["author_name"],
+        "destination": item["destination"],
+        "caption": item["caption"],
+        "plan": normalize_snapshot(json.loads(item["trip_snapshot"])),
+        "ai_available": ai_available(),
+    }
+
+
+@router.post("/wishlist/{item_id}/copy-check")
+def wishlist_copy_check(item_id: str, req: CopyCheckRequest, user: dict = Depends(get_current_user)):
+    _validate_copy_dates(req.start_date, req.end_date)
+    with get_conn(readonly=True) as conn:
+        item = _require_wishlist_item(conn, item_id, user["id"])
+
+    try:
+        result = adapt_copied_plan(
+            json.loads(item["trip_snapshot"]), req.start_date, req.end_date,
+            original_author=item["author_name"],
         )
-        conn.execute(
-            "INSERT INTO trip_members (trip_id, user_id, joined_at) VALUES (?, ?, ?)",
-            (trip_id, user["id"], _now()),
-        )
-    return {"id": trip_id, "name": name, "invite_code": code}
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Feasibility check failed: {exc}")
+
+    return {"report": result["report"], "plan": result["plan"], "ai_available": ai_available()}
+
+
+@router.post("/wishlist/{item_id}/copy")
+def wishlist_copy_trip(item_id: str, req: CopyTripRequest, user: dict = Depends(get_current_user)):
+    _validate_adapted_plan(req)
+    with get_conn() as conn:
+        item = _require_wishlist_item(conn, item_id, user["id"])
+        return _create_trip_from_plan(conn, user["id"], req, item["destination"])

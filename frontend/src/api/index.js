@@ -188,4 +188,20 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ name, start_date: startDate, end_date: endDate, adapted_plan: adaptedPlan }),
     }),
+
+  // Wishlist — saved itineraries to copy later
+  getWishlist: () => req('/social/wishlist'),
+  savePost: (postId, saved) =>
+    req(`/social/posts/${postId}/wishlist`, { method: 'POST', body: JSON.stringify({ saved }) }),
+  removeWishlistItem: (itemId) => req(`/social/wishlist/${itemId}`, { method: 'DELETE' }),
+  getWishlistTrip: (itemId) => req(`/social/wishlist/${itemId}/trip`),
+  wishlistCopyCheck: (itemId, startDate, endDate) =>
+    req(`/social/wishlist/${itemId}/copy-check`, {
+      method: 'POST', body: JSON.stringify({ start_date: startDate, end_date: endDate }),
+    }),
+  wishlistCopyTrip: (itemId, name, startDate, endDate, adaptedPlan) =>
+    req(`/social/wishlist/${itemId}/copy`, {
+      method: 'POST',
+      body: JSON.stringify({ name, start_date: startDate, end_date: endDate, adapted_plan: adaptedPlan }),
+    }),
 };
