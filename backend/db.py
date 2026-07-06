@@ -6,11 +6,20 @@ thin connection proxy rewrites `?` to `%s` (outside string literals) and
 psycopg's dict_row keeps `row["col"]` working. Usage in routers stays
 `with get_conn() as conn:` — commit on success, rollback on exception.
 
+Schema ownership differs by engine: Postgres/Supabase is defined by the
+Supabase CLI migrations in supabase/migrations/*.sql (applied with
+`supabase db push`, or by the GitHub integration on merge) — the app only
+VERIFIES it at startup. SQLite, the local-dev engine the CLI doesn't
+manage, still gets its schema from _SCHEMA below. Structural changes go
+in BOTH places: a new supabase/migrations file and the matching _SCHEMA /
+_COLUMN_MIGRATIONS entry.
+
 Set DATABASE_URL to a Postgres/Supabase connection string to switch, e.g.
 postgresql://postgres.<ref>:<password>@aws-0-eu-west-1.pooler.supabase.com:5432/postgres
 """
 
 import os
+import re
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -20,6 +29,8 @@ IS_POSTGRES = DATABASE_URL.startswith(("postgres://", "postgresql://"))
 
 _DB_PATH = Path(__file__).parent / "data" / "rovyn.db"
 
+# The SQLite (local dev) schema. Postgres is defined by supabase/migrations —
+# mirror any structural change there in a new migration file.
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id            TEXT PRIMARY KEY,
@@ -182,7 +193,9 @@ CREATE TABLE IF NOT EXISTS wishlist_items (
 );
 """
 
-# Columns added after the first release; applied to pre-existing databases.
+# Columns added after the first release; applied to pre-existing SQLITE
+# databases at startup. Postgres gets these via supabase/migrations — new
+# columns need an entry in both places (and a _SCHEMA_CANARIES bump).
 _COLUMN_MIGRATIONS = [
     ("trips", "destination", "TEXT"),
     ("trips", "options", "TEXT"),
@@ -195,6 +208,18 @@ _COLUMN_MIGRATIONS = [
     ("trips", "solo", "INTEGER NOT NULL DEFAULT 0"),  # one traveler — no invites, tailored copy
     ("bookings", "stale", "INTEGER NOT NULL DEFAULT 0"),
     ("payments", "mode", "TEXT NOT NULL DEFAULT 'full'"),
+]
+
+# Every table the code touches, derived from the SQLite schema so the two
+# engines can't drift silently — Postgres startup verifies they all exist.
+_EXPECTED_TABLES = re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", _SCHEMA)
+
+# The newest column each Supabase migration adds. Checked at startup in
+# Postgres mode so a forgotten `supabase db push` fails loudly at boot with
+# instructions, not mid-request with "column does not exist". Add a canary
+# whenever you add a migration file.
+_SCHEMA_CANARIES = [
+    ("trips", "solo"),  # supabase/migrations/20260706150000_add_trips_solo.sql
 ]
 
 if IS_POSTGRES:
@@ -302,11 +327,30 @@ if IS_POSTGRES:
                 "string (Supabase → Project Settings → Database → Connection string; "
                 "use the session pooler URI and URL-encode the password)."
             ) from exc
+        # The Postgres schema belongs to the Supabase CLI (supabase/migrations),
+        # so the app verifies instead of managing it — startup DDL would fight
+        # the migration history the CLI diffs against.
         with _pool.connection() as conn:
-            conn.execute(_SCHEMA)
-            for table, col, ddl in _COLUMN_MIGRATIONS:
-                if col not in _existing_columns(conn, table):
-                    conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {ddl}")
+            tables = {
+                r["table_name"] for r in conn.execute(
+                    "SELECT table_name FROM information_schema.tables "
+                    "WHERE table_schema = current_schema()"
+                ).fetchall()
+            }
+            missing = [t for t in _EXPECTED_TABLES if t not in tables]
+            missing += [
+                f"{table}.{column}"
+                for table, column in _SCHEMA_CANARIES
+                if table in tables and column not in _existing_columns(conn, table)
+            ]
+        if missing:
+            _pool.close()  # don't leave worker threads hanging behind a fatal boot error
+            raise RuntimeError(
+                "Postgres schema is behind the code (missing: " + ", ".join(missing) + "). "
+                "Apply the SQL migrations in supabase/migrations — run `supabase db push`, "
+                "or merge to main and let the Supabase GitHub integration apply them — "
+                "then restart."
+            )
 
 else:
     IntegrityError = (sqlite3.IntegrityError,)

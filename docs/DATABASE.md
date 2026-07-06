@@ -181,8 +181,14 @@ stateDiagram-v2
   (`ai_service.select_winners`, `trips._member_checks`), so there is no cached aggregate
   to drift out of sync. The one snapshot kept on purpose is `payments.receipt` — what a
   person was charged must never change retroactively.
-- **Migrations**: `db.py` adds any missing `trips` columns on startup
-  (`_TRIP_MIGRATIONS`), so pulling a newer branch never requires deleting the database.
+- **Migrations** are split by engine. Postgres/Supabase schema is owned by the Supabase
+  CLI: every structural change is a file in `supabase/migrations/`, applied with
+  `supabase db push` (or by the Supabase GitHub integration on merge) — the app only
+  VERIFIES the schema at startup and refuses to boot with instructions if it's behind
+  (`db.py` `_SCHEMA_CANARIES`). SQLite (local dev, which the CLI doesn't manage) still
+  self-migrates on startup via `_SCHEMA` + `_COLUMN_MIGRATIONS`, so pulling a newer
+  branch never requires deleting the local database. A new column therefore touches
+  three spots: the migration file, the SQLite lists, and a canary entry.
 - **`posts.trip_snapshot` is a frozen copy** of the trip's plan at the moment of posting
   (same principle as `payments.receipt`): the itinerary a viewer opens from the feed never
   drifts as the original group keeps editing, and it stays available even if the trip is
