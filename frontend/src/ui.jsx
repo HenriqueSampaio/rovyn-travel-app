@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { motion, AnimatePresence, animate, motionValue, useTransform } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Check, ChevronLeft, ChevronRight, Compass, LogOut, Loader2, MapPin } from 'lucide-react';
 import { api, auth } from './api/index.js';
@@ -15,20 +15,81 @@ export function Wordmark({ size = 26 }) {
   );
 }
 
-function NavLink({ to, label }) {
+/* Shared position across the three top-level pages, as a fractional index
+   (0 = Trips, 1 = Feed, 2 = Wishlist). The SwipeShell writes to it while a
+   finger drags; the tab underline below reads from it — so both the page
+   track and the indicator move together, mid-gesture included. */
+export const swipeProgress = motionValue(0);
+let progressSynced = false;
+
+const TABS = [
+  { to: '/trips', label: 'Trips' },
+  { to: '/feed', label: 'Feed' },
+  { to: '/wishlist', label: 'Wishlist' },
+];
+
+function TabRail() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const active = pathname === to || pathname.startsWith(`${to}/`);
+  const refs = useRef([]);
+  const [metrics, setMetrics] = useState(TABS.map(() => ({ left: 0, width: 0 })));
+
+  // Sub-pages count toward their tab (/trips/abc lights up Trips)
+  const activeIdx = TABS.findIndex(t => pathname === t.to || pathname.startsWith(`${t.to}/`));
+
+  useLayoutEffect(() => {
+    function measure() {
+      setMetrics(refs.current.map(el =>
+        el ? { left: el.offsetLeft, width: el.offsetWidth } : { left: 0, width: 0 }
+      ));
+    }
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, []);
+
+  // Keep the indicator in sync when arriving by tab click or deep link.
+  // (After a swipe gesture the progress already sits on the target, so
+  // this is a no-op there.) First sync ever jumps without animating.
+  useEffect(() => {
+    if (activeIdx === -1) return;
+    if (!progressSynced) {
+      progressSynced = true;
+      swipeProgress.set(activeIdx);
+      return;
+    }
+    if (swipeProgress.get() !== activeIdx) {
+      const controls = animate(swipeProgress, activeIdx, { duration: 0.32, ease: [0.22, 1, 0.36, 1] });
+      return () => controls.stop();
+    }
+  }, [activeIdx]);
+
+  const left = useTransform(swipeProgress, [0, 1, 2], metrics.map(m => m.left));
+  const width = useTransform(swipeProgress, [0, 1, 2], metrics.map(m => m.width));
+
   return (
-    <button
-      onClick={() => navigate(to)}
-      style={{
-        fontSize: 13, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase',
-        color: active ? 'var(--clay)' : 'var(--pine)', padding: '4px 0',
-      }}
-    >
-      {label}
-    </button>
+    <span className="nav-tabs">
+      {TABS.map((t, i) => (
+        <button
+          key={t.to}
+          ref={el => { refs.current[i] = el; }}
+          onClick={() => navigate(t.to)}
+          style={{
+            fontSize: 13, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase',
+            color: i === activeIdx ? 'var(--clay)' : 'var(--pine)',
+            padding: '4px 0 7px', transition: 'color 0.25s ease',
+          }}
+        >
+          {t.label}
+        </button>
+      ))}
+      {activeIdx !== -1 && (
+        <motion.span style={{
+          position: 'absolute', bottom: 0, height: 2, borderRadius: 2,
+          background: 'var(--clay)', left, width,
+        }} />
+      )}
+    </span>
   );
 }
 
@@ -52,9 +113,7 @@ export function Nav() {
       </div>
       {user && (
         <div className="nav-right">
-          <NavLink to="/trips" label="Trips" />
-          <NavLink to="/feed" label="Feed" />
-          <NavLink to="/wishlist" label="Wishlist" />
+          <TabRail />
           <span className="muted nav-username" style={{ fontSize: 14 }}>{user.name}</span>
           <button
             className="btn-quiet"
@@ -69,47 +128,7 @@ export function Nav() {
   );
 }
 
-/* Swipe navigation between the three top-level pages (touch devices).
-   Swipe left moves forward through the order, swipe right moves back.
-   Ignores gestures that start on media/inputs ([data-noswipe]) and
-   anything more vertical than horizontal, so scrolling stays untouched. */
-const SWIPE_ORDER = ['/trips', '/feed', '/wishlist'];
-
-function useSwipeNav() {
-  const navigate = useNavigate();
-  const { pathname } = useLocation();
-  useEffect(() => {
-    const idx = SWIPE_ORDER.indexOf(pathname);
-    if (idx === -1) return;
-    let startX = 0, startY = 0, tracking = false;
-    function onStart(e) {
-      if (e.touches.length !== 1) return;
-      if (e.target.closest('[data-noswipe], input, textarea, select, video')) return;
-      startX = e.touches[0].clientX;
-      startY = e.touches[0].clientY;
-      tracking = true;
-    }
-    function onEnd(e) {
-      if (!tracking) return;
-      tracking = false;
-      const t = e.changedTouches[0];
-      const dx = t.clientX - startX;
-      const dy = t.clientY - startY;
-      if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
-      const next = SWIPE_ORDER[idx + (dx < 0 ? 1 : -1)];
-      if (next) navigate(next);
-    }
-    window.addEventListener('touchstart', onStart, { passive: true });
-    window.addEventListener('touchend', onEnd, { passive: true });
-    return () => {
-      window.removeEventListener('touchstart', onStart);
-      window.removeEventListener('touchend', onEnd);
-    };
-  }, [pathname, navigate]);
-}
-
 export function Page({ children, width = 680, nav = true }) {
-  useSwipeNav();
   return (
     <div className="page">
       <div className="page-inner" style={{ maxWidth: width }}>

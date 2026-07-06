@@ -212,6 +212,14 @@ a { color: var(--pine); text-decoration: none; }
 }
 .site-nav .nav-left { gap: 26px; }
 
+/* Trips / Feed / Wishlist tabs — the underline slides between them,
+   tracking the swipe gesture on touch (positioned from ui.jsx) */
+.nav-tabs {
+  position: relative;
+  display: inline-flex;
+  gap: 20px;
+}
+
 /* Tab bar (planning board, final plan) */
 .tab-bar {
   display: flex;
@@ -332,6 +340,7 @@ a { color: var(--pine); text-decoration: none; }
   }
   .site-nav .nav-left { gap: 16px; }
   .site-nav .nav-right { gap: 14px; }
+  .nav-tabs { gap: 14px; }
   .nav-username { display: none; }
 
   /* Tabs become a swipeable strip instead of wrapping */
