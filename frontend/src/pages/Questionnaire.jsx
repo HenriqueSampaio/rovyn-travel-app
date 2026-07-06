@@ -192,6 +192,7 @@ export default function Questionnaire() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [dateVotes, setDateVotes] = useState(null);
+  const [solo, setSolo] = useState(false); // solo trips drop the group framing
   const [cityIdeas, setCityIdeas] = useState(null); // suggestions + group picks for the multi-city panel
   const [cityQuery, setCityQuery] = useState('');
   const ideasRequested = useRef(false);
@@ -205,6 +206,9 @@ export default function Questionnaire() {
     api.getDateVotes(tripId)
       .then(setDateVotes)
       .catch(() => setDateVotes({ counts: {}, names: {}, submitted: 0, total_members: 0 }));
+    api.tripStatus(tripId)
+      .then(d => setSolo(Boolean(d.solo)))
+      .catch(() => {});
   }, [tripId]);
 
   // Nearby-city ideas load the first time multi-city is chosen (the backend
@@ -301,7 +305,9 @@ export default function Questionnaire() {
     1: (
       <>
         <h1 style={{ fontSize: 36, marginBottom: 10 }}>When could you get away?</h1>
-        <p className="muted" style={{ marginBottom: 40 }}>We'll find the window everyone can make.</p>
+        <p className="muted" style={{ marginBottom: 40 }}>
+          {solo ? 'Pick the window that suits you.' : "We'll find the window everyone can make."}
+        </p>
         <div className="two-col" style={{ columnGap: 40 }}>
           <Field label="From">
             <input type="date" min={today} value={form.dateStart}
@@ -313,13 +319,17 @@ export default function Questionnaire() {
           </Field>
         </div>
         <div style={{ marginTop: 8 }}>
-          <p className="eyebrow" style={{ fontSize: 11, marginBottom: 6 }}>When the group can go</p>
+          <p className="eyebrow" style={{ fontSize: 11, marginBottom: 6 }}>
+            {solo ? 'Pick your days' : 'When the group can go'}
+          </p>
           {dateVotes ? (
             <>
               <p className="muted" style={{ fontSize: 13.5, marginBottom: 14, maxWidth: 520 }}>
-                {dateVotes.submitted > 0
-                  ? `${dateVotes.submitted} of ${dateVotes.total_members} travelers have picked dates — the greener a day, the more of you can make it. Tap a day to start your window, tap another to close it.`
-                  : 'No one has picked dates yet — you set the tone. Tap a day to start your window, tap another to close it.'}
+                {solo
+                  ? 'Tap a day to start your window, tap another to close it.'
+                  : dateVotes.submitted > 0
+                    ? `${dateVotes.submitted} of ${dateVotes.total_members} travelers have picked dates — the greener a day, the more of you can make it. Tap a day to start your window, tap another to close it.`
+                    : 'No one has picked dates yet — you set the tone. Tap a day to start your window, tap another to close it.'}
               </p>
               <DateHeatmap votes={dateVotes} start={form.dateStart} end={form.dateEnd} onPick={pickDate} />
             </>
@@ -371,7 +381,9 @@ export default function Questionnaire() {
     3: (
       <>
         <h1 style={{ fontSize: 36, marginBottom: 10 }}>What feels comfortable to spend?</h1>
-        <p className="muted" style={{ marginBottom: 40 }}>Per person, for the whole trip — flights aside.</p>
+        <p className="muted" style={{ marginBottom: 40 }}>
+          {solo ? 'For your whole trip — flights aside.' : 'Per person, for the whole trip — flights aside.'}
+        </p>
         <Budget label="No less than" value={form.budgetMin} min={100} max={10000}
                 onChange={v => setForm(f => ({ ...f, budgetMin: Math.min(v, f.budgetMax - 100) }))} />
         <Budget label="Up to" value={form.budgetMax} min={200} max={15000}
@@ -400,8 +412,9 @@ export default function Questionnaire() {
               <div style={{ paddingTop: 26 }}>
                 <p className="eyebrow" style={{ fontSize: 11, marginBottom: 4 }}>Cities on your wishlist</p>
                 <p className="muted" style={{ fontSize: 13.5, marginBottom: 14, maxWidth: 520 }}>
-                  Add the places you'd love the route to include — optional. Rovyn weighs the whole
-                  group's picks when it draws the route, the travel legs and the stays.
+                  Add the places you'd love the route to include — optional. Rovyn weighs
+                  {solo ? ' your picks' : ' the whole group\'s picks'} when it draws the route, the
+                  travel legs and the stays.
                 </p>
 
                 {form.multiCityPicks.length > 0 && (
@@ -492,7 +505,7 @@ export default function Questionnaire() {
                             <p className="serif muted" style={{ fontStyle: 'italic', fontSize: 15 }}>
                               {cityIdeas.anchor
                                 ? 'No more ideas to offer — add any city with the search above.'
-                                : 'No destination is pinned yet, so add dream cities freely — Rovyn will weigh them once the group picks where to go.'}
+                                : `No destination is pinned yet, so add dream cities freely — Rovyn will weigh them once ${solo ? 'you pick' : 'the group picks'} where to go.`}
                             </p>
                           )}
                         </>
@@ -544,7 +557,9 @@ export default function Questionnaire() {
     ),
     8: (
       <>
-        <h1 style={{ fontSize: 36, marginBottom: 10 }}>Anything the group should know?</h1>
+        <h1 style={{ fontSize: 36, marginBottom: 10 }}>
+          {solo ? 'Anything Rovyn should know?' : 'Anything the group should know?'}
+        </h1>
         <p className="muted" style={{ marginBottom: 40 }}>Dietary needs, accessibility, anything that matters. Optional.</p>
         <textarea
           placeholder="Vegetarian, traveling with a toddler, need visa-free destinations…"
@@ -601,7 +616,7 @@ export default function Questionnaire() {
           </button>
         ) : (
           <button className="btn" onClick={submit} disabled={loading}>
-            {loading ? 'Sending…' : 'Share with the group'} <Check size={16} strokeWidth={2.4} />
+            {loading ? 'Sending…' : solo ? 'Save my preferences' : 'Share with the group'} <Check size={16} strokeWidth={2.4} />
           </button>
         )}
       </div>

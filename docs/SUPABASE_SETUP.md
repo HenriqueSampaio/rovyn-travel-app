@@ -138,6 +138,26 @@ plain rows in `users`; if that person later signs in through Supabase with
 the same email, their data is re-keyed to the Supabase identity
 automatically.
 
+## Schema changes (Supabase CLI migrations)
+
+The Postgres schema is owned by the Supabase CLI: every structural change is
+a timestamped SQL file in `supabase/migrations/`, applied with
+`supabase db push` (or automatically by the Supabase GitHub integration on
+merge). The app no longer creates or alters tables in Postgres mode — at
+startup it only verifies the schema and refuses to boot with instructions
+when a migration hasn't been applied yet.
+
+Adding a column touches three places:
+
+1. a new `supabase/migrations/<timestamp>_<name>.sql` file (write DDL
+   idempotently — `ADD COLUMN IF NOT EXISTS` — so replays are harmless);
+2. the SQLite mirror in `backend/db.py` (`_SCHEMA` and, for pre-existing
+   local databases, `_COLUMN_MIGRATIONS`) — local dev has no CLI, so SQLite
+   still self-migrates on startup;
+3. a `_SCHEMA_CANARIES` entry in `backend/db.py`, which is what turns a
+   forgotten `db push` into a clear boot-time error instead of a confusing
+   mid-request "column does not exist".
+
 ## Performance: put the database near you
 
 Every SQL statement travels to the Supabase region, so **round-trip time is

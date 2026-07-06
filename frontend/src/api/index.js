@@ -84,8 +84,8 @@ export const api = {
     req('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
 
   myTrips: () => req('/trips'),
-  createTrip: (name, destination = '') =>
-    req('/trips', { method: 'POST', body: JSON.stringify({ name, destination }) }),
+  createTrip: (name, destination = '', solo = false) =>
+    req('/trips', { method: 'POST', body: JSON.stringify({ name, destination, solo }) }),
   joinTrip: (inviteCode) =>
     req('/trips/join', { method: 'POST', body: JSON.stringify({ invite_code: inviteCode }) }),
   tripStatus: (tripId) => req(`/trips/${tripId}`),
@@ -100,6 +100,12 @@ export const api = {
   getRecommendations: (tripId) => req(`/trips/${tripId}/recommendations`),
   generateRecommendations: (tripId) =>
     req(`/trips/${tripId}/recommendations`, { method: 'POST' }),
+  moreRecommendations: (tripId) =>
+    req(`/trips/${tripId}/recommendations/more`, { method: 'POST' }),
+  addRouteStop: (tripId, destinationName, city) =>
+    req(`/trips/${tripId}/recommendations/add-stop`, {
+      method: 'POST', body: JSON.stringify({ destination_name: destinationName, city }),
+    }),
 
   castVote: (tripId, destinationName) =>
     req(`/trips/${tripId}/vote`, { method: 'POST', body: JSON.stringify({ destination_name: destinationName }) }),
@@ -185,6 +191,22 @@ export const api = {
     }),
   copyTrip: (postId, name, startDate, endDate, adaptedPlan) =>
     req(`/social/posts/${postId}/copy`, {
+      method: 'POST',
+      body: JSON.stringify({ name, start_date: startDate, end_date: endDate, adapted_plan: adaptedPlan }),
+    }),
+
+  // Wishlist — saved itineraries to copy later
+  getWishlist: () => req('/social/wishlist'),
+  savePost: (postId, saved) =>
+    req(`/social/posts/${postId}/wishlist`, { method: 'POST', body: JSON.stringify({ saved }) }),
+  removeWishlistItem: (itemId) => req(`/social/wishlist/${itemId}`, { method: 'DELETE' }),
+  getWishlistTrip: (itemId) => req(`/social/wishlist/${itemId}/trip`),
+  wishlistCopyCheck: (itemId, startDate, endDate) =>
+    req(`/social/wishlist/${itemId}/copy-check`, {
+      method: 'POST', body: JSON.stringify({ start_date: startDate, end_date: endDate }),
+    }),
+  wishlistCopyTrip: (itemId, name, startDate, endDate, adaptedPlan) =>
+    req(`/social/wishlist/${itemId}/copy`, {
       method: 'POST',
       body: JSON.stringify({ name, start_date: startDate, end_date: endDate, adapted_plan: adaptedPlan }),
     }),

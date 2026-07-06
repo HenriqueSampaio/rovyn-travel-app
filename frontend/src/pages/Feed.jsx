@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  ChevronLeft, ChevronRight, Heart, Map, MessageCircle, Plus, Send, Sparkles, Trash2,
+  Bookmark, ChevronLeft, ChevronRight, Heart, Map, MessageCircle, Plus, Send, Sparkles, Trash2,
 } from 'lucide-react';
 import { api } from '../api/index.js';
 import { Page, Loading, ErrorText } from '../ui.jsx';
@@ -155,7 +155,9 @@ function PostCard({ post, onDelete }) {
   const [likes, setLikes] = useState(post.like_count);
   const [commentCount, setCommentCount] = useState(post.comment_count);
   const [showComments, setShowComments] = useState(false);
+  const [saved, setSaved] = useState(post.saved_by_me);
   const likeBusy = useRef(false);
+  const saveBusy = useRef(false);
 
   async function toggleLike() {
     if (likeBusy.current) return;
@@ -171,6 +173,20 @@ function PostCard({ post, onDelete }) {
       setLikes(n => n + (next ? -1 : 1));
     } finally {
       likeBusy.current = false;
+    }
+  }
+
+  async function toggleSave() {
+    if (saveBusy.current) return;
+    saveBusy.current = true;
+    const next = !saved;
+    setSaved(next);
+    try {
+      await api.savePost(post.id, next);
+    } catch {
+      setSaved(!next);
+    } finally {
+      saveBusy.current = false;
     }
   }
 
@@ -214,13 +230,24 @@ function PostCard({ post, onDelete }) {
           <span style={{ fontSize: 14, fontWeight: 600 }}>{commentCount}</span>
         </button>
         {post.has_trip && (
-          <button
-            className="btn-quiet"
-            style={{ marginLeft: 'auto' }}
-            onClick={() => navigate(`/feed/post/${post.id}/trip`)}
-          >
-            <Map size={15} /> View this trip's itinerary
-          </button>
+          <>
+            <button
+              onClick={toggleSave}
+              title={saved ? 'On your wishlist — tap to remove' : 'Save to wishlist for later'}
+              style={{ display: 'flex', alignItems: 'center' }}
+            >
+              <Bookmark size={19} strokeWidth={2}
+                        color={saved ? 'var(--pine)' : 'var(--ink-soft)'}
+                        fill={saved ? 'var(--pine)' : 'none'} />
+            </button>
+            <button
+              className="btn-quiet"
+              style={{ marginLeft: 'auto' }}
+              onClick={() => navigate(`/feed/post/${post.id}/trip`)}
+            >
+              <Map size={15} /> View this trip's itinerary
+            </button>
+          </>
         )}
       </div>
 

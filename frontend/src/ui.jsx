@@ -52,8 +52,9 @@ export function Nav() {
       </div>
       {user && (
         <div className="nav-right">
-          <NavLink to="/feed" label="Feed" />
           <NavLink to="/trips" label="Trips" />
+          <NavLink to="/feed" label="Feed" />
+          <NavLink to="/wishlist" label="Wishlist" />
           <span className="muted nav-username" style={{ fontSize: 14 }}>{user.name}</span>
           <button
             className="btn-quiet"

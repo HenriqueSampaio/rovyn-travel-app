@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight, Check, CheckCircle2, Compass, LogOut, MapPin, Plus, Ticket, Trash2, Crown, Users } from 'lucide-react';
 import { api } from '../api/index.js';
 import { Page, Field, Loading, ErrorText, CityInput } from '../ui.jsx';
@@ -25,32 +25,42 @@ function Countdown({ dates }) {
 }
 
 // How the trip's destination gets decided: pinned by the creator, or
-// suggested by Rovyn from the questionnaires and voted on by the group.
+// suggested by Rovyn from the questionnaires and voted on.
 const DESTINATION_MODES = [
-  {
-    id: 'known',
-    Icon: MapPin,
-    title: 'We know where we’re going',
-    desc: 'Pin the destination now — the group plans around it',
-  },
-  {
-    id: 'suggest',
-    Icon: Compass,
-    title: 'Let Rovyn suggest destinations',
-    desc: 'Five matched places to vote on, drawn from everyone’s answers',
-  },
+  { id: 'known', Icon: MapPin, label: 'We know where' },
+  { id: 'suggest', Icon: Compass, label: 'Surprise us' },
 ];
 
-function ModeRow({ selected, onClick, Icon, title, desc }) {
+function ModePills({ value, onChange }) {
   return (
-    <button className={`opt-row${selected ? ' selected' : ''}`} onClick={onClick} type="button">
-      <Icon size={18} strokeWidth={1.7} color={selected ? 'var(--pine)' : 'var(--muted)'} />
-      <span style={{ flex: 1 }}>
-        <span className="opt-title" style={{ display: 'block', fontSize: 15.5 }}>{title}</span>
-        <span className="opt-desc">{desc}</span>
-      </span>
-      {selected && <Check size={16} strokeWidth={2.4} color="var(--pine)" />}
-    </button>
+    <div style={{ display: 'inline-flex', gap: 4, padding: 4, border: '1px solid var(--line)', borderRadius: 999 }}>
+      {DESTINATION_MODES.map(({ id, Icon, label }) => {
+        const active = value === id;
+        return (
+          <button key={id} type="button" onClick={() => onChange(id)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 7,
+                    padding: '8px 16px', borderRadius: 999, fontSize: 13.5, fontWeight: 700,
+                    background: active ? 'var(--pine)' : 'transparent',
+                    color: active ? '#F6F2E8' : 'var(--ink-soft)',
+                    transition: 'all 0.18s ease', whiteSpace: 'nowrap',
+                  }}>
+            <Icon size={14} strokeWidth={2.2} /> {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/* Reveal-on-change wrapper for the create form's conditional rows */
+function Unfold({ id, children }) {
+  return (
+    <motion.div key={id} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.25, ease: 'easeOut' }}
+                style={{ overflow: 'hidden' }}>
+      {children}
+    </motion.div>
   );
 }
 
@@ -70,6 +80,7 @@ export default function Trips() {
   const [name, setName] = useState('');
   const [destMode, setDestMode] = useState('known');
   const [destination, setDestination] = useState('');
+  const [solo, setSolo] = useState(false);
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -102,7 +113,7 @@ export default function Trips() {
     setError('');
     try {
       // Empty destination is the API's signal for suggestion mode
-      const t = await api.createTrip(name.trim(), destMode === 'suggest' ? '' : destination.trim());
+      const t = await api.createTrip(name.trim(), destMode === 'suggest' ? '' : destination.trim(), solo);
       navigate(`/trips/${t.id}`);
     } catch (err) {
       setError(err.message);
@@ -203,24 +214,54 @@ export default function Trips() {
           <Field label="Trip name">
             <input placeholder="Summer in the Algarve" value={name} onChange={e => setName(e.target.value)} />
           </Field>
-          <p className="eyebrow" style={{ fontSize: 11, marginBottom: 4 }}>Destination</p>
-          {DESTINATION_MODES.map(m => (
-            <ModeRow key={m.id} selected={destMode === m.id} Icon={m.Icon}
-                     title={m.title} desc={m.desc}
-                     onClick={() => setDestMode(m.id)} />
-          ))}
-          {destMode === 'known' ? (
-            <div style={{ marginTop: 22 }}>
-              <Field label="Where to?">
-                <CityInput placeholder="Hvar, Croatia" value={destination} onChange={setDestination} />
-              </Field>
-            </div>
-          ) : (
-            <p className="muted" style={{ fontSize: 13, margin: '18px 0 28px', maxWidth: 400 }}>
-              Once everyone answers the questionnaire, Rovyn proposes five destinations
-              matched to the group's vibes, budget and dates — then you all vote.
-            </p>
-          )}
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, flexWrap: 'wrap', marginBottom: 14 }}>
+            <p className="eyebrow" style={{ fontSize: 11 }}>Destination</p>
+            <ModePills value={destMode} onChange={setDestMode} />
+          </div>
+          <AnimatePresence initial={false} mode="wait">
+            {destMode === 'known' ? (
+              <Unfold id="known">
+                <Field label="Where to?">
+                  <CityInput placeholder="Hvar, Croatia" value={destination} onChange={setDestination} />
+                </Field>
+              </Unfold>
+            ) : (
+              <Unfold id="suggest">
+                <p className="muted" style={{ fontSize: 13, marginBottom: 26, maxWidth: 400 }}>
+                  {solo
+                    ? 'Rovyn reads your answers and proposes five matched destinations — you pick your favorite.'
+                    : 'Rovyn reads everyone’s answers and proposes five matched destinations — the group votes.'}
+                </p>
+              </Unfold>
+            )}
+          </AnimatePresence>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', margin: '2px 0 26px' }}>
+            <button type="button" onClick={() => setSolo(s => !s)}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 9,
+                      fontSize: 13.5, fontWeight: 600,
+                      color: solo ? 'var(--pine)' : 'var(--ink-soft)',
+                    }}>
+              <span style={{
+                width: 17, height: 17, borderRadius: 5, border: '1.5px solid',
+                borderColor: solo ? 'var(--pine)' : 'var(--line)',
+                background: solo ? 'var(--pine)' : 'transparent',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'all 0.15s ease', flexShrink: 0,
+              }}>
+                {solo && <Check size={12} strokeWidth={3.2} color="#F6F2E8" />}
+              </span>
+              Travelling solo?
+            </button>
+            <AnimatePresence>
+              {solo && (
+                <motion.span className="muted" style={{ fontSize: 12.5 }}
+                             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                  No invites — this journey is all yours.
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </div>
           <button className="btn" disabled={busy || !name.trim() || (destMode === 'known' && !destination.trim())}>
             Create <ArrowRight size={16} />
           </button>

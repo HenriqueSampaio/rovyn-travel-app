@@ -4,6 +4,10 @@ Usage:
     DATABASE_URL=postgresql://... python -m backend.scripts.migrate_to_postgres
     (or pass the URL as the first argument)
 
+The target's schema must already be in place: apply supabase/migrations
+first (`supabase db push`) — this script copies data, it does not create
+tables, and it exits with instructions if the schema is missing.
+
 Idempotent: rows that already exist in Postgres are left alone
 (ON CONFLICT DO NOTHING), so re-running after a partial copy is safe.
 Tables are copied in foreign-key order.
@@ -53,7 +57,9 @@ def main() -> None:
     if not SQLITE_PATH.exists():
         sys.exit(f"No SQLite database found at {SQLITE_PATH} — nothing to migrate.")
 
-    # Ensure the schema exists on the target before copying.
+    # Verify the target schema before copying — importing backend.db runs
+    # init_db, which in Postgres mode checks the supabase/migrations schema
+    # is applied and raises with `supabase db push` instructions if not.
     os.environ["DATABASE_URL"] = url
     from backend import db  # noqa: PLC0415  (import runs init_db against DATABASE_URL)
 

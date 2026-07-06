@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  AlertTriangle, ArrowLeft, ArrowRight, BedDouble, CalendarDays, Check, CheckCircle2,
+  AlertTriangle, ArrowLeft, ArrowRight, BedDouble, Bookmark, CalendarDays, Check, CheckCircle2,
   Copy, HelpCircle, Loader2, MapPin, PartyPopper, Sparkles, Sun, XCircle,
 } from 'lucide-react';
 import { api } from '../api/index.js';
@@ -45,7 +45,7 @@ function DayRow({ day }) {
   );
 }
 
-function CopyFlow({ postId, plan }) {
+function CopyFlow({ plan, onCheck, onCreate, idleExtra }) {
   const navigate = useNavigate();
   const [phase, setPhase] = useState('idle'); // idle | dates | checking | report | creating
   const [start, setStart] = useState('');
@@ -70,7 +70,7 @@ function CopyFlow({ postId, plan }) {
     setPhase('checking');
     setError('');
     try {
-      const d = await api.copyCheck(postId, start, end);
+      const d = await onCheck(start, end);
       setResult(d);
       setName(`${plan.destination || 'My trip'} — copied`);
       setPhase('report');
@@ -85,7 +85,7 @@ function CopyFlow({ postId, plan }) {
     setPhase('creating');
     setError('');
     try {
-      const t = await api.copyTrip(postId, name.trim(), start, end, result.plan);
+      const t = await onCreate(name.trim(), start, end, result.plan);
       navigate(`/trips/${t.id}/final`);
     } catch (err) {
       setError(err.message);
@@ -104,9 +104,12 @@ function CopyFlow({ postId, plan }) {
           Pick your own dates and Rovyn's AI will check the whole itinerary against them —
           which events still run, whether the day count fits — and adapt it for you.
         </p>
-        <button className="btn clay" onClick={openDates}>
-          <Copy size={15} /> Copy this itinerary
-        </button>
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button className="btn clay" onClick={openDates}>
+            <Copy size={15} /> Copy this itinerary
+          </button>
+          {idleExtra}
+        </div>
       </div>
     );
   }
@@ -232,15 +235,47 @@ function CopyFlow({ postId, plan }) {
   );
 }
 
+function SaveForLater({ postId, initialSaved }) {
+  const [saved, setSaved] = useState(initialSaved);
+  const [busy, setBusy] = useState(false);
+
+  async function toggle() {
+    if (busy) return;
+    setBusy(true);
+    const next = !saved;
+    setSaved(next);
+    try {
+      await api.savePost(postId, next);
+    } catch {
+      setSaved(!next);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button className="btn-quiet" onClick={toggle}
+            title={saved ? 'Remove from your wishlist' : 'Keep it on your wishlist to copy later'}>
+      <Bookmark size={15} fill={saved ? 'var(--pine)' : 'none'} color={saved ? 'var(--pine)' : undefined} />
+      {saved ? 'On your wishlist' : 'Save for later'}
+    </button>
+  );
+}
+
 export default function PostTrip() {
-  const { postId } = useParams();
+  // Two ways in: from a feed post, or from a saved wishlist item
+  // (whose snapshot keeps working even after the post is deleted).
+  const { postId, itemId } = useParams();
+  const fromWishlist = Boolean(itemId);
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    api.getSharedTrip(postId).then(setData).catch(err => setError(err.message));
-  }, [postId]);
+    setData(null);
+    (fromWishlist ? api.getWishlistTrip(itemId) : api.getSharedTrip(postId))
+      .then(setData).catch(err => setError(err.message));
+  }, [postId, itemId, fromWishlist]);
 
   if (error) return <Page width={620}><ErrorText>{error}</ErrorText></Page>;
   if (!data) return <Page width={620}><Loading text="Opening the itinerary…" /></Page>;
@@ -251,8 +286,9 @@ export default function PostTrip() {
 
   return (
     <Page width={620}>
-      <button className="btn-quiet" onClick={() => navigate('/feed')} style={{ marginBottom: 28 }}>
-        <ArrowLeft size={15} /> Back to the feed
+      <button className="btn-quiet" onClick={() => navigate(fromWishlist ? '/wishlist' : '/feed')}
+              style={{ marginBottom: 28 }}>
+        <ArrowLeft size={15} /> {fromWishlist ? 'Back to your wishlist' : 'Back to the feed'}
       </button>
 
       <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -272,7 +308,14 @@ export default function PostTrip() {
         </p>
       )}
 
-      <CopyFlow postId={postId} plan={plan} />
+      <CopyFlow
+        plan={plan}
+        onCheck={(s, e) => fromWishlist ? api.wishlistCopyCheck(itemId, s, e) : api.copyCheck(postId, s, e)}
+        onCreate={(n, s, e, p) => fromWishlist
+          ? api.wishlistCopyTrip(itemId, n, s, e, p)
+          : api.copyTrip(postId, n, s, e, p)}
+        idleExtra={!fromWishlist && <SaveForLater postId={postId} initialSaved={data.saved_by_me} />}
+      />
 
       {stay.name && (
         <Section title="Where they stayed">

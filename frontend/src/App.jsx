@@ -13,6 +13,7 @@ import FinalPlan from './pages/FinalPlan.jsx';
 import Feed from './pages/Feed.jsx';
 import NewPost from './pages/NewPost.jsx';
 import PostTrip from './pages/PostTrip.jsx';
+import Wishlist from './pages/Wishlist.jsx';
 
 function Protected({ children }) {
   const location = useLocation();
@@ -48,6 +49,8 @@ export default function App() {
       <Route path="/feed" element={<Protected><Feed /></Protected>} />
       <Route path="/feed/new" element={<Protected><NewPost /></Protected>} />
       <Route path="/feed/post/:postId/trip" element={<Protected><PostTrip /></Protected>} />
+      <Route path="/wishlist" element={<Protected><Wishlist /></Protected>} />
+      <Route path="/wishlist/:itemId/trip" element={<Protected><PostTrip /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

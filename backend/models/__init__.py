@@ -15,6 +15,7 @@ class LoginRequest(BaseModel):
 class CreateTripRequest(BaseModel):
     name: str
     destination: str = ""  # optional — set it to skip destination voting
+    solo: bool = False     # one traveler — no invite link, no joining
 
 
 class JoinTripRequest(BaseModel):
@@ -38,6 +39,11 @@ class QuestionnaireData(BaseModel):
 
 class VoteRequest(BaseModel):
     destination_name: str
+
+
+class AddRouteStopRequest(BaseModel):
+    destination_name: str  # which recommendation's route gains the stop
+    city: str
 
 
 class StarRequest(BaseModel):
@@ -108,6 +114,10 @@ class CommentRequest(BaseModel):
 
 class LikeRequest(BaseModel):
     liked: bool
+
+
+class SaveRequest(BaseModel):
+    saved: bool
 
 
 class CopyCheckRequest(BaseModel):
