@@ -258,6 +258,7 @@ def get_destination_recommendations(responses: list[dict], trip_name: str = "") 
         recommendations = _ai_recommendations(prefs, trip_name)
     else:
         recommendations = _sample_recommendations(prefs)
+    _finalize_rec_routes(recommendations, prefs)
 
     for rec in recommendations:
         rec["image"] = first_image(
@@ -267,17 +268,70 @@ def get_destination_recommendations(responses: list[dict], trip_name: str = "") 
     return [_attach_links(rec, prefs) for rec in recommendations]
 
 
+def _want_rec_routes(prefs: dict) -> bool:
+    """Multi-city groups get route-shaped recommendations — unless the trip is
+    too short to move between cities (plan_route applies the same floor)."""
+    return prefs["trip_mode"] == "multi" and _duration_days(prefs["travel_dates"]) >= 4
+
+
+def _finalize_rec_routes(recommendations: list[dict], prefs: dict) -> None:
+    """Never trust the model with the route math: normalize each rec's route
+    (dedupe, stop cap, nights summing to the trip) and rebuild the readable
+    line to match. Recs whose route can't be salvaged — and every rec of a
+    single-base group — carry no route at all."""
+    duration = _duration_days(prefs["travel_dates"])
+    for rec in recommendations:
+        raw, cities = rec.get("route"), []
+        if _want_rec_routes(prefs) and isinstance(raw, list):
+            for c in raw:
+                if not isinstance(c, dict):
+                    continue
+                c = dict(c)
+                city = (c.get("city") or "").strip()
+                # Per-city hotel search & links downstream need "City, Country"
+                if city and "," not in city and rec.get("country"):
+                    c["city"] = f"{city}, {rec['country']}"
+                cities.append(c)
+            cities = _normalize_route_cities(cities, "", duration)
+        if len(cities) < 2:
+            rec.pop("route", None)
+            continue
+        rec["route"] = cities
+        rec["suggested_route"] = " -> ".join(
+            f"{c['city']} ({c['nights']} night{'s' if c['nights'] != 1 else ''})" for c in cities
+        )
+
+
 def _ai_recommendations(prefs: dict, trip_name: str = "") -> list[dict]:
     budget = prefs["budget_range"]
     dates = prefs["travel_dates"]
+    duration = _duration_days(dates)
     vibes = ", ".join(prefs["top_vibes"]) if prefs["top_vibes"] else "any"
     requirements = "; ".join(prefs["special_requirements"]) if prefs["special_requirements"] else "none"
     departures = ", ".join(prefs["departure_cities"]) if prefs["departure_cities"] else "unknown"
 
-    trip_style_note = {
-        "multi-city": "The group wants to explore MULTIPLE cities/regions within one country — favor destinations with easy internal travel and suggest a route.",
-        "single-city": "The group prefers to stay based in ONE city with day trips at most.",
-    }.get(prefs["trip_style"], "The group has no strong preference between one base city or a multi-city route.")
+    want_routes = _want_rec_routes(prefs)
+    if want_routes:
+        max_cities = max(2, min(4, duration // 2))
+        wishes = "; ".join(f"{v['city']} — {v['count']} traveler(s) want this" for v in prefs["city_votes"]) or \
+            "no specific requests"
+        trip_style_note = (
+            f"The group voted to explore MULTIPLE cities — every recommendation must BE a multi-city route of "
+            f"2-{max_cities} stops with easy internal travel (one country or a compact region), not a single base.\n"
+            f"- Dream-city wishlist (with votes): {wishes}. Where geography reasonably allows, weave the most-wished "
+            f"cities into your routes — a wished city should appear on at least one of the five."
+        )
+        route_field = '\n    "route": [{"city": "Athens, Greece", "nights": 2, "why": "one short clause"}],'
+        route_rule = (
+            f'\nEvery "route" lists the ordered stops: each city label MUST be "City, Country", '
+            f"and nights MUST total exactly {duration}."
+        )
+    else:
+        trip_style_note = {
+            "multi-city": "The group likes moving between cities, but this window is short — favor one well-placed base with easy day trips.",
+            "single-city": "The group prefers to stay based in ONE city with day trips at most.",
+        }.get(prefs["trip_style"], "The group has no strong preference between one base city or a multi-city route.")
+        route_field, route_rule = "", ""
 
     name_note = ""
     if trip_name.strip():
@@ -292,14 +346,14 @@ def _ai_recommendations(prefs: dict, trip_name: str = "") -> list[dict]:
 
 Group profile:
 - Budget per person: ${budget['min']}–${budget['max']} USD (total trip, flights excluded)
-- Travel window: {dates['start']} to {dates['end']}
+- Travel window: {dates['start']} to {dates['end']} ({duration} nights)
 - Departure cities of members: {departures}
 - Desired vibes (most voted first): {vibes}
 - {trip_style_note}
 - Preferred accommodation: {prefs['preferred_accommodation']}
 - Special requirements: {requirements}{name_note}
 
-Recommend exactly 5 travel destinations that suit this entire group. Weigh nature/outdoors, nightlife/party, and cultural interests according to the vibes above, and factor in reasonable flight access from the departure cities.
+Recommend exactly 5 travel destinations that suit this entire group. Weigh nature/outdoors, nightlife/party, and cultural interests according to the vibes above, and factor in reasonable flight access from the departure cities. "why_it_matches" must tie each pick to THIS group's vibes, budget and dates.{route_rule}
 
 Respond with ONLY a valid JSON array (no markdown, no extra text):
 [
@@ -312,13 +366,13 @@ Respond with ONLY a valid JSON array (no markdown, no extra text):
     "why_it_matches": "Specific explanation of how this fits the group's preferences",
     "highlights": ["Highlight 1", "Highlight 2", "Highlight 3", "Highlight 4"],
     "estimated_budget_per_person": {{"min": 600, "max": 1200}},
-    "best_activities": ["Activity 1", "Activity 2", "Activity 3"],
+    "best_activities": ["Activity 1", "Activity 2", "Activity 3"],{route_field}
     "suggested_route": "For multi-city trips: City A (2 nights) -> City B (3 nights); otherwise the base city",
     "best_time_to_visit": "Month or season note"
   }}
 ]"""
 
-    return _ask_claude(prompt, max_tokens=4096)
+    return _ask_claude(prompt, max_tokens=6000 if want_routes else 4096)
 
 
 def _sample_recommendations(prefs: dict) -> list[dict]:
@@ -329,23 +383,23 @@ def _sample_recommendations(prefs: dict) -> list[dict]:
     samples = [
         ("Lisbon", "Portugal", 94, "Sun-drenched hills, tiled streets and late-night fado.",
          ["Alfama old town", "Day trip to Sintra", "Miradouro sunsets", "Pastéis de Belém"],
-         "Lisbon (3 nights) -> Lagos, Algarve (2 nights)"),
+         "Lisbon (3 nights) -> Lagos, Algarve (2 nights)", "Lagos, Portugal"),
         ("Barcelona", "Spain", 90, "Beach mornings, Gaudí afternoons, nightlife until sunrise.",
          ["Sagrada Família", "Barceloneta beach", "El Born tapas crawl", "Montjuïc views"],
-         "Barcelona (4 nights) -> Costa Brava (1 night)"),
+         "Barcelona (4 nights) -> Costa Brava (1 night)", "Girona, Spain"),
         ("Mexico City", "Mexico", 87, "World-class food and culture at a friendly price point.",
          ["Chapultepec park", "Teotihuacán pyramids", "Roma Norte food scene", "Lucha libre night"],
-         "Mexico City (3 nights) -> Oaxaca (2 nights)"),
+         "Mexico City (3 nights) -> Oaxaca (2 nights)", "Oaxaca, Mexico"),
         ("Split", "Croatia", 85, "Adriatic swims, island hops and Roman ruins in one trip.",
          ["Diocletian's Palace", "Hvar island hop", "Krka waterfalls", "Old-town bars"],
-         "Split (3 nights) -> Hvar (2 nights)"),
+         "Split (3 nights) -> Hvar (2 nights)", "Hvar, Croatia"),
         ("Chiang Mai", "Thailand", 82, "Temples, jungle treks and night markets on a backpacker budget.",
          ["Old-city temples", "Doi Inthanon trek", "Sunday night market", "Thai cooking class"],
-         "Chiang Mai (3 nights) -> Pai (2 nights)"),
+         "Chiang Mai (3 nights) -> Pai (2 nights)", "Pai, Thailand"),
     ]
     recs = []
-    for name, country, score, tagline, highlights, route in samples:
-        recs.append({
+    for name, country, score, tagline, highlights, route, partner in samples:
+        rec = {
             "name": name,
             "country": country,
             "match_score": score,
@@ -358,7 +412,19 @@ def _sample_recommendations(prefs: dict) -> list[dict]:
             "suggested_route": route,
             "best_time_to_visit": "Spring or early autumn",
             "source": "sample",
-        })
+        }
+        if _want_rec_routes(prefs):
+            # Same shape as AI multi-mode recs: anchor + any wished cities that
+            # land in this rec's country + the classic pairing. Normalization
+            # (_finalize_rec_routes) dedupes and balances the nights.
+            wished = [v["city"] for v in prefs["city_votes"]
+                      if v["city"].casefold().endswith(f", {country.casefold()}")]
+            rec["route"] = (
+                [{"city": f"{name}, {country}", "nights": 3, "why": "The anchor — most to see and do."}]
+                + [{"city": w, "nights": 2, "why": "On the group's wishlist."} for w in wished]
+                + [{"city": partner, "nights": 2, "why": "The classic pairing."}]
+            )
+        recs.append(rec)
     return recs
 
 
@@ -369,15 +435,17 @@ def _sample_recommendations(prefs: dict) -> list[dict]:
 def suggest_nearby_cities(anchor: str, trip_name: str = "", limit: int = 8) -> list[dict]:
     """City ideas around the trip's destination, for the questionnaire's
     multi-city picker. AI when available; otherwise the biggest same-country
-    cities from the offline GeoNames set. [] when there's nothing to anchor on."""
+    cities from the offline GeoNames set. [] when there's nothing to anchor on —
+    suggestion-mode trips pick their destination later, so guessing a region
+    here would only bias the group's wishlist."""
     from backend.services.places_service import cities_in_country
 
     anchor = (anchor or "").strip()
+    if not anchor:
+        return []
     if ai_available():
         hint = f' The trip is named "{trip_name.strip()}" — honor any place it references.' if trip_name.strip() else ""
-        anchor_note = f"The group's anchor destination is {anchor}." if anchor else \
-            "No destination is set yet — infer the most likely region from the trip name."
-        prompt = f"""You suggest add-on cities for a group building a multi-city trip. {anchor_note}{hint}
+        prompt = f"""You suggest add-on cities for a group building a multi-city trip. The group's anchor destination is {anchor}.{hint}
 
 Suggest exactly {limit} cities travelers commonly combine with it in one trip (day-trip towns count only if worth an overnight). Prefer places reachable by train or a short flight. Never repeat the anchor itself.
 
@@ -438,7 +506,9 @@ def _route_with_dates(cities: list[dict], dates: dict, duration: int, reason: st
 
 def _normalize_route_cities(raw_cities: list[dict], anchor: str, duration: int) -> list[dict]:
     """Sanitize an AI (or fallback) city list: dedupe, ensure the anchor is on
-    the route, cap the stop count, and force nights to sum exactly to the trip."""
+    the route (when one is given — recommendation routes have none, their name
+    may be a region label rather than a city), cap the stop count, and force
+    nights to sum exactly to the trip."""
     max_cities = max(2, min(4, duration // 2))
     cities: list[dict] = []
     for c in raw_cities:
@@ -451,7 +521,7 @@ def _normalize_route_cities(raw_cities: list[dict], anchor: str, duration: int) 
             "nights": max(1, int(nights)) if isinstance(nights, (int, float)) else 2,
             "why": (c.get("why") or "").strip(),
         })
-    if not any(_same_town(c["city"], anchor) for c in cities):
+    if anchor and not any(_same_town(c["city"], anchor) for c in cities):
         cities.insert(0, {"city": anchor, "nights": 2, "why": "The trip's chosen destination."})
     cities = cities[:max_cities]
     # Nights must sum to the trip's night count — trim/grow from the ends
@@ -496,12 +566,22 @@ Respond with ONLY valid JSON:
     return result if isinstance(result, dict) and result.get("cities") else None
 
 
-def plan_route(destination: str, prefs: dict, trip_name: str = "") -> dict | None:
+def plan_route(destination: str, prefs: dict, trip_name: str = "",
+               seed_route: list | None = None) -> dict | None:
     """The multi-city route: ordered cities, nights each, dates and travel legs.
-    None when the group prefers one home base or the trip is too short to move."""
+    None when the group prefers one home base or the trip is too short to move.
+    seed_route is the structured route off the recommendation the group voted
+    for — when sane, it IS the route, so the board delivers the pitch they chose."""
     duration = _duration_days(prefs["travel_dates"])
     if prefs.get("trip_mode") != "multi" or duration < 4:
         return None
+
+    seed = [c for c in seed_route or [] if isinstance(c, dict) and (c.get("city") or "").strip()]
+    if seed:
+        cities = _normalize_route_cities(seed, "", duration)
+        if len(cities) >= 2:
+            return _route_with_dates(cities, prefs["travel_dates"], duration,
+                                     "The route the group voted for on the destination ballot.")
 
     raw, reason = None, ""
     if ai_available():
@@ -594,14 +674,15 @@ def _attach_option_links(options: dict, prefs: dict, destination: str) -> dict:
     return options
 
 
-def generate_trip_options(destination: str, responses: list[dict], trip_name: str = "") -> dict:
+def generate_trip_options(destination: str, responses: list[dict], trip_name: str = "",
+                          suggested_route: list | None = None) -> dict:
     prefs = _aggregate_preferences(responses)
     dates = dict(prefs["travel_dates"])
     duration = _duration_days(dates)
 
     # Multi-city groups get a route first (cities, order, nights) — everything
     # else (stays per city, transport legs, open-jaw flights) hangs off it.
-    route = plan_route(destination, prefs, trip_name)
+    route = plan_route(destination, prefs, trip_name, seed_route=suggested_route)
 
     def city_stays_in_sequence() -> dict[str, list]:
         """Live hotels per route city, searched one city at a time — parallel
