@@ -17,8 +17,9 @@ from backend.models import (
 )
 from backend.services.ai_service import (
     RevisionNotPossible, ai_available, categories_for, generate_final_plan,
-    generate_itinerary, generate_trip_options, get_destination_recommendations,
-    recommended_picks, recompute_plan_costs, revise_final_plan, suggest_nearby_cities,
+    generate_itinerary, generate_option_details, generate_trip_options,
+    get_destination_recommendations, recommended_picks, recompute_plan_costs,
+    revise_final_plan, suggest_nearby_cities,
 )
 from backend.services.hotel_service import stay_media_for_options
 
@@ -756,6 +757,76 @@ def _valid_option_ids(options: dict, category: str) -> set[str]:
     return {o["id"] for o in options.get(category, [])}
 
 
+def _find_option(options: dict, option_id: str) -> tuple[str, dict] | tuple[None, None]:
+    """Locate a board option by id across every category shape."""
+    for cat in ("stay", "visits", "events"):
+        for o in options.get(cat) or []:
+            if o.get("id") == option_id:
+                return cat, o
+    for cat in ("flights", "transport"):
+        for group in (options.get(cat) or {}).values():
+            for o in group:
+                if o.get("id") == option_id:
+                    return cat, o
+    return None, None
+
+
+@router.get("/{trip_id}/option-details/{option_id}")
+def read_option_details(trip_id: str, option_id: str, user: dict = Depends(get_current_user)):
+    """The full sheet for one board option — rooms/amenities for a stay,
+    segments/baggage for a flight, hours/tickets/tips for a visit or event.
+
+    Generated with the fast model tier the first time anyone opens the option,
+    then cached inside the trip's options JSON: the board generation stays
+    lean, and each detail sheet costs one small request exactly once."""
+    with get_conn(readonly=True) as conn:
+        trip = _member_trip(conn, trip_id, user["id"])
+        if not trip["options"]:
+            raise HTTPException(status_code=400, detail="The planning board isn't open yet.")
+        options = json.loads(trip["options"])
+        members = conn.execute(
+            "SELECT COUNT(*) c FROM trip_members WHERE trip_id = ?", (trip_id,)
+        ).fetchone()["c"]
+
+    category, option = _find_option(options, option_id)
+    if not option:
+        raise HTTPException(status_code=404, detail="That option doesn't exist on this board.")
+    if option.get("details"):
+        return {"details": option["details"], "category": category,
+                "source": options.get("source") or ("ai" if ai_available() else "sample")}
+
+    context = {
+        "destination": options.get("destination", ""),
+        "dates": options.get("dates", {}),
+        "group_size": max(members, 1),
+    }
+    route = options.get("route")
+    if route and category == "stay":
+        seg = next((c for c in route["cities"]
+                    if (option.get("city") or "").split(",")[0].strip().casefold() == c["town"].casefold()), None)
+        if seg:
+            context["nights"] = seg["nights"]
+
+    try:
+        details = generate_option_details(category, option, context)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Couldn't build the details: {exc}")
+
+    # Cache on the trip. Re-read under the write connection so a concurrent
+    # route edit isn't clobbered; last writer wins on the details field itself.
+    with get_conn() as conn:
+        row = conn.execute("SELECT options FROM trips WHERE id = ?", (trip_id,)).fetchone()
+        if row and row["options"]:
+            fresh = json.loads(row["options"])
+            _, fresh_opt = _find_option(fresh, option_id)
+            if fresh_opt is not None:
+                fresh_opt["details"] = details
+                conn.execute("UPDATE trips SET options = ? WHERE id = ?", (json.dumps(fresh), trip_id))
+
+    return {"details": details, "category": category,
+            "source": "ai" if ai_available() else "sample"}
+
+
 @router.post("/{trip_id}/star")
 def toggle_star(trip_id: str, req: StarRequest, user: dict = Depends(get_current_user)):
     with get_conn() as conn:
@@ -1044,6 +1115,13 @@ def read_plan(trip_id: str, user: dict = Depends(get_current_user)):
         plan = json.loads(trip["final_plan"]) if trip["final_plan"] else None
         checks = _member_checks(conn, trip) if plan else []
         payload = _status_payload(conn, trip, user["id"])
+        # Plans drafted before budget tracking landed don't carry the group's
+        # agreed range — derive it from the questionnaires on the way out.
+        if plan and not plan.get("budget_per_person"):
+            from backend.services.ai_service import _aggregate_preferences
+            responses = _questionnaire_rows(conn, trip_id)
+            if responses:
+                plan["budget_per_person"] = _aggregate_preferences(responses)["budget_range"]
     # Emails are private-ish: only expose your own
     for c in checks:
         if c["user_id"] != user["id"]:

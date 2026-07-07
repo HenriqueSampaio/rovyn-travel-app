@@ -4,11 +4,9 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime as dt, timedelta
 
-from backend.services import links
+from backend.services import links, llm
 from backend.services.hotel_service import official_website, real_stay_options
 from backend.services.image_service import first_image, image_for, nth_image
-
-_client = None
 
 # "itinerary" is no longer a starrable category — Rovyn builds the itinerary
 # from the group's starred visits & events at their preferred pace.
@@ -35,16 +33,8 @@ def recommended_picks(duration_days: int, pace: str) -> dict:
     return {"visits": visits, "events": events}
 
 
-def _get_client():
-    global _client
-    if _client is None:
-        from anthropic import Anthropic
-        _client = Anthropic()
-    return _client
-
-
 def ai_available() -> bool:
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+    return llm.available()
 
 
 # ---------------------------------------------------------------------------
@@ -174,59 +164,10 @@ def _duration_days(dates: dict) -> int:
         return 5
 
 
-def _parse_json_reply(text: str):
-    text = text.strip()
-    if text.startswith("```"):
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-        text = text.strip()
-    # Tolerate prose around the JSON payload; try the shape the reply starts
-    # with first, so an object containing arrays parses as the object
-    pairs = (("{", "}"), ("[", "]")) if text[:1] == "{" else (("[", "]"), ("{", "}"))
-    for opener, closer in pairs:
-        start = text.find(opener)
-        end = text.rfind(closer)
-        if start != -1 and end > start:
-            try:
-                return json.loads(text[start:end + 1])
-            except json.JSONDecodeError:
-                continue
-    return json.loads(text)
-
-
-def _ask_claude(prompt: str, max_tokens: int = 8192):
-    """Streamed request with one connection-error retry.
-
-    Long generations (final-plan weaves take 30-90s of thinking) leave a
-    non-streaming HTTP connection idle, and idle connections get dropped
-    ('server disconnected without a response'). Streaming keeps bytes moving.
-    """
-    from anthropic import APIConnectionError, APITimeoutError
-
-    last_err = None
-    # Attempt 1: adaptive thinking. Attempt 2: thinking off — covers both
-    # transient connection drops AND the model spending the entire token
-    # budget on thinking and returning no text at all.
-    for thinking in ({"type": "adaptive"}, None):
-        try:
-            kwargs = {
-                "model": "claude-opus-4-8",
-                "max_tokens": max_tokens,
-                "messages": [{"role": "user", "content": prompt}],
-            }
-            if thinking:
-                kwargs["thinking"] = thinking
-            with _get_client().messages.stream(**kwargs) as stream:
-                message = stream.get_final_message()
-            text = next((b.text for b in message.content if b.type == "text"), "")
-            if not text.strip():
-                last_err = RuntimeError("The model returned an empty completion (token budget spent on thinking).")
-                continue
-            return _parse_json_reply(text)
-        except (APIConnectionError, APITimeoutError) as exc:
-            last_err = exc
-    raise last_err
+def _ask(prompt: str, max_tokens: int = 8192, tier: str = "standard"):
+    """One JSON generation on the tier's model (see services/llm.py for the
+    fast/standard split and provider selection)."""
+    return llm.generate_json(prompt, tier=tier, max_tokens=max_tokens)
 
 
 def _attach_links(rec: dict, prefs: dict) -> dict:
@@ -388,7 +329,7 @@ Respond with ONLY a valid JSON array (no markdown, no extra text):
   }}
 ]"""
 
-    return _ask_claude(prompt, max_tokens=6000 if want_routes else 4096)
+    return _ask(prompt, max_tokens=6000 if want_routes else 4096)
 
 
 def _sample_recommendations(prefs: dict, exclude: list[str] | None = None) -> list[dict]:
@@ -486,7 +427,7 @@ Suggest exactly {limit} cities travelers commonly combine with it in one trip (d
 Respond with ONLY a valid JSON array:
 [{{"city": "Nice", "country": "France", "travel_hint": "5h30 by TGV / 1h20 flight from Paris", "why": "one short clause on what it adds to the trip"}}]"""
         try:
-            raw = _ask_claude(prompt, max_tokens=2048)
+            raw = _ask(prompt, max_tokens=2048, tier="fast")
             out = []
             for s in raw if isinstance(raw, list) else []:
                 city = (s.get("city") or "").strip()
@@ -596,7 +537,7 @@ Design the best route of 2-{max_cities} stops INCLUDING the anchor. Honor the mo
 
 Respond with ONLY valid JSON:
 {{"reason": "1-2 sentences on why this route and split", "cities": [{{"city": "Paris, France", "nights": 3, "why": "one short clause"}}]}}"""
-    result = _ask_claude(prompt, max_tokens=2048)
+    result = _ask(prompt, max_tokens=2048)
     return result if isinstance(result, dict) and result.get("cities") else None
 
 
@@ -736,13 +677,17 @@ def generate_trip_options(destination: str, responses: list[dict], trip_name: st
                 found[c["town"]] = []
         return found
 
-    # The slow, independent fetches run concurrently: the big options prompt,
-    # the per-city flights prompt, transport legs, and the live hotel search.
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        base_future = pool.submit(
-            _ai_trip_options if ai_available() else (lambda d, p, _t, r: _sample_trip_options(d, p, r)),
-            destination, prefs, trip_name, route,
-        )
+    # The slow, independent fetches run concurrently: the visits/events menu,
+    # the stay menu, the per-city flights prompt, transport legs, and the live
+    # hotel search — the board is ready when the slowest of them lands, not
+    # when their sum does.
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        if ai_available():
+            base_future = pool.submit(_ai_activity_options, destination, prefs, trip_name, route)
+            ai_stay_future = pool.submit(_ai_stay_options, destination, prefs, trip_name, route)
+        else:
+            base_future = pool.submit(_sample_trip_options, destination, prefs, route)
+            ai_stay_future = None
         flights_future = pool.submit(_flight_options, destination, prefs, route)
         transport_future = pool.submit(_transport_options, route, prefs) if route else None
         if route:
@@ -753,6 +698,11 @@ def generate_trip_options(destination: str, responses: list[dict], trip_name: st
                 prefs["group_size"], duration, "", prefs["accommodation_votes"],
             )
         options = base_future.result()
+        if ai_stay_future is not None:
+            try:
+                options["stay"] = ai_stay_future.result()
+            except Exception:
+                options["stay"] = []  # _ensure_categories backfills below
         options["flights"] = flights_future.result()
         if transport_future:
             options["transport"] = transport_future.result()
@@ -919,7 +869,7 @@ Respond with ONLY valid JSON — an object whose keys are EXACTLY these strings:
       "duration": "11h 20m", "est_price_per_person": 640, "why": "one line on the trade-off"}}
   ]
 }}"""
-    result = _ask_claude(prompt, max_tokens=4096)
+    result = _ask(prompt, max_tokens=4096, tier="fast")
     return result if isinstance(result, dict) else {}
 
 
@@ -988,7 +938,7 @@ Respond with ONLY valid JSON — an object whose keys are EXACTLY: {keys}
       "est_price_per_person": 45, "why": "one line on the trade-off"}}
   ]
 }}"""
-    result = _ask_claude(prompt, max_tokens=4096)
+    result = _ask(prompt, max_tokens=4096, tier="fast")
     return result if isinstance(result, dict) else {}
 
 
@@ -1074,64 +1024,224 @@ def _ai_category_retry(destination: str, prefs: dict, route: dict | None, cat: s
 
 Respond with ONLY a valid JSON array:
 [{schema}]"""
-    result = _ask_claude(prompt, max_tokens=4096)
+    result = _ask(prompt, max_tokens=4096, tier="fast")
     return [item for item in result if isinstance(item, dict)] if isinstance(result, list) else []
 
 
-def _ai_trip_options(destination: str, prefs: dict, trip_name: str, route: dict | None = None) -> dict:
+# ---------------------------------------------------------------------------
+# Per-option detail sheets (opened from a board card, cached on the trip)
+# ---------------------------------------------------------------------------
+
+_DETAIL_SCHEMAS = {
+    "stay": """{
+  "overview": "2-3 sentences on the property and what staying there is like",
+  "rooms": [{"name": "Double Room", "sleeps": 2, "est_price_per_night": 160, "note": "one short clause"}],
+  "amenities": ["..."],
+  "neighborhood": "1-2 sentences on the area and what's walkable",
+  "check_in": "15:00", "check_out": "11:00",
+  "good_to_know": ["2-4 short practical notes (deposits, breakfast, parking...)"]
+}""",
+    "flights": """{
+  "overview": "1-2 sentences on this option's trade-off",
+  "outbound": [{"leg": "JFK → VIE", "carrier": "Austrian", "depart": "09:40", "arrive": "23:55", "duration": "8h 15m"}],
+  "return": [{"leg": "SPU → FCO", "carrier": "ITA Airways", "depart": "17:10", "arrive": "18:20", "duration": "1h 10m"}],
+  "baggage": "what the fare typically includes (cabin/checked)",
+  "fare_notes": "fare class, changes/refunds in one sentence",
+  "good_to_know": ["2-3 short practical notes (layover length, airport change, check-in...)"]
+}""",
+    "transport": """{
+  "overview": "1-2 sentences on this way of making the leg",
+  "boarding": "where it leaves from and how early to arrive",
+  "luggage": "what you can bring",
+  "good_to_know": ["2-3 short practical notes (seat reservations, views, wifi...)"]
+}""",
+    "visits": """{
+  "overview": "3-4 sentences on what it is and why it's worth the time",
+  "hours": "typical opening hours",
+  "how_long": "how long people usually spend",
+  "getting_there": "one sentence from the city center",
+  "tickets": "how/where to get in and typical price",
+  "good_to_know": ["2-4 short practical tips (best time, queues, dress code...)"]
+}""",
+    "events": """{
+  "overview": "3-4 sentences on the experience",
+  "when": "when it runs during the trip's dates",
+  "where": "venue/area",
+  "tickets": "how/where to book and typical price",
+  "good_to_know": ["2-4 short practical tips"]
+}""",
+}
+
+
+def generate_option_details(category: str, option: dict, context: dict) -> dict:
+    """A richer sheet for ONE board option — rooms and amenities for a stay,
+    segments and baggage for a flight, hours and tips for a visit. Generated
+    the first time a traveler opens the option and cached on the trip, so the
+    board generation itself stays lean. Everything is an estimate and the UI
+    labels it that way."""
+    schema = _DETAIL_SCHEMAS.get(category)
+    if not schema:
+        raise ValueError(f"No detail sheet for category '{category}'.")
+    if not ai_available():
+        return _sample_option_details(category, option)
+
+    dates = context.get("dates") or {}
+    where = option.get("city") or context.get("destination") or ""
+    lines = [
+        f"Trip context: {context.get('destination', '')}, {dates.get('start', '?')} to {dates.get('end', '?')}, "
+        f"group of {context.get('group_size', 1)}.",
+    ]
+    if category == "stay" and context.get("nights"):
+        lines.append(f"The group sleeps here {context['nights']} night(s) in {where}.")
+    option_facts = {
+        k: v for k, v in option.items()
+        if k == "amenities" or (k not in ("image", "links", "details") and not isinstance(v, (dict, list)))
+    }
+    prompt = f"""A traveler tapped one option on their group-trip planning board and wants the full picture before starring it. Category: {category}. {' '.join(lines)}
+
+The option as shown on the board:
+{json.dumps(option_facts, indent=1)}
+
+Write the detail sheet for THIS specific option ({where}). Be concrete and realistic; where you estimate (prices, hours), keep estimates plausible for the place and season. Do not contradict the board's own numbers.
+
+Respond with ONLY valid JSON:
+{schema}"""
+    result = _ask(prompt, max_tokens=1500, tier="fast")
+    if not isinstance(result, dict) or not result:
+        raise RuntimeError("The detail sheet came back malformed.")
+    return result
+
+
+def _sample_option_details(category: str, option: dict) -> dict:
+    """Deterministic detail sheets so the detail view works without an API key."""
+    name = option.get("name") or option.get("airline") or option.get("carrier") or "This option"
+    if category == "stay":
+        base = option.get("price_per_night") or 150
+        return {
+            "overview": f"{name} is a well-reviewed {option.get('type', 'stay')} in {option.get('area') or 'a central spot'} — "
+                        "comfortable base, easy walking distance to the main sights.",
+            "rooms": [
+                {"name": "Standard Double", "sleeps": 2, "est_price_per_night": base, "note": "the board's price"},
+                {"name": "Twin Room", "sleeps": 2, "est_price_per_night": base + 10, "note": "two singles, same floor"},
+                {"name": "Triple / Family", "sleeps": 3, "est_price_per_night": round(base * 1.4), "note": "best value for three"},
+            ],
+            "amenities": option.get("amenities") or ["Wi-Fi", "24h reception"],
+            "neighborhood": "Quiet street minutes from the center; cafés and a market nearby.",
+            "check_in": "15:00", "check_out": "11:00",
+            "good_to_know": ["City tax is usually paid at the desk", "Ask for a high floor when booking"],
+        }
+    if category == "flights":
+        return {
+            "overview": option.get("why") or "A solid balance of price and schedule.",
+            "outbound": [{"leg": option.get("route", "—"), "carrier": option.get("airline", "—"),
+                          "depart": (option.get("depart") or "").split(" ")[-1], "arrive": "", "duration": option.get("duration", "")}],
+            "return": [{"leg": option.get("return_route") or option.get("route", "—"), "carrier": option.get("airline", "—"),
+                        "depart": (option.get("return") or "").split(" ")[-1], "arrive": "", "duration": ""}],
+            "baggage": "Cabin bag included; checked bags usually cost extra on this fare.",
+            "fare_notes": "Economy fare — changes possible for a fee, typically non-refundable.",
+            "good_to_know": ["Check in online 24-48h before departure", "Layover times are estimates — verify when booking"],
+        }
+    if category == "transport":
+        return {
+            "overview": option.get("why") or f"A {option.get('mode', 'connection')} between the two cities.",
+            "boarding": "Leaves from the main station/terminal — arrive ~30 minutes early.",
+            "luggage": "A suitcase and a day bag per person travel free.",
+            "good_to_know": ["Book a few days ahead for the best price", "Morning departures keep the arrival day usable"],
+        }
+    return {  # visits & events share a shape
+        "overview": option.get("description") or f"{name} is one of the area's signature experiences.",
+        "when" if category == "events" else "hours": option.get("date_hint") or "Usually 09:00-18:00; check the official site",
+        "where" if category == "events" else "how_long": option.get("duration") or "About 2 hours",
+        "getting_there": "Reachable on foot or a short ride from the center.",
+        "tickets": (f"About ${option.get('cost_per_person')} per person"
+                    if option.get("cost_per_person") else "Free to visit"),
+        "good_to_know": ["Go early or late to dodge the crowds", "Book ahead in high season"],
+    }
+
+
+def _group_profile_block(destination: str, prefs: dict, trip_name: str) -> str:
     budget = prefs["budget_range"]
     dates = prefs["travel_dates"]
     duration = _duration_days(dates)
-    n_visits, n_events = _option_pool_sizes(duration)
     vibes = ", ".join(prefs["top_vibes"]) if prefs["top_vibes"] else "any"
     requirements = "; ".join(prefs["special_requirements"]) if prefs["special_requirements"] else "none"
-    acc_votes = ", ".join(f"{k}: {v} vote(s)" for k, v in prefs["accommodation_votes"].items()) or "no data"
-
-    if route:
-        route_desc = "; ".join(
-            f"{c['city']} — {c['nights']} night(s), {c.get('start') or '?'} to {c.get('end') or '?'}"
-            for c in route["cities"]
-        )
-        towns = ", ".join(f'"{c["town"]}"' for c in route["cities"])
-        route_block = f"""
-THIS IS A MULTI-CITY TRIP. The route is LOCKED: {route_desc}.
-Every stay, visit and event must carry a "city" field set to EXACTLY one of: {towns}.
-- "stay": 2-3 options PER CITY (so {2 * len(route['cities'])}-{3 * len(route['cities'])} total), each priced for that city's night count only ("total_per_person" covers just those nights).
-- "visits" and "events": spread them across the cities roughly in proportion to nights there.
-- Events must plausibly run while the group is IN their city (see the per-city date windows above)."""
-        stay_line = '2-3 accommodation options per route city (see the multi-city block), each with its "city".'
-        city_field = '"city": "one of the route towns", '
-    else:
-        route_block = ""
-        stay_line = "exactly 4 accommodation options covering different styles/price points that match the group's votes."
-        city_field = ""
-
-    prompt = f"""You are an expert travel planner assembling a menu of concrete options for a group trip to {destination}. The group will STAR the options they like — Rovyn then builds the day-by-day itinerary from their starred picks — so every option must be distinct, real and independently doable (real hotel names, real sights).
-
-Trip: "{trip_name or destination}"
+    return f"""Trip: "{trip_name or destination}"
 Group profile:
 - Group size: {prefs['group_size']}
 - Budget per person: ${budget['min']}–${budget['max']} USD total (flights excluded)
 - Dates: {dates['start']} to {dates['end']} ({duration} days)
 - Vibes (most voted first): {vibes}
-- Accommodation votes across the group: {acc_votes} — offer options spanning the styles people asked for
-- Special requirements: {requirements}{route_block}
+- Special requirements: {requirements}"""
 
-Produce options in THREE categories:
-1. "stay" — {stay_line}
-2. "visits" — exactly {n_visits} sights/attractions/day-trips worth visiting (each independently bookable or free). Cover different interests and durations so both packed and relaxed travelers find matches.
-3. "events" — exactly {n_events} time-specific experiences during the dates (concerts, festivals, food tours, boat parties, classes…). If nothing specific is verifiable, propose typical seasonal events and mark date_hint accordingly.
+
+def _route_menu_block(route: dict | None, what: str) -> tuple[str, str]:
+    """(rules block, per-item city field) for a multi-city menu prompt."""
+    if not route:
+        return "", ""
+    route_desc = "; ".join(
+        f"{c['city']} — {c['nights']} night(s), {c.get('start') or '?'} to {c.get('end') or '?'}"
+        for c in route["cities"]
+    )
+    towns = ", ".join(f'"{c["town"]}"' for c in route["cities"])
+    block = f"""
+THIS IS A MULTI-CITY TRIP. The route is LOCKED: {route_desc}.
+{what} must carry a "city" field set to EXACTLY one of: {towns}."""
+    return block, '"city": "one of the route towns", '
+
+
+# The stay menu and the visits/events menu used to ship in one very large
+# generation — the single slowest request in the app. They are independent,
+# so they run as two smaller parallel calls (see generate_trip_options).
+
+def _ai_stay_options(destination: str, prefs: dict, trip_name: str, route: dict | None = None) -> list[dict]:
+    acc_votes = ", ".join(f"{k}: {v} vote(s)" for k, v in prefs["accommodation_votes"].items()) or "no data"
+    route_block, city_field = _route_menu_block(route, "Every stay")
+    if route:
+        stay_line = (f'2-3 options PER CITY (so {2 * len(route["cities"])}-{3 * len(route["cities"])} total), each '
+                     'priced for that city\'s night count only ("total_per_person" covers just those nights).')
+    else:
+        stay_line = "exactly 4 options covering different styles/price points that match the group's votes."
+
+    prompt = f"""You are an expert travel planner listing accommodation options for a group trip to {destination}. The group will STAR the ones they like, so every option must be a real, distinct, bookable property (real hotel/hostel/apartment names).
+
+{_group_profile_block(destination, prefs, trip_name)}
+- Accommodation votes across the group: {acc_votes} — offer options spanning the styles people asked for{route_block}
+
+Produce {stay_line}
+
+Respond with ONLY valid JSON (no markdown):
+{{
+  "stay": [
+    {{{city_field}"name": "string", "type": "boutique hotel", "area": "neighborhood", "price_per_night": 180,
+      "total_per_person": 450, "rating": 4.6, "amenities": ["...", "..."],
+      "why": "one sentence on who this suits"}}
+  ]
+}}"""
+    result = _ask(prompt, max_tokens=8000 if route else 4096)
+    return result.get("stay", []) if isinstance(result, dict) else []
+
+
+def _ai_activity_options(destination: str, prefs: dict, trip_name: str, route: dict | None = None) -> dict:
+    dates = prefs["travel_dates"]
+    n_visits, n_events = _option_pool_sizes(_duration_days(dates))
+    route_block, city_field = _route_menu_block(route, "Every visit and event")
+    if route:
+        route_block += ("\n- Spread visits and events across the cities roughly in proportion to nights there."
+                        "\n- Events must plausibly run while the group is IN their city (see the per-city date windows above).")
+
+    prompt = f"""You are an expert travel planner assembling a menu of concrete activities for a group trip to {destination}. The group will STAR the options they like — Rovyn then builds the day-by-day itinerary from their starred picks — so every option must be distinct, real and independently doable (real sights, real venues).
+
+{_group_profile_block(destination, prefs, trip_name)}{route_block}
+
+Produce options in TWO categories:
+1. "visits" — exactly {n_visits} sights/attractions/day-trips worth visiting (each independently bookable or free). Cover different interests and durations so both packed and relaxed travelers find matches.
+2. "events" — exactly {n_events} time-specific experiences during the dates (concerts, festivals, food tours, boat parties, classes…). If nothing specific is verifiable, propose typical seasonal events and mark date_hint accordingly.
 
 Respond with ONLY valid JSON (no markdown):
 {{
   "destination": "{destination}",
   "country": "string",
   "dates": {{"start": "{dates['start']}", "end": "{dates['end']}"}},
-  "stay": [
-    {{{city_field}"name": "string", "type": "boutique hotel", "area": "neighborhood", "price_per_night": 180,
-      "total_per_person": 450, "rating": 4.6, "amenities": ["...", "..."],
-      "why": "one sentence on who this suits"}}
-  ],
   "visits": [
     {{{city_field}"name": "string", "description": "1-2 sentences", "duration": "2h", "cost_per_person": 25, "category": "culture"}}
   ],
@@ -1139,10 +1249,7 @@ Respond with ONLY valid JSON (no markdown):
     {{{city_field}"name": "string", "description": "1-2 sentences", "date_hint": "evenings in July / July 18", "cost_per_person": 40}}
   ]
 }}"""
-
-    # Multi-city responses are much bigger (stays per city, tagged
-    # visits/events) — give them headroom so the JSON never truncates.
-    return _ask_claude(prompt, max_tokens=20000 if route else 12000)
+    return _ask(prompt, max_tokens=10000 if route else 8000)
 
 
 def _sample_city_stays(c: dict, prefs: dict) -> list[dict]:
@@ -1528,6 +1635,10 @@ def generate_final_plan(destination: str, responses: list[dict], options: dict, 
         "image": options.get("image"),
         "dates": dates,
         "duration_days": duration,
+        # The band everyone agreed to in the questionnaire (highest floor to
+        # lowest ceiling; flights excluded) — the UI compares the final costs
+        # against it so the group sees whether the plan fits the budget.
+        "budget_per_person": prefs["budget_range"],
         "trip_mode": "multi" if route else "single",
         "summary": woven.get("summary", f"The group's plan for {destination}."),
         "decisions": decisions,
@@ -1644,7 +1755,7 @@ Respond with ONLY valid JSON:
   "tips": ["tip 1", "tip 2", "tip 3"]
 }}"""
 
-    return _ask_claude(prompt, max_tokens=12000)
+    return _ask(prompt, max_tokens=12000)
 
 
 def _sample_weave_plan(destination: str, prefs: dict, selection: dict, dates: dict,
@@ -1855,7 +1966,7 @@ Otherwise apply the change faithfully but minimally — keep everything else ide
 
 Respond with ONLY the complete updated plan as valid JSON (or the impossible object)."""
 
-    revised = _ask_claude(prompt, max_tokens=16000)
+    revised = _ask(prompt, max_tokens=16000)
     if isinstance(revised, dict) and revised.get("impossible"):
         raise RevisionNotPossible(revised["impossible"])
     if not isinstance(revised, dict) or "days" not in revised.get("itinerary", {}):
@@ -2014,7 +2125,7 @@ Respond with ONLY valid JSON:
   }},
   "plan": {{ ...the complete adapted plan, same schema as the original... }}
 }}"""
-    result = _ask_claude(prompt, max_tokens=16000)
+    result = _ask(prompt, max_tokens=16000)
     if not isinstance(result, dict) or "plan" not in result:
         raise RuntimeError("The adaptation came back malformed — please try again.")
     return result
@@ -2162,7 +2273,7 @@ Respond with ONLY a valid JSON object (no markdown) with this exact structure:
   "tips": ["Local tip 1", "Local tip 2", "Local tip 3"]
 }}"""
 
-    return _ask_claude(prompt, max_tokens=8192)
+    return _ask(prompt, max_tokens=8192)
 
 
 def _sample_itinerary(destination: str, prefs: dict) -> dict:
