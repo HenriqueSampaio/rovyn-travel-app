@@ -468,6 +468,37 @@ export function RouteTimeline({ route, style }) {
   );
 }
 
+/* A Rovyn-styled map from the backend's Static Maps proxy. `load` returns a
+   blob URL (api.routeMap / api.optionMap — session-cached, so re-mounts are
+   instant). Reserves its aspect ratio while loading; vanishes quietly if no
+   map exists — maps are an enhancement, never a hole in the page. */
+export function MapImage({ load, ratio = 2, alt = 'Map', style, header = null }) {
+  const [src, setSrc] = useState(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let dead = false;
+    load().then(url => { if (!dead) setSrc(url); })
+      .catch(() => { if (!dead) setFailed(true); });
+    return () => { dead = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  if (failed) return null; // the header vanishes with the map — no orphans
+  return (
+    <>
+      {header}
+      {src ? (
+        <motion.img
+          src={src} alt={alt} draggable={false}
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.35 }}
+          style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 4, ...style }}
+        />
+      ) : (
+        <div className="map-loading" style={{ aspectRatio: `${ratio} / 1`, ...style }} />
+      )}
+    </>
+  );
+}
+
 /* Wide place photo with photographer credit (renders nothing without an image) */
 export function Hero({ image, height = 230, style }) {
   if (!image?.url) return null;

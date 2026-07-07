@@ -182,6 +182,15 @@ a { color: var(--pine); text-decoration: none; }
 .spin-slow { animation: spin 5s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Soft placeholder while a map image streams in */
+.map-loading {
+  width: 100%;
+  border-radius: 4px;
+  background: var(--bg-soft);
+  animation: map-pulse 1.6s ease-in-out infinite;
+}
+@keyframes map-pulse { 50% { opacity: 0.55; } }
+
 /* ============================================================
    Layout classes — structural rules live here (not inline) so
    the mobile media queries below can restack them.

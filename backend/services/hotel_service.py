@@ -419,6 +419,77 @@ def official_website(name: str, place: str) -> str | None:
         return None
 
 
+_NAME_STOPWORDS = {
+    "hotel", "hotels", "the", "a", "an", "of", "and", "de", "del", "della",
+    "di", "da", "la", "le", "les", "el", "los", "das", "der", "at", "by",
+    "hostel", "resort", "inn", "suites", "suite", "apartments", "apartment",
+    "aparthotel", "bb", "guesthouse", "guest", "house", "boutique",
+}
+
+
+def _names_match(a: str, b: str) -> bool:
+    """Do two property names plausibly describe the same place? Places Text
+    Search answers SOMETHING for almost any query, so before trusting its
+    links for a hotel we require real overlap between the distinctive words
+    ("Lutetia", "Excelsior") of both names — brand suffixes and rebrandings
+    still pass, a completely different property doesn't."""
+    def tokens(s: str) -> set[str]:
+        return {t for t in re.split(r"[^a-z0-9]+", s.casefold()) if len(t) > 1}
+
+    ta, tb = tokens(a), tokens(b)
+    if not ta or not tb:
+        return False
+    shorter = min(ta, tb, key=len)
+    overlap = ta & tb
+    return (len(overlap) * 2 >= len(shorter)) and bool(overlap - _NAME_STOPWORDS)
+
+
+def places_stay_links(name: str, place: str) -> dict | None:
+    """Official website + Google Maps link (+ coordinates) for a stay that
+    already has its facts from LiteAPI — the two links LiteAPI never carries.
+
+    {} means Google answered but nothing was trustworthy: no result, or the
+    best match looked like a different property (a wrong link is worse than
+    no link — callers may cache the verdict). None means we couldn't ask
+    (missing key / network) — callers should try again another time."""
+    key = os.environ.get("GOOGLE_PLACES_API_KEY")
+    if not key or not name:
+        return None
+    try:
+        req = urllib.request.Request(
+            "https://places.googleapis.com/v1/places:searchText",
+            data=json.dumps({"textQuery": f"{name} {place}".strip()}).encode(),
+            headers={
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": key,
+                "X-Goog-FieldMask":
+                    "places.displayName,places.websiteUri,places.googleMapsUri,places.location",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10, context=_SSL_CTX) as res:
+            data = json.loads(res.read().decode())
+        places = data.get("places") or []
+        if not places:
+            return {}
+        top = places[0]
+        found_name = ((top.get("displayName") or {}).get("text") or "").strip()
+        if not _names_match(name, found_name):
+            return {}
+        location = top.get("location") or {}
+        out = {
+            "website": safe_url(top.get("websiteUri")),
+            "maps_url": safe_url(top.get("googleMapsUri")),
+        }
+        out = {k: v for k, v in out.items() if v}
+        if location.get("latitude") is not None and location.get("longitude") is not None:
+            out["lat"] = location["latitude"]
+            out["lng"] = location["longitude"]
+        return out
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Option-detail screens — live facts only, no AI anywhere below this line
 # ---------------------------------------------------------------------------
@@ -455,7 +526,16 @@ def _liteapi_stay_page(hotel_id: str) -> dict:
         "star_rating": detail.get("starRating"),
         "phone": detail.get("phone") or "",
     }
-    return {k: v for k, v in out.items() if v}
+    out = {k: v for k, v in out.items() if v}
+    # The property's exact coordinates — the location map's pin. LiteAPI
+    # nests them under "location"; keep reading top-level too, just in case.
+    loc = detail.get("location") or {}
+    lat = loc.get("latitude", detail.get("latitude"))
+    lng = loc.get("longitude", detail.get("longitude"))
+    if lat is not None and lng is not None:
+        out["lat"] = lat
+        out["lng"] = lng
+    return out
 
 
 def _liteapi_room_offers(hotel_id: str, check_in: str, check_out: str,
@@ -528,7 +608,7 @@ _PLACE_DETAIL_FIELDS = ",".join(f"places.{f}" for f in (
     "displayName", "editorialSummary", "formattedAddress", "rating",
     "userRatingCount", "regularOpeningHours.weekdayDescriptions",
     "websiteUri", "googleMapsUri", "internationalPhoneNumber",
-    "reviews", "photos",
+    "reviews", "photos", "location",
 ))
 
 
@@ -594,6 +674,7 @@ def place_details(name: str, place: str) -> dict | None:
                 "source": "google",
             })
         rating = top.get("rating")
+        location = top.get("location") or {}
         out = {
             "summary": ((top.get("editorialSummary") or {}).get("text") or "").strip(),
             "address": top.get("formattedAddress") or "",
@@ -607,6 +688,10 @@ def place_details(name: str, place: str) -> dict | None:
             "reviews": reviews[:5],
         }
         out = {k: v for k, v in out.items() if v}
+        # Coordinates feed the location map on the option-detail screen
+        if location.get("latitude") is not None and location.get("longitude") is not None:
+            out["lat"] = location["latitude"]
+            out["lng"] = location["longitude"]
         return out or None
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError,
             json.JSONDecodeError, KeyError, TypeError, ValueError):
@@ -632,14 +717,15 @@ def real_option_details(category: str, option: dict, context: dict) -> dict:
     if category == "stay":
         hotel_id = option.get("liteapi_hotel_id")
         if hotel_id and liteapi_available():
-            # The page and the room offers are independent requests — overlap them
-            with ThreadPoolExecutor(max_workers=2) as pool:
+            # Page, room offers and Google links are independent — overlap them
+            with ThreadPoolExecutor(max_workers=3) as pool:
                 page_f = pool.submit(_liteapi_stay_page, hotel_id)
                 offers_f = pool.submit(
                     _liteapi_room_offers, hotel_id,
                     context.get("check_in") or "", context.get("check_out") or "",
                     context.get("group_size", 2), context.get("nights", 1),
                 )
+                links_f = pool.submit(places_stay_links, option.get("name", ""), where)
                 try:
                     page = page_f.result()
                 except Exception:
@@ -648,9 +734,17 @@ def real_option_details(category: str, option: dict, context: dict) -> dict:
                     offers = offers_f.result()
                 except Exception:
                     offers = None
+                try:
+                    links = links_f.result() or {}
+                except Exception:
+                    links = {}
             if page or offers:
                 details.update(page)
                 details.update(offers or {})
+                # LiteAPI never carries the property's own website or a Maps
+                # link — Google fills those gaps; LiteAPI wins where both know
+                for k, v in links.items():
+                    details.setdefault(k, v)
                 details["source"] = "liteapi"
                 return details
         found = place_details(option.get("name", ""), where)

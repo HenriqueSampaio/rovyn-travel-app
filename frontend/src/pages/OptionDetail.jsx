@@ -5,7 +5,7 @@ import {
   PlaneTakeoff, Ship, Star, TrainFront,
 } from 'lucide-react';
 import { api } from '../api/index.js';
-import { Page, Loading, ErrorText, Hero, PhotoCarousel, GuestReviews } from '../ui.jsx';
+import { Page, Loading, ErrorText, Hero, MapImage, PhotoCarousel, GuestReviews } from '../ui.jsx';
 
 const TITLES = {
   stay: 'The stay', flights: 'This flight', transport: 'This leg',
@@ -463,6 +463,16 @@ export default function OptionDetail() {
             <FactRow icon={MapPin} label="Address">{d.address}</FactRow>
             <FactRow icon={Phone} label="Phone">{d.phone}</FactRow>
           </div>
+
+          {['stay', 'visits', 'events'].includes(category) && d.source !== 'board' && (
+            <MapImage
+              key={optionId}
+              load={() => api.optionMap(tripId, optionId)}
+              ratio={640 / 300}
+              alt={`Map of ${title}`}
+              style={{ marginTop: 18 }}
+            />
+          )}
 
           {reviewMedia && (
             <GuestReviews

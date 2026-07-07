@@ -6,7 +6,7 @@ import uuid
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 
 from backend.auth import get_current_user
 from backend.db import IS_POSTGRES, fetch_many, get_conn
@@ -22,7 +22,10 @@ from backend.services.ai_service import (
     revise_final_plan, suggest_nearby_cities,
 )
 from backend.services.hotel_service import (
-    real_option_details, refresh_room_offers, stay_media_for_options,
+    places_stay_links, real_option_details, refresh_room_offers, stay_media_for_options,
+)
+from backend.services.maps_service import (
+    geocode_place, maps_available, option_map_png, route_map_png,
 )
 from backend.services.flight_service import (
     live_flight_details,
@@ -837,9 +840,19 @@ def read_option_details(trip_id: str, option_id: str, user: dict = Depends(get_c
     # "kind" marks the live format — older trips may still cache AI sheets,
     # which are ignored and replaced by real data on this open
     if isinstance(cached, dict) and cached.get("kind") == "live":
-        # The page facts never change, but room prices are live — re-quote
-        # them on every open instead of serving a stale snapshot
         if cached.get("source") == "liteapi":
+            # Details cached before the Places key existed lack the hotel's
+            # website / Maps link — backfill once and keep the verdict, so
+            # old boards heal on open without regenerating anything.
+            if not (cached.get("website") or cached.get("maps_url") or cached.get("links_checked")):
+                links = places_stay_links(
+                    option.get("name", ""), option.get("city") or context["destination"])
+                if links is not None:  # None = couldn't ask; retry next open
+                    cached = {**cached, "links_checked": True,
+                              **{k: v for k, v in links.items() if k not in cached}}
+                    _persist_option_details(trip_id, option_id, cached)
+            # The page facts never change, but room prices are live — re-quote
+            # them on every open instead of serving a stale snapshot
             fresh = refresh_room_offers(option, context)
             if fresh:
                 cached = {**cached, **fresh}
@@ -847,19 +860,102 @@ def read_option_details(trip_id: str, option_id: str, user: dict = Depends(get_c
 
     details = real_option_details(category, option, context)
 
-    # Cache on the trip. Re-read under the write connection so a concurrent
-    # route edit isn't clobbered; last writer wins on the details field itself.
+    # Board-only results are NOT cached, so a flaky live fetch retries next open
     if details.get("source") != "board":
-        with get_conn() as conn:
-            row = conn.execute("SELECT options FROM trips WHERE id = ?", (trip_id,)).fetchone()
-            if row and row["options"]:
-                fresh = json.loads(row["options"])
-                _, fresh_opt = _find_option(fresh, option_id)
-                if fresh_opt is not None:
-                    fresh_opt["details"] = details
-                    conn.execute("UPDATE trips SET options = ? WHERE id = ?", (json.dumps(fresh), trip_id))
+        _persist_option_details(trip_id, option_id, details)
 
     return {"details": details, "category": category}
+
+
+def _persist_option_details(trip_id: str, option_id: str, details: dict) -> None:
+    """Cache one option's live details inside the trip's options JSON.
+    Re-reads under the write connection so a concurrent route edit isn't
+    clobbered; last writer wins on the details field itself."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT options FROM trips WHERE id = ?", (trip_id,)).fetchone()
+        if row and row["options"]:
+            fresh = json.loads(row["options"])
+            _, fresh_opt = _find_option(fresh, option_id)
+            if fresh_opt is not None:
+                fresh_opt["details"] = details
+                conn.execute("UPDATE trips SET options = ? WHERE id = ?", (json.dumps(fresh), trip_id))
+
+
+_MAP_HEADERS = {"Cache-Control": "private, max-age=86400"}
+
+
+def _map_options(trip_id: str, user_id: str) -> dict:
+    """Shared guard for the map endpoints: maps configured, member, board open."""
+    if not maps_available():
+        raise HTTPException(status_code=404, detail="Maps aren't configured.")
+    with get_conn(readonly=True) as conn:
+        trip = _member_trip(conn, trip_id, user_id)
+        if not trip["options"]:
+            raise HTTPException(status_code=404, detail="The planning board isn't open yet.")
+        return json.loads(trip["options"])
+
+
+@router.get("/{trip_id}/map/route")
+def read_route_map(trip_id: str, w: int = 640, h: int = 320,
+                   user: dict = Depends(get_current_user)):
+    """The trip's route as a Rovyn-styled map image: numbered pins in route
+    order joined by a path — or a single destination pin for one-city trips.
+
+    The PNG comes from the Google Maps Static API, fetched server-side (the
+    key never reaches the browser) and cached on disk forever — the image is
+    a pure function of the route. City coordinates come from Places Text
+    Search and are cached the same way."""
+    options = _map_options(trip_id, user["id"])
+    country = (options.get("country") or "").strip()
+    route = options.get("route")
+    points = []
+    if route and route.get("cities"):
+        for c in route["cities"]:
+            place = c.get("city") if "," in (c.get("city") or "") \
+                else ", ".join(filter(None, [c.get("town"), country]))
+            coords = geocode_place(place)
+            if not coords:
+                # A partial route would number the pins wrong — show nothing
+                # rather than a map that contradicts the timeline.
+                raise HTTPException(status_code=404, detail="No map for this route yet.")
+            points.append((c.get("town", ""), *coords))
+    else:
+        dest = (options.get("destination") or "").strip()
+        place = dest if "," in dest or not country else f"{dest}, {country}"
+        coords = geocode_place(place)
+        if coords:
+            points.append((dest, *coords))
+    png = route_map_png(points, w, h)
+    if not png:
+        raise HTTPException(status_code=404, detail="No map for this trip yet.")
+    return Response(content=png, media_type="image/png", headers=_MAP_HEADERS)
+
+
+@router.get("/{trip_id}/map/option/{option_id}")
+def read_option_map(trip_id: str, option_id: str, w: int = 640, h: int = 300,
+                    user: dict = Depends(get_current_user)):
+    """Where one board option sits: a single-pin map image, styled like the
+    route map and cached the same way. Coordinates prefer the option's cached
+    live details (LiteAPI's exact property position, or Places'); options
+    opened before coordinates were captured fall back to a geocode of the
+    name — that lookup is cached forever, so the fallback is one-time."""
+    options = _map_options(trip_id, user["id"])
+    category, option = _find_option(options, option_id)
+    if not option:
+        raise HTTPException(status_code=404, detail="That option doesn't exist on this board.")
+    if category in ("flights", "transport"):
+        raise HTTPException(status_code=404, detail="No single place to map for this option.")
+    details = option.get("details") if isinstance(option.get("details"), dict) else {}
+    lat, lng = details.get("lat"), details.get("lng")
+    if lat is None or lng is None:
+        where = option.get("city") or options.get("destination") or ""
+        coords = geocode_place(", ".join(filter(None, [option.get("name", ""), where])))
+        if coords:
+            lat, lng = coords
+    png = option_map_png(lat, lng, w, h) if lat is not None and lng is not None else None
+    if not png:
+        raise HTTPException(status_code=404, detail="No map for this option yet.")
+    return Response(content=png, media_type="image/png", headers=_MAP_HEADERS)
 
 
 @router.post("/{trip_id}/star")
