@@ -8,3 +8,6 @@ node_modules/
 .DS_Store
 .claude/worktrees/
 frontend/dist/
+
+# symlinked in worktrees; trailing-slash pattern above misses symlinks
+node_modules

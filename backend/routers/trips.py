@@ -24,6 +24,9 @@ from backend.services.ai_service import (
 from backend.services.hotel_service import (
     real_option_details, refresh_room_offers, stay_media_for_options,
 )
+from backend.services.flight_service import (
+    live_flight_details,
+)
 
 router = APIRouter()
 
@@ -787,12 +790,16 @@ def read_option_details(trip_id: str, option_id: str, user: dict = Depends(get_c
     Real hotels get their LiteAPI page (description, facilities, check-in
     times) plus live room offers for the trip's dates; visits, events and
     non-LiteAPI stays get Google Places facts (address, hours, rating,
-    reviews, photos). Nothing here is AI-generated — flights and transport
-    have no live source wired yet, so they come back as source="board" and
-    the screen shows the board's own numbers with a live link-out.
+    reviews, photos). Live flights serve the real segments stored on the
+    option at board time, re-verifying the fare only while the quoted offer
+    can still be alive. Nothing here is AI-generated — AI flights and
+    transport come back as source="board" and the screen shows the board's
+    own numbers with a live link-out.
 
     Fetched on the first open, then cached inside the trip's options JSON;
-    board-only results are NOT cached so a flaky fetch retries next open."""
+    board-only results are NOT cached so a flaky fetch retries next open.
+    Flight details are never cached — they're assembled from the option
+    itself, so caching would only freeze the fare-freshness answer."""
     with get_conn(readonly=True) as conn:
         trip = _member_trip(conn, trip_id, user["id"])
         if not trip["options"]:
@@ -822,6 +829,9 @@ def read_option_details(trip_id: str, option_id: str, user: dict = Depends(get_c
             context["check_out"] = seg.get("end") or context["check_out"]
             context["nights"] = seg["nights"]
     context.setdefault("nights", _nights_between(context["check_in"], context["check_out"]))
+
+    if category == "flights":
+        return {"details": live_flight_details(option), "category": category}
 
     cached = option.get("details")
     # "kind" marks the live format — older trips may still cache AI sheets,

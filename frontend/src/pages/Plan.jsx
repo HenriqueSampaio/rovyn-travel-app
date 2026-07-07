@@ -61,7 +61,18 @@ function FlightCard({ opt, starred, count, onStar, disabled, buddies, onOpen }) 
     <div onClick={onOpen}
          style={{ display: 'flex', gap: 16, ...starredWash(starred), borderTop: '1px solid var(--line-soft)', alignItems: 'flex-start', cursor: 'pointer' }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <p style={{ fontWeight: 700, fontSize: 16 }}>{opt.airline}</p>
+        <p style={{ fontWeight: 700, fontSize: 16 }}>
+          {opt.airline}
+          {opt.live_price && (
+            <span title="Real bookable flights with a live fare for your dates" style={{
+              marginLeft: 10, fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em',
+              color: 'var(--pine)', border: '1px solid var(--pine)', borderRadius: 999,
+              padding: '2px 8px', verticalAlign: 2, whiteSpace: 'nowrap', display: 'inline-block',
+            }}>
+              LIVE PRICE
+            </span>
+          )}
+        </p>
         <div style={{ margin: '6px 0 2px' }}>
           <FlightLegRow label="OUT" when={opt.depart} route={opt.route} />
           <FlightLegRow label="BACK" when={opt.return} route={opt.return_route || opt.route} />
@@ -72,7 +83,7 @@ function FlightCard({ opt, starred, count, onStar, disabled, buddies, onOpen }) 
         <p style={{ fontSize: 14, color: 'var(--ink-soft)', marginTop: 4 }}>{opt.why}</p>
         <p style={{ marginTop: 8, display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
           <span className="serif" style={{ fontSize: 24, color: 'var(--pine)' }}>${opt.est_price_per_person}</span>
-          <span className="muted" style={{ fontSize: 13 }}>est. round trip</span>
+          <span className="muted" style={{ fontSize: 13 }}>{opt.live_price ? 'round trip · live fare' : 'est. round trip'}</span>
           {opt.link && <a className="btn-quiet" href={opt.link} target="_blank" rel="noreferrer" style={{ fontSize: 13 }} onClick={e => e.stopPropagation()}>compare on Expedia</a>}
         </p>
         {buddies.length > 0 && (
@@ -877,6 +888,23 @@ export default function Plan() {
         {tab !== 'overview' && (
           <>
             <p className="muted" style={{ maxWidth: 560, marginBottom: 10 }}>{CATEGORY_INTRO[tab]}</p>
+            {tab === 'flights' && (
+              options.flights_source === 'liteapi' ? (
+                <p style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 10,
+                  fontSize: 13.5, fontWeight: 700, color: 'var(--pine)',
+                }}>
+                  <Check size={14} strokeWidth={2.6} />
+                  {options.flights_all_live === false
+                    ? 'Real flights with live fares where marked LIVE PRICE — the rest are Rovyn estimates.'
+                    : 'Real flights with live fares for your dates.'}
+                </p>
+              ) : (
+                <p style={{ marginBottom: 10, fontSize: 13.5, color: 'var(--clay)' }}>
+                  These flights and prices are AI estimates — the Expedia links show live fares.
+                </p>
+              )
+            )}
             {tab === 'stay' && (
               options.stay_source === 'liteapi' ? (
                 <p style={{

@@ -53,6 +53,54 @@ function LegRow({ label, when, route }) {
   );
 }
 
+/* One direction of a LIVE itinerary: every real segment (carrier, flight
+   number, times, duration) with layover hints between them. */
+function SegmentLeg({ label, rows, duration }) {
+  if (!rows?.length) return null;
+  const timeOf = when => splitWhen(when).time;
+  const daysLater = (dep, arr) => {
+    const d1 = (dep || '').slice(0, 10);
+    const d2 = (arr || '').slice(0, 10);
+    if (!d1 || !d2 || d1 === d2) return '';
+    const days = Math.round((new Date(d2) - new Date(d1)) / 86400000);
+    return days > 0 ? `+${days}` : '';
+  };
+  return (
+    <div style={{ padding: '10px 0', borderTop: '1px dashed var(--line-soft)' }}>
+      <p style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
+        <span style={{
+          fontSize: 10.5, fontWeight: 700, letterSpacing: '0.12em',
+          color: label === 'OUT' ? 'var(--pine)' : 'var(--clay)',
+        }}>
+          {label}
+        </span>
+        <span className="muted" style={{ fontSize: 13 }}>{splitWhen(rows[0].depart).date}</span>
+        {duration && <span className="muted" style={{ fontSize: 13, marginLeft: 'auto' }}>{duration} total</span>}
+      </p>
+      {rows.map((s, i) => (
+        <div key={i}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, padding: '7px 0 2px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 15, fontWeight: 700, whiteSpace: 'nowrap' }}>
+              {timeOf(s.depart)} → {timeOf(s.arrive)}
+              {daysLater(s.depart, s.arrive) && (
+                <sup style={{ fontSize: 10, color: 'var(--clay)', fontWeight: 700 }}> {daysLater(s.depart, s.arrive)}</sup>
+              )}
+            </span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink-soft)', whiteSpace: 'nowrap' }}>{s.leg}</span>
+            <span className="muted" style={{ fontSize: 13 }}>{s.carrier} · {s.flight_no}</span>
+            <span className="muted" style={{ fontSize: 13, marginLeft: 'auto', whiteSpace: 'nowrap' }}>{s.duration}</span>
+          </div>
+          {s.layover_after && (
+            <p className="muted" style={{ fontSize: 12.5, fontStyle: 'italic', padding: '2px 0 2px 14px' }}>
+              layover · {s.layover_after}
+            </p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function FactRow({ icon: Icon, label, children }) {
   if (!children) return null;
   return (
@@ -193,19 +241,21 @@ export default function OptionDetail() {
     return () => { dead = true; };
   }, [tripId, optionId, navigate]);
 
-  // Live details — flights/transport have no live source, so they render
-  // instantly from the board's own facts without a request.
+  // Live details — transport and AI-estimated flights have no live source,
+  // so they render instantly from the board's own facts without a request.
+  // Live flights fetch their real segments (and a fare re-check when the
+  // quoted offer is still fresh enough to verify).
   useEffect(() => {
-    if (!category || detailsRequested.current) return;
+    if (!category || !opt || detailsRequested.current) return;
     detailsRequested.current = true;
-    if (category === 'flights' || category === 'transport') {
+    if (category === 'transport' || (category === 'flights' && !opt.live_price)) {
       setDetails({ data: { source: 'board' } });
       return;
     }
     api.getOptionDetails(tripId, optionId)
       .then(res => setDetails({ data: res.details }))
       .catch(err => setDetails({ err: err.message }));
-  }, [category, tripId, optionId]);
+  }, [category, opt, tripId, optionId]);
 
   // Stays reuse the board's cached galleries + guest reviews
   useEffect(() => {
@@ -239,7 +289,10 @@ export default function OptionDetail() {
   if (!opt) return <Page><Loading text="Opening the details…" /></Page>;
 
   const d = details?.data;
-  const loadingLive = !details && !['flights', 'transport'].includes(category);
+  const skipsFetch = category === 'transport' || (category === 'flights' && !opt.live_price);
+  const loadingLive = !details && !skipsFetch;
+  const liveSegs = category === 'flights' && d?.source === 'liteapi' && d.segments?.out?.length
+    ? d.segments : null;
   const title = opt.name || opt.airline || opt.carrier || opt.mode || 'Details';
   const city = (opt.city || '').split(',')[0].trim();
   const photos = (category === 'stay' ? media?.photos : d?.photos) || [];
@@ -259,7 +312,10 @@ export default function OptionDetail() {
 
   const price =
     category === 'stay' ? [`$${opt.price_per_night}`, ' / night', `≈ $${opt.total_per_person} per person total`]
-    : category === 'flights' ? [`$${opt.est_price_per_person}`, '', 'est. round trip']
+    : category === 'flights' ? [
+        `$${d?.price_per_person ?? opt.est_price_per_person}`, '',
+        opt.live_price ? 'round trip · live fare, per person' : 'est. round trip',
+      ]
     : category === 'transport' ? [`$${opt.est_price_per_person}`, '', 'per person, one way']
     : opt.cost_per_person > 0 ? [`$${opt.cost_per_person}`, '', 'per person'] : ['Free', '', ''];
 
@@ -285,8 +341,10 @@ export default function OptionDetail() {
       <h1 style={{ fontSize: 34, margin: '8px 0 4px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         {category === 'transport' && <ModeIcon size={26} strokeWidth={1.7} color="var(--pine)" />}
         {title}
-        {category === 'stay' && opt.live_price && (
-          <span title="Real property with live availability for your dates" style={{
+        {['stay', 'flights'].includes(category) && opt.live_price && (
+          <span title={category === 'flights'
+            ? 'Real bookable flights with a live fare for your dates'
+            : 'Real property with live availability for your dates'} style={{
             fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em',
             color: 'var(--pine)', border: '1px solid var(--pine)', borderRadius: 999,
             padding: '3px 9px', whiteSpace: 'nowrap',
@@ -334,16 +392,38 @@ export default function OptionDetail() {
 
       {opt.why && <p className="serif muted" style={{ fontStyle: 'italic', fontSize: 15.5, margin: '8px 0 4px' }}>{opt.why}</p>}
 
-      {/* Flights & transport: the board's own numbers, laid out properly */}
-      {category === 'flights' && (
+      {/* Flights: real segments once live details land; board facts otherwise */}
+      {category === 'flights' && (liveSegs ? (
+        <section style={{ marginTop: 14 }}>
+          <SegmentLeg label="OUT" rows={liveSegs.out} duration={d.out_duration} />
+          <SegmentLeg label="BACK" rows={liveSegs.back} duration={d.back_duration} />
+          {(d.fare_family || d.bags?.checked || d.bags?.carry_on) && (
+            <p className="muted" style={{ fontSize: 13.5, marginTop: 10 }}>
+              {[
+                d.fare_family,
+                d.bags?.checked ? 'checked bag included' : d.bags?.carry_on ? 'carry-on included' : null,
+              ].filter(Boolean).join(' · ')}
+            </p>
+          )}
+          <p className="muted" style={{ fontSize: 13.5, marginTop: 6, fontStyle: 'italic' }}>
+            Live fares via LiteAPI — {d.price_fresh
+              ? 'this fare was re-verified just now.'
+              : `showing the fare quoted ${splitWhen((d.priced_at || '').replace('T', ' ')).date || 'at board time'} — fares move, so re-check before booking.`}
+          </p>
+        </section>
+      ) : (
         <section style={{ marginTop: 14 }}>
           <LegRow label="OUT" when={opt.depart} route={opt.route} />
           <LegRow label="BACK" when={opt.return} route={opt.return_route || opt.route} />
           <p className="muted" style={{ fontSize: 13.5, marginTop: 10 }}>
-            Rovyn’s estimate for planning — exact times, baggage and fare rules live on the airline and Expedia.
+            {opt.live_price
+              ? (details
+                ? 'Live fare from the board — the segment details didn’t load this time. Go back and reopen to retry.'
+                : 'Live fare via LiteAPI — loading the full segment details…')
+              : 'Rovyn’s estimate for planning — exact times, baggage and fare rules live on the airline and Expedia.'}
           </p>
         </section>
-      )}
+      ))}
       {category === 'transport' && (
         <section style={{ marginTop: 14 }}>
           <FactRow icon={Clock} label="Departs">{opt.depart}</FactRow>
@@ -394,9 +474,10 @@ export default function OptionDetail() {
           )}
 
           {(() => {
-            const note = SOURCE_NOTES[d.source]
-              || (['flights', 'transport'].includes(category) ? null
-                : isSample ? 'Sample board — connect LiteAPI and Google Places keys for live details.'
+            // Flights carry their source note inside the segments section
+            const note = ['flights', 'transport'].includes(category) ? null
+              : SOURCE_NOTES[d.source]
+              || (isSample ? 'Sample board — connect LiteAPI and Google Places keys for live details.'
                 : 'No live source answered for this one — showing the board’s own facts.');
             return note && (
               <p className="muted" style={{ fontSize: 12, marginTop: 18, fontStyle: 'italic' }}>{note}</p>
