@@ -8,9 +8,15 @@ existing AI/sample options, so this module never breaks trip planning.
 Optional companion: GOOGLE_PLACES_API_KEY enriches hotels (and any stay option)
 with their official website via Google Places Text Search, and provides guest
 reviews for stays that don't come from LiteAPI.
+
+This module also builds the option-detail screens: LiteAPI's hotel page +
+live room offers for real stays, Google Places facts (hours, address,
+reviews, photos) for visits, events and AI stays — see real_option_details.
 """
+import html
 import json
 import os
+import re
 import ssl
 import time
 import urllib.error
@@ -405,3 +411,251 @@ def official_website(name: str, place: str) -> str | None:
         return safe_url(places[0].get("websiteUri")) if places else None
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError):
         return None
+
+
+# ---------------------------------------------------------------------------
+# Option-detail screens — live facts only, no AI anywhere below this line
+# ---------------------------------------------------------------------------
+
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_html(text: str) -> str:
+    """LiteAPI hotel descriptions arrive as HTML — flatten to clean paragraphs."""
+    if not text:
+        return ""
+    text = re.sub(r"(?i)</p\s*>|<br\s*/?>", "\n", text)
+    text = html.unescape(_TAG_RE.sub(" ", text))
+    lines = [re.sub(r"[ \t]+", " ", ln).strip() for ln in text.splitlines()]
+    return "\n".join(ln for ln in lines if ln)
+
+
+def _liteapi_stay_page(hotel_id: str) -> dict:
+    """The property's own page data: description, address, check-in times,
+    facilities. Photos are NOT fetched here — the stay-media endpoint already
+    carries the gallery and the frontend reuses it."""
+    detail = (_lite_request("/data/hotel", params={"hotelId": hotel_id})).get("data") or {}
+    times = detail.get("checkinCheckoutTimes") or {}
+    country = detail.get("country") or ""
+    out = {
+        "description": _strip_html(detail.get("hotelDescription") or ""),
+        "address": ", ".join(filter(None, [
+            detail.get("address"), detail.get("city"),
+            country.upper() if len(country) == 2 else country,
+        ])),
+        "check_in": times.get("checkin") or "",
+        "check_out": times.get("checkout") or "",
+        "facilities": detail.get("hotelFacilities") or [],
+        "star_rating": detail.get("starRating"),
+        "phone": detail.get("phone") or "",
+    }
+    return {k: v for k, v in out.items() if v}
+
+
+def _liteapi_room_offers(hotel_id: str, check_in: str, check_out: str,
+                         group_size: int, nights: int) -> dict | None:
+    """Live bookable room offers for the trip's dates — the Booking.com-style
+    room table. Prices come straight from LiteAPI's rates endpoint, which
+    occasionally 200s with no data for a hotel that does have availability,
+    so an empty answer is retried once before believing it."""
+    if not (check_in and check_out):
+        return None
+    rooms_needed = max(1, (group_size + 1) // 2)
+    best: dict[tuple, dict] = {}
+    for attempt in range(2):
+        if attempt:
+            time.sleep(0.8)
+        rates = _lite_request("/hotels/rates", payload={
+            "hotelIds": [hotel_id],
+            "checkin": check_in,
+            "checkout": check_out,
+            "currency": "USD",
+            "guestNationality": "US",
+            "occupancies": [{"adults": 2}] * rooms_needed,
+        })
+        for entry in rates.get("data") or []:
+            for rt in entry.get("roomTypes") or []:
+                # offerRetailRate = ALL requested rooms for the WHOLE stay
+                total = (rt.get("offerRetailRate") or {}).get("amount")
+                if not total:
+                    continue
+                total = float(total)
+                rate = (rt.get("rates") or [{}])[0]
+                name = (rate.get("name") or "").strip() or "Room"
+                board = (rate.get("boardName") or "").strip()
+                refundable = ((rate.get("cancellationPolicies") or {}).get("refundableTag")) == "RFN"
+                key = (name.casefold(), board.casefold(), refundable)
+                if key not in best or total < best[key]["total"]:
+                    best[key] = {
+                        "name": name,
+                        "board": board,
+                        "refundable": refundable,
+                        "sleeps": rate.get("maxOccupancy") or rate.get("adultCount"),
+                        "total": round(total),
+                        "per_room_per_night": round(total / max(nights, 1) / rooms_needed),
+                    }
+        if best:
+            break
+    if not best:
+        return None
+    offers = sorted(best.values(), key=lambda o: o["total"])[:8]
+    return {"rooms_needed": rooms_needed, "room_offers": offers}
+
+
+def refresh_room_offers(option: dict, context: dict) -> dict | None:
+    """Fresh room offers for an already-cached LiteAPI stay — prices are the
+    one part of a detail page that must never be served stale. None when the
+    stay isn't a LiteAPI property or the fetch fails."""
+    hotel_id = option.get("liteapi_hotel_id")
+    if not (hotel_id and liteapi_available()):
+        return None
+    try:
+        return _liteapi_room_offers(
+            hotel_id, context.get("check_in") or "", context.get("check_out") or "",
+            context.get("group_size", 2), context.get("nights", 1),
+        )
+    except Exception:
+        return None
+
+
+_PLACE_DETAIL_FIELDS = ",".join(f"places.{f}" for f in (
+    "displayName", "editorialSummary", "formattedAddress", "rating",
+    "userRatingCount", "regularOpeningHours.weekdayDescriptions",
+    "websiteUri", "googleMapsUri", "internationalPhoneNumber",
+    "reviews", "photos",
+))
+
+
+def _places_photo_urls(names: list[str], key: str, limit: int = 6) -> list[dict]:
+    """Resolve Places photo resource names to plain image URLs server-side, so
+    the API key never reaches the browser."""
+    names = [n for n in names if n][:limit]
+    if not names:
+        return []
+
+    def fetch(name: str) -> str | None:
+        url = f"https://places.googleapis.com/v1/{name}/media?maxHeightPx=900&skipHttpRedirect=true"
+        req = urllib.request.Request(url, headers={"X-Goog-Api-Key": key})
+        try:
+            with urllib.request.urlopen(req, timeout=10, context=_SSL_CTX) as res:
+                return safe_url(json.loads(res.read().decode()).get("photoUri"))
+        except Exception:
+            return None
+
+    with ThreadPoolExecutor(max_workers=min(6, len(names))) as pool:
+        return [{"url": u, "caption": ""} for u in pool.map(fetch, names) if u]
+
+
+def place_details(name: str, place: str) -> dict | None:
+    """Everything Google Places knows about one venue: summary, address,
+    opening hours, rating, reviews, website, photos. None when the key is
+    missing, the place is unknown, or anything fails."""
+    key = os.environ.get("GOOGLE_PLACES_API_KEY")
+    if not key or not name:
+        return None
+    try:
+        req = urllib.request.Request(
+            "https://places.googleapis.com/v1/places:searchText",
+            data=json.dumps({"textQuery": f"{name} {place}".strip()}).encode(),
+            headers={
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": key,
+                "X-Goog-FieldMask": _PLACE_DETAIL_FIELDS,
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10, context=_SSL_CTX) as res:
+            data = json.loads(res.read().decode())
+        places = data.get("places") or []
+        if not places:
+            return None
+        top = places[0]
+        reviews = []
+        for r in top.get("reviews") or []:
+            text = ((r.get("text") or {}).get("text") or "").strip()
+            if not text:
+                continue
+            reviews.append({
+                # Google rates /5 — normalize to /10 so the UI shows one scale
+                "score10": round(float(r["rating"]) * 2, 1) if r.get("rating") else None,
+                "headline": "",
+                "pros": "",
+                "cons": "",
+                "text": text,
+                "author": (r.get("authorAttribution") or {}).get("displayName") or "A visitor",
+                "date": (r.get("publishTime") or "")[:10],
+                "traveler_type": "",
+                "source": "google",
+            })
+        rating = top.get("rating")
+        out = {
+            "summary": ((top.get("editorialSummary") or {}).get("text") or "").strip(),
+            "address": top.get("formattedAddress") or "",
+            "hours": (top.get("regularOpeningHours") or {}).get("weekdayDescriptions") or [],
+            "website": safe_url(top.get("websiteUri")),
+            "maps_url": safe_url(top.get("googleMapsUri")),
+            "phone": top.get("internationalPhoneNumber") or "",
+            "rating10": round(float(rating) * 2, 1) if rating else None,
+            "review_count": top.get("userRatingCount"),
+            "photos": _places_photo_urls([p.get("name") for p in top.get("photos") or []], key),
+            "reviews": reviews[:5],
+        }
+        out = {k: v for k, v in out.items() if v}
+        return out or None
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError,
+            json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return None
+
+
+def real_option_details(category: str, option: dict, context: dict) -> dict:
+    """Live facts for ONE board option — the option-detail screen's data.
+
+    stay with liteapi_hotel_id -> LiteAPI hotel page + live room offers
+    stay (AI/sample)           -> Google Places lookup of the property
+    visits / events            -> Google Places (hours, address, reviews…)
+    flights / transport        -> no live source wired yet: source="board",
+                                  the screen shows the board's own facts
+
+    Every branch degrades to {"source": "board"} instead of raising, so the
+    detail screen always renders something."""
+    details: dict = {"kind": "live", "source": "board"}
+    where = option.get("city") or context.get("destination") or ""
+
+    if category == "stay":
+        hotel_id = option.get("liteapi_hotel_id")
+        if hotel_id and liteapi_available():
+            # The page and the room offers are independent requests — overlap them
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                page_f = pool.submit(_liteapi_stay_page, hotel_id)
+                offers_f = pool.submit(
+                    _liteapi_room_offers, hotel_id,
+                    context.get("check_in") or "", context.get("check_out") or "",
+                    context.get("group_size", 2), context.get("nights", 1),
+                )
+                try:
+                    page = page_f.result()
+                except Exception:
+                    page = {}
+                try:
+                    offers = offers_f.result()
+                except Exception:
+                    offers = None
+            if page or offers:
+                details.update(page)
+                details.update(offers or {})
+                details["source"] = "liteapi"
+                return details
+        found = place_details(option.get("name", ""), where)
+        if found:
+            details.update(found)
+            details["source"] = "places"
+        return details
+
+    if category in ("visits", "events"):
+        found = place_details(option.get("name", ""), where)
+        if found:
+            details.update(found)
+            details["source"] = "places"
+        return details
+
+    return details

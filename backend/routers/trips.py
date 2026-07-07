@@ -17,11 +17,13 @@ from backend.models import (
 )
 from backend.services.ai_service import (
     RevisionNotPossible, ai_available, categories_for, generate_final_plan,
-    generate_itinerary, generate_option_details, generate_trip_options,
+    generate_itinerary, generate_trip_options,
     get_destination_recommendations, recommended_picks, recompute_plan_costs,
     revise_final_plan, suggest_nearby_cities,
 )
-from backend.services.hotel_service import stay_media_for_options
+from backend.services.hotel_service import (
+    real_option_details, refresh_room_offers, stay_media_for_options,
+)
 
 router = APIRouter()
 
@@ -771,14 +773,26 @@ def _find_option(options: dict, option_id: str) -> tuple[str, dict] | tuple[None
     return None, None
 
 
+def _nights_between(check_in: str, check_out: str) -> int:
+    try:
+        return max(1, (date.fromisoformat(check_out) - date.fromisoformat(check_in)).days)
+    except (TypeError, ValueError):
+        return 1
+
+
 @router.get("/{trip_id}/option-details/{option_id}")
 def read_option_details(trip_id: str, option_id: str, user: dict = Depends(get_current_user)):
-    """The full sheet for one board option — rooms/amenities for a stay,
-    segments/baggage for a flight, hours/tickets/tips for a visit or event.
+    """Live facts for one board option — the option-detail screen's data.
 
-    Generated with the fast model tier the first time anyone opens the option,
-    then cached inside the trip's options JSON: the board generation stays
-    lean, and each detail sheet costs one small request exactly once."""
+    Real hotels get their LiteAPI page (description, facilities, check-in
+    times) plus live room offers for the trip's dates; visits, events and
+    non-LiteAPI stays get Google Places facts (address, hours, rating,
+    reviews, photos). Nothing here is AI-generated — flights and transport
+    have no live source wired yet, so they come back as source="board" and
+    the screen shows the board's own numbers with a live link-out.
+
+    Fetched on the first open, then cached inside the trip's options JSON;
+    board-only results are NOT cached so a flaky fetch retries next open."""
     with get_conn(readonly=True) as conn:
         trip = _member_trip(conn, trip_id, user["id"])
         if not trip["options"]:
@@ -791,40 +805,51 @@ def read_option_details(trip_id: str, option_id: str, user: dict = Depends(get_c
     category, option = _find_option(options, option_id)
     if not option:
         raise HTTPException(status_code=404, detail="That option doesn't exist on this board.")
-    if option.get("details"):
-        return {"details": option["details"], "category": category,
-                "source": options.get("source") or ("ai" if ai_available() else "sample")}
 
+    dates = options.get("dates") or {}
     context = {
         "destination": options.get("destination", ""),
-        "dates": options.get("dates", {}),
         "group_size": max(members, 1),
+        "check_in": dates.get("start") or "",
+        "check_out": dates.get("end") or "",
     }
     route = options.get("route")
     if route and category == "stay":
         seg = next((c for c in route["cities"]
                     if (option.get("city") or "").split(",")[0].strip().casefold() == c["town"].casefold()), None)
         if seg:
+            context["check_in"] = seg.get("start") or context["check_in"]
+            context["check_out"] = seg.get("end") or context["check_out"]
             context["nights"] = seg["nights"]
+    context.setdefault("nights", _nights_between(context["check_in"], context["check_out"]))
 
-    try:
-        details = generate_option_details(category, option, context)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Couldn't build the details: {exc}")
+    cached = option.get("details")
+    # "kind" marks the live format — older trips may still cache AI sheets,
+    # which are ignored and replaced by real data on this open
+    if isinstance(cached, dict) and cached.get("kind") == "live":
+        # The page facts never change, but room prices are live — re-quote
+        # them on every open instead of serving a stale snapshot
+        if cached.get("source") == "liteapi":
+            fresh = refresh_room_offers(option, context)
+            if fresh:
+                cached = {**cached, **fresh}
+        return {"details": cached, "category": category}
+
+    details = real_option_details(category, option, context)
 
     # Cache on the trip. Re-read under the write connection so a concurrent
     # route edit isn't clobbered; last writer wins on the details field itself.
-    with get_conn() as conn:
-        row = conn.execute("SELECT options FROM trips WHERE id = ?", (trip_id,)).fetchone()
-        if row and row["options"]:
-            fresh = json.loads(row["options"])
-            _, fresh_opt = _find_option(fresh, option_id)
-            if fresh_opt is not None:
-                fresh_opt["details"] = details
-                conn.execute("UPDATE trips SET options = ? WHERE id = ?", (json.dumps(fresh), trip_id))
+    if details.get("source") != "board":
+        with get_conn() as conn:
+            row = conn.execute("SELECT options FROM trips WHERE id = ?", (trip_id,)).fetchone()
+            if row and row["options"]:
+                fresh = json.loads(row["options"])
+                _, fresh_opt = _find_option(fresh, option_id)
+                if fresh_opt is not None:
+                    fresh_opt["details"] = details
+                    conn.execute("UPDATE trips SET options = ? WHERE id = ?", (json.dumps(fresh), trip_id))
 
-    return {"details": details, "category": category,
-            "source": "ai" if ai_available() else "sample"}
+    return {"details": details, "category": category}
 
 
 @router.post("/{trip_id}/star")

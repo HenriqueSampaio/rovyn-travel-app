@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence, animate, motionValue, useTransform } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Check, ChevronLeft, ChevronRight, Compass, LogOut, Loader2, MapPin } from 'lucide-react';
+import { ArrowLeft, Check, ChevronLeft, ChevronRight, Compass, LogOut, Loader2, MapPin, Quote } from 'lucide-react';
 import { api, auth } from './api/index.js';
 
 export function Wordmark({ size = 26 }) {
@@ -574,6 +574,74 @@ export function PhotoCarousel({ photos, height = 220, style }) {
             ))}
           </span>
         </>
+      )}
+    </div>
+  );
+}
+
+/* Guest reviews under a stay or venue — LiteAPI guest feedback (pros/cons)
+   or Google reviews (text). Fully tucked away until the traveler asks: the
+   closed state is a single quiet line, never a wall of review text. */
+export function GuestReviews({ media, fallbackRating, defaultOpen = false,
+                               title = 'Guest reviews', fallbackHeadline = 'A recent stay' }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const reviews = media?.reviews || [];
+  if (reviews.length === 0) return null;
+  const rating = media?.rating10 ?? fallbackRating;
+  const summary = [
+    rating != null ? `${Number(rating).toFixed(1)}/10` : null,
+    media?.review_count > 0 ? `${media.review_count.toLocaleString()} reviews` : `${reviews.length} reviews`,
+  ].filter(Boolean).join(' · ');
+
+  if (!open) {
+    return (
+      <button className="btn-quiet" style={{ fontSize: 13, marginTop: 10 }}
+              onClick={e => { e.stopPropagation(); setOpen(true); }}>
+        <Quote size={12} strokeWidth={2.5} /> Read {title.toLowerCase()}
+        <span className="muted" style={{ fontWeight: 600 }}>{summary}</span>
+      </button>
+    );
+  }
+  return (
+    <div style={{ marginTop: 14 }}>
+      <p className="eyebrow" style={{ fontSize: 10.5, display: 'flex', alignItems: 'center', gap: 7, marginBottom: 2 }}>
+        <Quote size={12} strokeWidth={2.5} /> {title}
+        {rating != null && <span style={{ color: 'var(--clay)' }}>{Number(rating).toFixed(1)}/10</span>}
+        {media?.review_count > 0 && (
+          <span className="muted" style={{ letterSpacing: 0, textTransform: 'none', fontWeight: 600 }}>
+            · {media.review_count.toLocaleString()} reviews
+          </span>
+        )}
+      </p>
+      {reviews.map((r, i) => (
+        <div key={`${r.author}-${r.date}-${i}`} style={{ padding: '10px 0', borderTop: '1px dashed var(--line-soft)' }}>
+          <p style={{ fontSize: 13.5 }}>
+            <strong>{r.headline || fallbackHeadline}</strong>
+            <span className="muted">
+              {' '}— {r.author}
+              {r.traveler_type ? ` · ${r.traveler_type}` : ''}
+              {r.date ? ` · ${r.date}` : ''}
+              {r.score10 != null ? ` · rated ${Number(r.score10).toFixed(1)}/10` : ''}
+            </span>
+          </p>
+          {r.pros && (
+            <p style={{ fontSize: 13.5, color: 'var(--ink-soft)', marginTop: 2 }}>
+              <span style={{ color: 'var(--pine)', fontWeight: 700 }}>+</span> {r.pros}
+            </p>
+          )}
+          {r.cons && (
+            <p style={{ fontSize: 13.5, color: 'var(--ink-soft)', marginTop: 2 }}>
+              <span style={{ color: 'var(--clay)', fontWeight: 700 }}>−</span> {r.cons}
+            </p>
+          )}
+          {r.text && <p style={{ fontSize: 13.5, color: 'var(--ink-soft)', marginTop: 2 }}>{r.text}</p>}
+        </div>
+      ))}
+      {!defaultOpen && (
+        <button className="btn-quiet" style={{ fontSize: 13 }}
+                onClick={e => { e.stopPropagation(); setOpen(false); }}>
+          Hide reviews
+        </button>
       )}
     </div>
   );

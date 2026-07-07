@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  ArrowRight, BedDouble, Bus, Check, Compass, Info, Landmark, Loader2, Lock, LockOpen,
-  MapPin, Minus, PlaneTakeoff, Plus, Quote, Ship, Sparkles, Star, Ticket, TrainFront, Users, X,
+  ArrowRight, BedDouble, Bus, Check, Compass, Landmark, Lock, LockOpen,
+  MapPin, Minus, PlaneTakeoff, Plus, Ship, Sparkles, Star, Ticket, TrainFront, Users,
 } from 'lucide-react';
 import { api, auth } from '../api/index.js';
-import { Page, Loading, ErrorText, JourneyTracker, Hero, PhotoCarousel, RouteTimeline, Thumb, ThinkingLoader, useSwipeTabs } from '../ui.jsx';
+import { Page, Loading, ErrorText, GuestReviews, JourneyTracker, Hero, PhotoCarousel, RouteTimeline, Thumb, ThinkingLoader, useSwipeTabs } from '../ui.jsx';
 
 const TABS = [
   { key: 'overview', label: 'Overview', Icon: Compass },
@@ -37,15 +37,6 @@ function splitWhen(s = '') {
   return { date, time: t || '' };
 }
 
-function DetailsButton({ onClick }) {
-  return (
-    <button className="btn-quiet" style={{ fontSize: 13 }}
-            onClick={e => { e.stopPropagation(); onClick(); }}>
-      <Info size={13} strokeWidth={2.2} /> More details
-    </button>
-  );
-}
-
 /* One direction of a round trip, unpacked from the old single crammed line:
    OUT  09:40  Thu, Aug 14   JFK → SPU (via VIE) */
 function FlightLegRow({ label, when, route }) {
@@ -65,9 +56,10 @@ function FlightLegRow({ label, when, route }) {
   );
 }
 
-function FlightCard({ opt, starred, count, onStar, disabled, buddies, onDetails }) {
+function FlightCard({ opt, starred, count, onStar, disabled, buddies, onOpen }) {
   return (
-    <div style={{ display: 'flex', gap: 16, ...starredWash(starred), borderTop: '1px solid var(--line-soft)', alignItems: 'flex-start' }}>
+    <div onClick={onOpen}
+         style={{ display: 'flex', gap: 16, ...starredWash(starred), borderTop: '1px solid var(--line-soft)', alignItems: 'flex-start', cursor: 'pointer' }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <p style={{ fontWeight: 700, fontSize: 16 }}>{opt.airline}</p>
         <div style={{ margin: '6px 0 2px' }}>
@@ -81,8 +73,7 @@ function FlightCard({ opt, starred, count, onStar, disabled, buddies, onDetails 
         <p style={{ marginTop: 8, display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
           <span className="serif" style={{ fontSize: 24, color: 'var(--pine)' }}>${opt.est_price_per_person}</span>
           <span className="muted" style={{ fontSize: 13 }}>est. round trip</span>
-          <DetailsButton onClick={onDetails} />
-          {opt.link && <a className="btn-quiet" href={opt.link} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>compare on Expedia</a>}
+          {opt.link && <a className="btn-quiet" href={opt.link} target="_blank" rel="noreferrer" style={{ fontSize: 13 }} onClick={e => e.stopPropagation()}>compare on Expedia</a>}
         </p>
         {buddies.length > 0 && (
           <p style={{ marginTop: 8, display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 13.5, fontWeight: 600, color: 'var(--clay)' }}>
@@ -92,178 +83,6 @@ function FlightCard({ opt, starred, count, onStar, disabled, buddies, onDetails 
         )}
       </div>
       <StarButton starred={starred} count={count} onClick={onStar} disabled={disabled} />
-    </div>
-  );
-}
-
-/* Detail-sheet fields rendered as label/value rows, per category */
-const DETAIL_ROWS = {
-  stay: [['neighborhood', 'Neighborhood'], ['check_in', 'Check-in'], ['check_out', 'Check-out']],
-  flights: [['baggage', 'Baggage'], ['fare_notes', 'Fare']],
-  transport: [['boarding', 'Boarding'], ['luggage', 'Luggage']],
-  visits: [['hours', 'Hours'], ['how_long', 'How long'], ['getting_there', 'Getting there'], ['tickets', 'Tickets']],
-  events: [['when', 'When'], ['where', 'Where'], ['tickets', 'Tickets']],
-};
-
-const DETAIL_TITLES = {
-  stay: 'The stay', flights: 'This flight', transport: 'This leg',
-  visits: 'The visit', events: 'The event',
-};
-
-function DetailRow({ label, children }) {
-  if (!children) return null;
-  return (
-    <div style={{ display: 'flex', gap: 16, padding: '9px 0', borderTop: '1px dashed var(--line-soft)', fontSize: 14 }}>
-      <span className="muted" style={{ width: 110, flexShrink: 0, fontWeight: 600 }}>{label}</span>
-      <span style={{ color: 'var(--ink-soft)' }}>{children}</span>
-    </div>
-  );
-}
-
-function SegmentRows({ title, segments }) {
-  if (!segments?.length) return null;
-  return (
-    <div style={{ marginTop: 10 }}>
-      <p className="eyebrow" style={{ fontSize: 10.5, marginBottom: 2 }}>{title}</p>
-      {segments.map((s, i) => (
-        <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'baseline', padding: '7px 0', borderTop: '1px dashed var(--line-soft)', fontSize: 13.5, flexWrap: 'wrap' }}>
-          <span style={{ fontWeight: 700 }}>{s.leg}</span>
-          <span className="muted">{s.carrier}</span>
-          <span style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>
-            {s.depart}{s.arrive ? ` → ${s.arrive}` : ''}{s.duration ? ` · ${s.duration}` : ''}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/* The full sheet for one board option — photos, board facts, and the
-   AI-researched details (rooms, segments, hours…), fetched on first open */
-function OptionDetailModal({ detail, sheet, media, isSample, starred, count, onStar, onClose }) {
-  const { category, opt } = detail;
-  const d = sheet?.data;
-  const title = opt.name || opt.airline || opt.carrier || opt.mode || 'Details';
-  const city = (opt.city || '').split(',')[0].trim();
-  const photos = media?.photos || [];
-  const facts = [
-    category === 'stay' && opt.type,
-    category === 'stay' && opt.area,
-    category === 'stay' && opt.rating ? `★ ${opt.rating}` : null,
-    category === 'stay' && opt.price_per_night ? `$${opt.price_per_night}/night` : null,
-    category === 'flights' && (opt.stops === 0 ? 'nonstop' : `${opt.stops} stop${opt.stops > 1 ? 's' : ''}`),
-    category === 'flights' && opt.duration,
-    category === 'flights' && opt.est_price_per_person ? `$${opt.est_price_per_person} round trip` : null,
-    category === 'transport' && opt.mode,
-    category === 'transport' && opt.duration,
-    category === 'transport' && opt.est_price_per_person ? `$${opt.est_price_per_person} one way` : null,
-    ['visits', 'events'].includes(category) && opt.duration,
-    ['visits', 'events'].includes(category) && opt.date_hint,
-    ['visits', 'events'].includes(category)
-      ? (opt.cost_per_person > 0 ? `$${opt.cost_per_person} per person` : 'free')
-      : null,
-  ].filter(Boolean);
-
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(35, 49, 43, 0.45)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
-      }}
-    >
-      <motion.div
-        className="modal-card"
-        style={{ maxWidth: 600 }}
-        initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
-        onClick={e => e.stopPropagation()}
-      >
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
-          <div style={{ flex: 1 }}>
-            <p className="eyebrow">{DETAIL_TITLES[category]}{city ? ` · ${city}` : ''}</p>
-            <h2 style={{ fontSize: 27, margin: '6px 0 2px' }}>{title}</h2>
-            {facts.length > 0 && <p className="muted" style={{ fontSize: 13.5 }}>{facts.join(' · ')}</p>}
-          </div>
-          <button aria-label="Close" onClick={onClose} style={{ color: 'var(--muted)', marginTop: 4 }}>
-            <X size={20} strokeWidth={2} />
-          </button>
-        </div>
-
-        {photos.length > 0
-          ? <PhotoCarousel photos={photos} height={230} style={{ margin: '14px 0 4px' }} />
-          : opt.image?.url && <Hero image={opt.image} height={200} style={{ margin: '14px 0 4px' }} />}
-
-        {!sheet || (!d && !sheet.err) ? (
-          <p className="muted" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '22px 0', fontStyle: 'italic' }}>
-            <Loader2 className="spin" size={16} strokeWidth={2} color="var(--pine)" />
-            Pulling together the details…
-          </p>
-        ) : sheet.err ? (
-          <p style={{ color: 'var(--clay)', fontSize: 14, padding: '18px 0' }}>{sheet.err}</p>
-        ) : (
-          <div style={{ marginTop: 12 }}>
-            {d.overview && <p style={{ fontSize: 14.5, color: 'var(--ink-soft)', marginBottom: 12 }}>{d.overview}</p>}
-
-            {category === 'stay' && d.rooms?.length > 0 && (
-              <div style={{ marginBottom: 12 }}>
-                <p className="eyebrow" style={{ fontSize: 10.5, marginBottom: 2 }}>Rooms & rates</p>
-                {d.rooms.map((r, i) => (
-                  <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'baseline', padding: '8px 0', borderTop: '1px dashed var(--line-soft)', fontSize: 14, flexWrap: 'wrap' }}>
-                    <span style={{ fontWeight: 700 }}>{r.name}</span>
-                    <span className="muted" style={{ fontSize: 13 }}>sleeps {r.sleeps}{r.note ? ` · ${r.note}` : ''}</span>
-                    <span style={{ marginLeft: 'auto', fontWeight: 600, whiteSpace: 'nowrap' }}>≈ ${r.est_price_per_night}/night</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {category === 'stay' && (d.amenities || opt.amenities)?.length > 0 && (
-              <p className="muted" style={{ fontSize: 13.5, marginBottom: 10 }}>
-                {(d.amenities || opt.amenities).join(' · ')}
-              </p>
-            )}
-
-            {category === 'flights' && <SegmentRows title="Outbound" segments={d.outbound} />}
-            {category === 'flights' && <SegmentRows title="Return" segments={d.return} />}
-
-            {(DETAIL_ROWS[category] || []).map(([key, label]) => (
-              <DetailRow key={key} label={label}>{d[key]}</DetailRow>
-            ))}
-
-            {d.good_to_know?.length > 0 && (
-              <div style={{ marginTop: 12 }}>
-                <p className="eyebrow" style={{ fontSize: 10.5, marginBottom: 6 }}>Good to know</p>
-                {d.good_to_know.map((tip, i) => (
-                  <p key={i} style={{ fontSize: 13.5, color: 'var(--ink-soft)', padding: '3px 0', display: 'flex', gap: 8 }}>
-                    <span style={{ color: 'var(--clay)' }}>—</span> {tip}
-                  </p>
-                ))}
-              </div>
-            )}
-
-            <p className="muted" style={{ fontSize: 12, marginTop: 14, fontStyle: 'italic' }}>
-              {isSample
-                ? 'Sample details — add an AI key for researched ones.'
-                : 'AI-researched estimates — verify times and prices when booking.'}
-            </p>
-          </div>
-        )}
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginTop: 18, flexWrap: 'wrap' }}>
-          <button className="btn" onClick={onStar}>
-            <Star size={15} fill={starred ? '#F6F2E8' : 'none'} />
-            {starred ? 'Starred' : 'Star this'}{count > 0 ? ` · ${count}` : ''}
-          </button>
-          {opt.official_website && (
-            <a className="btn-quiet" href={opt.official_website} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>official site</a>
-          )}
-          {(opt.links?.booking || opt.link) && (
-            <a className="btn-quiet" href={opt.links?.booking || opt.link} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>
-              {category === 'flights' ? 'compare on Expedia' : category === 'transport' ? 'compare on Rome2Rio' : 'see booking options'}
-            </a>
-          )}
-          <button className="btn-quiet" onClick={onClose} style={{ marginLeft: 'auto' }}>Close</button>
-        </div>
-      </motion.div>
     </div>
   );
 }
@@ -405,7 +224,7 @@ const PACE_LABEL = { very: 'very busy', moderately: 'moderately busy', slightly:
 function StarButton({ starred, count, onClick, disabled }) {
   return (
     <button
-      onClick={onClick}
+      onClick={e => { e.stopPropagation(); onClick(); }}
       disabled={disabled}
       title={disabled ? 'Pick from your own departure city' : starred ? 'Unstar' : 'Star this'}
       style={{
@@ -421,77 +240,13 @@ function StarButton({ starred, count, onClick, disabled }) {
   );
 }
 
-/* Guest reviews under a stay — LiteAPI guest feedback (pros/cons) or Google
-   Places reviews (text). Fully tucked away until the traveler asks: the
-   closed state is a single quiet line, never a wall of review text. */
-function GuestReviews({ media, fallbackRating, defaultOpen = false }) {
-  const [open, setOpen] = useState(defaultOpen);
-  const reviews = media?.reviews || [];
-  if (reviews.length === 0) return null;
-  const rating = media?.rating10 ?? fallbackRating;
-  const summary = [
-    rating != null ? `${Number(rating).toFixed(1)}/10` : null,
-    media?.review_count > 0 ? `${media.review_count.toLocaleString()} reviews` : `${reviews.length} reviews`,
-  ].filter(Boolean).join(' · ');
-
-  if (!open) {
-    return (
-      <button className="btn-quiet" style={{ fontSize: 13, marginTop: 10 }} onClick={() => setOpen(true)}>
-        <Quote size={12} strokeWidth={2.5} /> Read guest reviews
-        <span className="muted" style={{ fontWeight: 600 }}>{summary}</span>
-      </button>
-    );
-  }
-  return (
-    <div style={{ marginTop: 14 }}>
-      <p className="eyebrow" style={{ fontSize: 10.5, display: 'flex', alignItems: 'center', gap: 7, marginBottom: 2 }}>
-        <Quote size={12} strokeWidth={2.5} /> Guest reviews
-        {rating != null && <span style={{ color: 'var(--clay)' }}>{Number(rating).toFixed(1)}/10</span>}
-        {media?.review_count > 0 && (
-          <span className="muted" style={{ letterSpacing: 0, textTransform: 'none', fontWeight: 600 }}>
-            · {media.review_count.toLocaleString()} reviews
-          </span>
-        )}
-      </p>
-      {reviews.map((r, i) => (
-        <div key={`${r.author}-${r.date}-${i}`} style={{ padding: '10px 0', borderTop: '1px dashed var(--line-soft)' }}>
-          <p style={{ fontSize: 13.5 }}>
-            <strong>{r.headline || 'A recent stay'}</strong>
-            <span className="muted">
-              {' '}— {r.author}
-              {r.traveler_type ? ` · ${r.traveler_type}` : ''}
-              {r.date ? ` · ${r.date}` : ''}
-              {r.score10 != null ? ` · rated ${Number(r.score10).toFixed(1)}/10` : ''}
-            </span>
-          </p>
-          {r.pros && (
-            <p style={{ fontSize: 13.5, color: 'var(--ink-soft)', marginTop: 2 }}>
-              <span style={{ color: 'var(--pine)', fontWeight: 700 }}>+</span> {r.pros}
-            </p>
-          )}
-          {r.cons && (
-            <p style={{ fontSize: 13.5, color: 'var(--ink-soft)', marginTop: 2 }}>
-              <span style={{ color: 'var(--clay)', fontWeight: 700 }}>−</span> {r.cons}
-            </p>
-          )}
-          {r.text && <p style={{ fontSize: 13.5, color: 'var(--ink-soft)', marginTop: 2 }}>{r.text}</p>}
-        </div>
-      ))}
-      {!defaultOpen && (
-        <button className="btn-quiet" style={{ fontSize: 13 }} onClick={() => setOpen(false)}>
-          Hide reviews
-        </button>
-      )}
-    </div>
-  );
-}
-
 /* A stay option: photo gallery (real hotels get their full LiteAPI gallery),
-   the essentials, and reviews tucked behind a tap */
-function StayCard({ opt, media, starred, count, onStar, onDetails }) {
+   the essentials, and reviews tucked behind a tap. The whole card opens the
+   stay's full page. */
+function StayCard({ opt, media, starred, count, onStar, onOpen }) {
   const photos = media?.photos || [];
   return (
-    <div style={{ ...starredWash(starred), borderTop: '1px solid var(--line-soft)' }}>
+    <div onClick={onOpen} style={{ ...starredWash(starred), borderTop: '1px solid var(--line-soft)', cursor: 'pointer' }}>
       {photos.length > 0
         ? <PhotoCarousel photos={photos} height={330} style={{ marginBottom: 16 }} />
         : <Hero image={opt.image} height={300} style={{ marginBottom: 16 }} />}
@@ -519,8 +274,7 @@ function StayCard({ opt, media, starred, count, onStar, onDetails }) {
           <p style={{ marginTop: 8, display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
             <span className="serif" style={{ fontSize: 24, color: 'var(--pine)' }}>${opt.price_per_night}<span style={{ fontSize: 14 }}> / night</span></span>
             <span className="muted" style={{ fontSize: 13 }}>≈ ${opt.total_per_person} per person total</span>
-            <DetailsButton onClick={onDetails} />
-            {opt.links?.booking && <a className="btn-quiet" href={opt.links.booking} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>{opt.live_price ? 'compare' : 'see similar'}</a>}
+            {opt.links?.booking && <a className="btn-quiet" href={opt.links.booking} target="_blank" rel="noreferrer" style={{ fontSize: 13 }} onClick={e => e.stopPropagation()}>{opt.live_price ? 'compare' : 'see similar'}</a>}
           </p>
         </div>
         <StarButton starred={starred} count={count} onClick={onStar} />
@@ -562,18 +316,24 @@ export default function Plan() {
   const [board, setBoard] = useState(null);
   const [myStars, setMyStars] = useState(new Set());
   const [counts, setCounts] = useState({});
-  const [tab, setTab] = useState('overview');
+  // Opening an option pushes a whole new screen — remember where the
+  // traveler was so coming back lands on the same tab and city.
+  const [tab, setTab] = useState(() => sessionStorage.getItem(`rovyn-plan-tab-${tripId}`) || 'overview');
   const [tabDir, setTabDir] = useState(0); // which way the content slides in
   const [error, setError] = useState('');
   const [finalizing, setFinalizing] = useState(false);
   const [stayMedia, setStayMedia] = useState(null); // null = not loaded yet
-  const [cityFilter, setCityFilter] = useState('all'); // multi-city: which city a tab shows
-  const [detail, setDetail] = useState(null); // { category, opt } — open detail sheet
-  const [detailSheets, setDetailSheets] = useState({}); // option id -> { data } | { err }
+  const [cityFilter, setCityFilterRaw] = useState(() => sessionStorage.getItem(`rovyn-plan-city-${tripId}`) || 'all');
   const pollRef = useRef(null);
   const starsInitialized = useRef(false);
   const stayMediaRequested = useRef(false);
+  const cityRestored = useRef(false);
   const tabBtnRefs = useRef({});
+
+  function setCityFilter(v) {
+    sessionStorage.setItem(`rovyn-plan-city-${tripId}`, v);
+    setCityFilterRaw(v);
+  }
 
   // Tab order is stable enough to wire gestures before the board loads
   const tabs = board?.options?.transport && board?.options?.route
@@ -584,6 +344,7 @@ export default function Plan() {
   function goTab(key) {
     const to = tabs.findIndex(t => t.key === key);
     setTabDir(to > tabIdx ? 1 : to < tabIdx ? -1 : 0);
+    sessionStorage.setItem(`rovyn-plan-tab-${tripId}`, key);
     setTab(key);
   }
 
@@ -591,16 +352,26 @@ export default function Plan() {
   // like the Trips/Feed/Wishlist deck one level up
   const swipeRef = useSwipeTabs(tabs.length, tabIdx, i => goTab(tabs[i].key));
 
+  // A remembered tab may not exist on this board (e.g. Transport on a
+  // single-city trip) — fall back to the overview
+  const hasBoard = Boolean(board?.options);
+  useEffect(() => {
+    if (hasBoard && !tabs.some(t => t.key === tab)) setTab('overview');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasBoard]);
+
   // On phones the tab strip scrolls sideways — keep the active pill in view
   useEffect(() => {
     tabBtnRefs.current[tab]?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
   }, [tab]);
 
   // Entering a tab resets the city pills: Stay opens on the first city (you
-  // pick one stay per city), Visits/Events open on the full list.
+  // pick one stay per city), Visits/Events open on the full list. The very
+  // first run is skipped so the filter restored from the last visit survives.
   const hasRoute = Boolean(board?.options?.route);
   useEffect(() => {
     if (!hasRoute) return;
+    if (!cityRestored.current) { cityRestored.current = true; return; }
     setCityFilter(tab === 'stay' ? board.options.route.cities[0].town : 'all');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, hasRoute]);
@@ -703,13 +474,12 @@ export default function Plan() {
       });
   }
 
-  function openDetails(category, opt) {
-    setDetail({ category, opt });
-    if (detailSheets[opt.id]?.data) return; // cached from a previous open
-    setDetailSheets(prev => ({ ...prev, [opt.id]: {} }));
-    api.getOptionDetails(tripId, opt.id)
-      .then(res => setDetailSheets(prev => ({ ...prev, [opt.id]: { data: res.details } })))
-      .catch(err => setDetailSheets(prev => ({ ...prev, [opt.id]: { err: err.message } })));
+  // Tapping anywhere on a card opens the option's own screen — the seed
+  // state renders it instantly, then live details stream in there.
+  function openOption(category, opt) {
+    navigate(`/trips/${tripId}/plan/option/${opt.id}`, {
+      state: { category, opt, starred: myStars.has(opt.id), count: counts[opt.id] || 0 },
+    });
   }
 
   async function finalize() {
@@ -739,12 +509,13 @@ export default function Plan() {
             onStar={() => star(category, opt.id)}
             disabled={disabled}
             buddies={buddies}
-            onDetails={() => openDetails('flights', opt)}
+            onOpen={() => openOption('flights', opt)}
           />
         );
       }
       return (
-      <div key={opt.id} style={{ display: 'flex', gap: 16, ...starredWash(myStars.has(opt.id)), borderTop: '1px solid var(--line-soft)', alignItems: 'flex-start' }}>
+      <div key={opt.id} onClick={() => openOption(category, opt)}
+           style={{ display: 'flex', gap: 16, ...starredWash(myStars.has(opt.id)), borderTop: '1px solid var(--line-soft)', alignItems: 'flex-start', cursor: 'pointer' }}>
         <Thumb image={opt.image} size={76} />
         <div style={{ flex: 1 }}>
           <p style={{ fontWeight: 700, fontSize: 16 }}>
@@ -760,12 +531,9 @@ export default function Plan() {
             )}
           </p>
           <p style={{ fontSize: 14.5, color: 'var(--ink-soft)', margin: '3px 0' }}>{opt.description}</p>
-          <p className="muted" style={{ fontSize: 13, display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-            <span>
-              {opt.duration ? `${opt.duration} · ` : ''}{opt.date_hint ? `${opt.date_hint} · ` : ''}
-              {opt.cost_per_person > 0 ? `$${opt.cost_per_person} per person` : 'free'}
-            </span>
-            <DetailsButton onClick={() => openDetails(category, opt)} />
+          <p className="muted" style={{ fontSize: 13 }}>
+            {opt.duration ? `${opt.duration} · ` : ''}{opt.date_hint ? `${opt.date_hint} · ` : ''}
+            {opt.cost_per_person > 0 ? `$${opt.cost_per_person} per person` : 'free'}
           </p>
         </div>
         <StarButton
@@ -835,7 +603,8 @@ export default function Plan() {
               const ModeIcon = MODE_ICONS[(opt.mode || '').toLowerCase()] || TrainFront;
               const buddies = (board.star_names?.[opt.id] || []).filter(n => n !== me?.name);
               return (
-                <div key={opt.id} style={{ display: 'flex', gap: 16, ...starredWash(myStars.has(opt.id), 20), borderTop: '1px solid var(--line-soft)', alignItems: 'flex-start' }}>
+                <div key={opt.id} onClick={() => openOption('transport', opt)}
+                     style={{ display: 'flex', gap: 16, ...starredWash(myStars.has(opt.id), 20), borderTop: '1px solid var(--line-soft)', alignItems: 'flex-start', cursor: 'pointer' }}>
                   <ModeIcon size={20} strokeWidth={1.7} color="var(--pine)" style={{ marginTop: 2, flexShrink: 0 }} />
                   <div style={{ flex: 1 }}>
                     <p style={{ fontWeight: 700, fontSize: 16 }}>
@@ -849,8 +618,7 @@ export default function Plan() {
                     <p style={{ marginTop: 6, display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
                       <span className="serif" style={{ fontSize: 24, color: 'var(--pine)' }}>${opt.est_price_per_person}</span>
                       <span className="muted" style={{ fontSize: 13 }}>per person, one way</span>
-                      <DetailsButton onClick={() => openDetails('transport', opt)} />
-                      {opt.link && <a className="btn-quiet" href={opt.link} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>compare on Rome2Rio</a>}
+                      {opt.link && <a className="btn-quiet" href={opt.link} target="_blank" rel="noreferrer" style={{ fontSize: 13 }} onClick={e => e.stopPropagation()}>compare on Rome2Rio</a>}
                     </p>
                     {buddies.length > 0 && (
                       <p style={{ marginTop: 8, display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 13.5, fontWeight: 600, color: 'var(--clay)' }}>
@@ -883,7 +651,7 @@ export default function Plan() {
         starred={myStars.has(opt.id)}
         count={counts[opt.id] || 0}
         onStar={() => star('stay', opt.id)}
-        onDetails={() => openDetails('stay', opt)}
+        onOpen={() => openOption('stay', opt)}
       />
     );
     if (!route) return stays.map(card);
@@ -1163,19 +931,6 @@ export default function Plan() {
         )}
       </motion.div>
       </div>
-
-      {detail && (
-        <OptionDetailModal
-          detail={detail}
-          sheet={detailSheets[detail.opt.id]}
-          media={detail.category === 'stay' ? stayMedia?.[detail.opt.id] : null}
-          isSample={isSample}
-          starred={myStars.has(detail.opt.id)}
-          count={counts[detail.opt.id] || 0}
-          onStar={() => star(detail.category, detail.opt.id)}
-          onClose={() => setDetail(null)}
-        />
-      )}
     </Page>
   );
 }
