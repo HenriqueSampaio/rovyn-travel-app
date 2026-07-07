@@ -468,13 +468,58 @@ export function RouteTimeline({ route, style }) {
   );
 }
 
+/* The Maps Embed API browser key (separate, referrer-restricted, free) —
+   fetched once per session; null means static maps only, no tap-to-explore. */
+let embedKeyPromise = null;
+function mapsEmbedKey() {
+  if (!embedKeyPromise) {
+    embedKeyPromise = api.mapsEmbedKey().then(r => r.key || null).catch(() => null);
+  }
+  return embedKeyPromise;
+}
+
+/* Full-screen interactive Google map (Maps Embed API) behind a tap on the
+   static picture — pan, zoom, Street View, live transit directions. */
+function MapSheet({ title, src, onClose }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 90, background: 'var(--bg, #F6F2E8)',
+      display: 'flex', flexDirection: 'column',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px' }}>
+        <p className="eyebrow" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <MapPin size={13} strokeWidth={2.5} /> {title}
+        </p>
+        <button className="btn-quiet" onClick={onClose}>Close</button>
+      </div>
+      <iframe
+        title={title}
+        src={src}
+        style={{ flex: 1, width: '100%', border: 0 }}
+        allowFullScreen
+        loading="lazy"
+        referrerPolicy="no-referrer-when-downgrade"
+      />
+    </div>
+  );
+}
+
+function embedUrl(key, embed) {
+  const params = new URLSearchParams({ key, ...embed.params });
+  return `https://www.google.com/maps/embed/v1/${embed.mode}?${params}`;
+}
+
 /* A Rovyn-styled map from the backend's Static Maps proxy. `load` returns a
    blob URL (api.routeMap / api.optionMap — session-cached, so re-mounts are
    instant). Reserves its aspect ratio while loading; vanishes quietly if no
-   map exists — maps are an enhancement, never a hole in the page. */
-export function MapImage({ load, ratio = 2, alt = 'Map', style, header = null }) {
+   map exists — maps are an enhancement, never a hole in the page.
+   With an `embed` prop ({mode, params} for the Maps Embed API) and a
+   configured browser key, tapping the picture opens the interactive map. */
+export function MapImage({ load, ratio = 2, alt = 'Map', style, header = null, embed = null }) {
   const [src, setSrc] = useState(null);
   const [failed, setFailed] = useState(false);
+  const [embedKey, setEmbedKey] = useState(null);
+  const [open, setOpen] = useState(false);
   useEffect(() => {
     let dead = false;
     load().then(url => { if (!dead) setSrc(url); })
@@ -482,18 +527,42 @@ export function MapImage({ load, ratio = 2, alt = 'Map', style, header = null })
     return () => { dead = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => {
+    if (!embed) return;
+    let dead = false;
+    mapsEmbedKey().then(k => { if (!dead) setEmbedKey(k); });
+    return () => { dead = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [Boolean(embed)]);
   if (failed) return null; // the header vanishes with the map — no orphans
+  const interactive = Boolean(embed && embedKey && src);
   return (
     <>
       {header}
       {src ? (
-        <motion.img
-          src={src} alt={alt} draggable={false}
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.35 }}
-          style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 4, ...style }}
-        />
+        <div style={{ position: 'relative', ...style }}>
+          <motion.img
+            src={src} alt={alt} draggable={false}
+            onClick={() => interactive && setOpen(true)}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.35 }}
+            style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 4,
+                     cursor: interactive ? 'pointer' : 'default' }}
+          />
+          {interactive && (
+            <span style={{
+              position: 'absolute', right: 10, bottom: 10, padding: '4px 12px',
+              borderRadius: 999, background: 'rgba(35, 49, 43, 0.62)', color: '#F6F2E8',
+              fontSize: 11.5, fontWeight: 700, pointerEvents: 'none',
+            }}>
+              tap to explore
+            </span>
+          )}
+        </div>
       ) : (
         <div className="map-loading" style={{ aspectRatio: `${ratio} / 1`, ...style }} />
+      )}
+      {open && interactive && (
+        <MapSheet title={alt} src={embedUrl(embedKey, embed)} onClose={() => setOpen(false)} />
       )}
     </>
   );

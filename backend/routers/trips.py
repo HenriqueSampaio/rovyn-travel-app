@@ -1089,6 +1089,12 @@ def set_route_nights(trip_id: str, req: RouteNightsRequest, user: dict = Depends
         options["route"] = _route_with_dates(cities, options.get("dates", {}), duration, route.get("reason", ""))
         options["route"]["locked"] = bool(route.get("locked"))
         options["route"]["split_adjusted_by"] = user["name"]
+        # A nights split doesn't change the cities — keep the Routes-API
+        # travel annotations instead of recomputing (or losing) them
+        old_facts = {leg["key"]: leg.get("real_durations") for leg in route.get("legs", [])}
+        for leg in options["route"]["legs"]:
+            if old_facts.get(leg["key"]):
+                leg["real_durations"] = old_facts[leg["key"]]
 
         # Booking links carry per-city date windows — re-derive them for the new split
         prefs = _aggregate_preferences(_questionnaire_rows(conn, trip_id))

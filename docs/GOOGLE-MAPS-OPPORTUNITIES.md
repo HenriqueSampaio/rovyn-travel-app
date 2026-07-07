@@ -98,55 +98,54 @@ makes that unlikely for a long time.
 
 ## What's on the table next
 
-### 1. Routes API — real travel times and true route lines (top pick)
+### 1. Routes API — real travel times and true route lines ✅ (implemented July 7, 2026)
 `routes.googleapis.com` `computeRoutes`: origin, destination, travel mode
-(**transit included** — trains and buses, i.e. exactly Rovyn's inter-city legs),
-returns duration, distance and an **encoded polyline**.
+(**transit included**), returns duration, distance and an **encoded polyline**.
+**Verified enabled on the server key** — Rome→Florence answers 2h 36m transit /
+3h 13m drive with real polylines.
 
-Concretely in Rovyn:
-- The Transport tab's leg durations ("5h30 by train") are currently AI estimates.
-  One transit `computeRoutes` call per leg gives real schedules-grade durations.
-- The route map's straight pin-to-pin lines become the actual path: Static Maps
-  accepts `path=enc:<polyline>` directly — no frontend change at all, just a
-  smarter `path` parameter in `maps_service.route_map_png`.
-- Feasibility guard at board generation: if the AI proposes Rome→Interlaken as a
-  "2h hop", the real 6h answer can demote or annotate it.
+Shipped in `maps_service.compute_route()` (disk-cached forever like geocodes;
+an API denial flips a process flag and everything degrades to the old behavior):
+- **Transport legs**: `_annotate_leg_durations` at board generation attaches
+  `leg["real_durations"]` (transit + drive + km); the Transport tab shows
+  "Google puts this leg at 2h 31m by transit · 3h 11m by car · 262 km" and the
+  leg's detail screens show a "Live times" row. Nights-split edits keep the
+  annotations. AI carrier options stay (they carry names/prices); the Google
+  line is the schedules-grade anchor beside them.
+- **Route maps draw the actual path**: `route_map_png` requests per-leg transit
+  (fallback: driving) polylines and passes `path=enc:` to Static Maps, with a
+  15k URL-budget guard that falls back to geodesic lines for huge routes.
+- Still open: automatic demotion of infeasible AI transport ideas (the
+  annotation makes the discrepancy visible to travelers today).
 
-Effort: ~a day (new service function + cache polylines next to geocodes + wire
-into transport generation). Cost: Essentials, 10k free/month; legs-per-board is
-tiny and cacheable per (from, to, mode). *Caveat:* transit coverage is uneven in
-some countries; fall back to the AI estimate when the API returns nothing.
+### 2. Maps Embed API — a free interactive map behind a tap ✅ (code shipped; needs a browser key)
+Every static map (board overview, final plan, option detail pages) is now
+tappable: a full-screen sheet opens the interactive embed — `place` mode for
+venues/destinations, `directions` mode with waypoints + transit for multi-city
+routes. Unlimited free usage.
 
-### 2. Maps Embed API — a free interactive map behind a tap
-An iframe (`google.com/maps/embed/v1/place?q=…` / `directions?origin=…`) gives
-pan/zoom/Street-View interactivity with **unlimited free usage**. Rovyn's taste is
-"verbose things behind taps": tapping a static location map could open a
-full-screen sheet with the interactive embed (and `directions` mode between route
-cities).
+**One console step remains**: create a SECOND API key, API-restricted to the
+Maps Embed API and HTTP-referrer-restricted (add localhost:5173 + LAN dev URLs
+now, the real domain at deploy), and set it as `GOOGLE_MAPS_EMBED_KEY` in
+`.env`. The frontend fetches it via `GET /places/maps-embed-key`; while the
+variable is unset the "tap to explore" affordance simply never appears. Never
+reuse the server key here — the embed key rides in the iframe URL by design.
 
-*The catch:* the key rides in the iframe URL, visible in the browser. That
-requires a **second, separate key** — HTTP-referrer-restricted to Rovyn's domains
-and API-restricted to the Embed API only. Since embeds are free, a leaked embed
-key can't run up a bill, but never reuse the server key here. Effort: small
-(a sheet component + one env var + key setup in the console).
-
-### 3. Route Matrix / Distance Matrix — day-plan sanity
-`computeRouteMatrix` prices like compute-routes and answers "how far is each
-starred sight from the chosen stay?" in one call. Uses:
-- "12 min walk from your hotel" chips on visit cards (the data already exists to
-  render them the moment coordinates are cached — coordinates now are).
+### 3. Route Matrix / Distance Matrix — day-plan sanity (partially ✅)
+Shipped: **"12 min walk from the center" chips** on stay/visit/event detail
+pages (`maps_service.travel_from_center`, computed once coordinates land and
+cached with the details; walking first, transit/driving for far-flung spots).
+Still open, waiting on final-plan slots carrying option ids (see Deferred):
+- "N min walk from your hotel" per sight once a stay is decided (needs
+  `computeRouteMatrix` against the chosen stay).
 - Final-plan day ordering: warn when a day's slots zigzag across town.
 
-Effort: moderate — the API is easy; deciding where verdicts surface in the UI is
-the real work. Pairs well with #1.
-
-### 4. Geocoding API — cheaper coordinates (micro-optimization)
-`maps_service.geocode_place()` currently geocodes through Places Text Search with
-a `places.location` mask — that's a **Pro** call (~$32/1k after 5k free) for data
-the **Geocoding API** sells at ~$5/1k after 10k free. The permanent geocode cache
-means Rovyn's real volume is a handful of calls per new destination, so this is
-pennies either way — but it's a one-function swap next time someone touches the
-file. Not urgent; noted for honesty.
+### 4. Geocoding API — cheaper coordinates ✅ (implemented July 7, 2026)
+`geocode_place()` now tries the **Geocoding API** (~$5/1k, 10k free) first and
+falls back to Places Text Search only when the Geocoding API is disabled on the
+key (a process flag remembers the denial). **Verified enabled and answering.**
+The permanent cache still makes real volume a handful of calls per new
+destination.
 
 ### 5. Time Zone API
 One call per destination gives the IANA zone for correct "evening" slot times and
@@ -185,11 +184,13 @@ Roads API (no GPS traces).
 - The single key lives server-side only (`.env` → backend); the frontend receives
   finished PNGs and photo URLs, never the key. Map endpoints require trip
   membership, so quota can't be farmed anonymously.
-- **Do in the Cloud console:** API-restrict the key to exactly what the backend
-  uses — Places API (New) + Maps Static API (+ Geocoding if #4 lands). When Rovyn
-  deploys to a stable host, add an IP restriction (App Engine/VM egress IPs).
-- Any future browser-facing feature (Embed, Maps JS) gets its **own** key,
-  referrer-restricted and API-restricted. Never ship the server key in HTML.
+- **Do in the Cloud console:** API-restrict the server key to exactly what the
+  backend uses — **Places API (New) + Maps Static API + Routes API + Geocoding
+  API** (all four in use as of July 7, 2026). When Rovyn deploys to a stable
+  host, add an IP restriction (App Engine/VM egress IPs).
+- Browser-facing features (the Embed sheet today, Maps JS someday) get their
+  **own** key, referrer-restricted and API-restricted — `GOOGLE_MAPS_EMBED_KEY`
+  in `.env`. Never ship the server key in HTML.
 
 ## Deferred on this branch (and why)
 

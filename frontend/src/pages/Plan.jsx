@@ -610,6 +610,15 @@ export default function Plan() {
               <TrainFront size={13} strokeWidth={2.5} /> {leg.key}
               {leg.date && <span className="muted" style={{ letterSpacing: 0, textTransform: 'none', fontWeight: 600 }}>· {leg.date}</span>}
             </p>
+            {leg.real_durations && (
+              <p className="muted" style={{ fontSize: 13, marginBottom: 4 }}>
+                Google puts this leg at
+                {leg.real_durations.transit ? ` ${leg.real_durations.transit} by transit` : ''}
+                {leg.real_durations.transit && leg.real_durations.drive ? ' ·' : ''}
+                {leg.real_durations.drive ? ` ${leg.real_durations.drive} by car` : ''}
+                {leg.real_durations.km ? ` · ${Math.round(leg.real_durations.km)} km` : ''}
+              </p>
+            )}
             {(options.transport[leg.key] || []).map(opt => {
               const ModeIcon = MODE_ICONS[(opt.mode || '').toLowerCase()] || TrainFront;
               const buddies = (board.star_names?.[opt.id] || []).filter(n => n !== me?.name);
@@ -710,6 +719,7 @@ export default function Plan() {
             load={() => api.routeMap(tripId)}
             alt={`Map of ${options.destination}`}
             style={{ marginBottom: 52 }}
+            embed={{ mode: 'place', params: { q: options.destination } }}
             header={
               <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
                 <MapPin size={13} strokeWidth={2.5} /> The destination
@@ -722,7 +732,18 @@ export default function Plan() {
             <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
               <TrainFront size={13} strokeWidth={2.5} /> The route
             </p>
-            <MapImage load={() => api.routeMap(tripId)} alt="Route map" style={{ marginBottom: 16 }} />
+            <MapImage
+              load={() => api.routeMap(tripId)}
+              alt="Route map"
+              style={{ marginBottom: 16 }}
+              embed={{ mode: 'directions', params: {
+                origin: route.cities[0].city,
+                destination: route.cities[route.cities.length - 1].city,
+                ...(route.cities.length > 2
+                  ? { waypoints: route.cities.slice(1, -1).map(c => c.city).join('|') } : {}),
+                mode: 'transit',
+              } }}
+            />
             <RouteTimeline route={route} style={{ maxWidth: 560 }} />
             <RouteSplitEditor
               route={route}

@@ -8,6 +8,7 @@ from backend.services import links, llm
 from backend.services.flight_service import flights_available, real_flight_options
 from backend.services.hotel_service import official_website, real_stay_options
 from backend.services.image_service import first_image, image_for, nth_image
+from backend.services.maps_service import leg_travel_facts
 
 # "itinerary" is no longer a starrable category — Rovyn builds the itinerary
 # from the group's starred visits & events at their preferred pace.
@@ -453,6 +454,20 @@ Respond with ONLY a valid JSON array:
     return cities_in_country(country, limit=limit, exclude={town}) if country else []
 
 
+def _annotate_leg_durations(route: dict) -> None:
+    """Real inter-city travel times (Google Routes API) attached to each leg
+    as leg["real_durations"] — the schedules-grade anchor shown next to the
+    AI's transport options. Geocodes and routes cache forever, so this costs
+    a couple of calls per new city pair, ever. Best-effort by design."""
+    for leg in (route or {}).get("legs", []):
+        try:
+            facts = leg_travel_facts(leg["from_city"], leg["to_city"])
+        except Exception:
+            facts = None
+        if facts:
+            leg["real_durations"] = facts
+
+
 def _route_with_dates(cities: list[dict], dates: dict, duration: int, reason: str) -> dict:
     """Attach calendar windows, day ranges and travel legs to a city sequence.
     Day numbers follow the plan's convention: day 1..duration, one per night."""
@@ -694,6 +709,7 @@ def generate_trip_options(destination: str, responses: list[dict], trip_name: st
             ai_stay_future = None
         flights_future = pool.submit(_flight_options, destination, prefs, route)
         transport_future = pool.submit(_transport_options, route, prefs) if route else None
+        legs_future = pool.submit(_annotate_leg_durations, route) if route else None
         if route:
             city_stays_future = pool.submit(city_stays_in_sequence)
         else:
@@ -714,6 +730,11 @@ def generate_trip_options(destination: str, responses: list[dict], trip_name: st
                 o.get("live_price") for opts in options["flights"].values() for o in opts)
         if transport_future:
             options["transport"] = transport_future.result()
+        if legs_future:
+            try:
+                legs_future.result()
+            except Exception:
+                pass  # real durations are an annotation, never a blocker
 
         if route:
             options["route"] = route

@@ -762,6 +762,15 @@ export default function FinalPlan() {
           load={() => api.routeMap(tripId)}
           alt={plan.route ? 'Route map' : `Map of ${plan.destination}`}
           style={{ margin: '4px 0 18px' }}
+          embed={plan.route
+            ? { mode: 'directions', params: {
+                origin: plan.route.cities[0].city,
+                destination: plan.route.cities[plan.route.cities.length - 1].city,
+                ...(plan.route.cities.length > 2
+                  ? { waypoints: plan.route.cities.slice(1, -1).map(c => c.city).join('|') } : {}),
+                mode: 'transit',
+              } }
+            : { mode: 'place', params: { q: plan.destination } }}
         />
         {plan.route && (
           <div style={{ margin: '4px 0 22px' }}>

@@ -12,6 +12,8 @@ import json
 import os
 import sys
 import tempfile
+import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -30,6 +32,7 @@ os.environ.update({
     "LITEAPI_API_KEY": "",
     "PEXELS_API_KEY": "",
     "GOOGLE_PLACES_API_KEY": "test-key",
+    "GOOGLE_MAPS_EMBED_KEY": "",
 })
 
 TMP = Path(tempfile.mkdtemp(prefix="rovyn-maps-test-"))
@@ -53,7 +56,13 @@ GEOCODES = {
     "florence, italy": (43.7700, 11.2577),
     "venice, italy": (45.4404, 12.3160),
     "sea breeze rooms, venice, italy": (45.4380, 12.3190),
+    "milan, italy": (45.4642, 9.1900),
 }
+
+# The two "may not be enabled on the key yet" APIs default to denied so the
+# older checks exercise the fallback paths; targeted checks flip them on.
+FAKE_MODES = {"routes": "denied", "geocoding": "denied"}
+ROUTE_SECONDS = {"TRANSIT": 19320, "DRIVE": 11100, "WALK": 720}
 
 PLACES_RESULTS = {
     # The healing lookup for the LiteAPI stay: same property, branded name
@@ -69,6 +78,12 @@ PLACES_RESULTS = {
         "websiteUri": "https://wrong-hotel.example.com",
         "googleMapsUri": "https://maps.google.com/?cid=13",
         "location": {"latitude": 45.0, "longitude": 12.0},
+    },
+    # Fresh detail fetch for the plain stay (the from-center chip e2e)
+    "sea breeze rooms venice, italy": {
+        "displayName": {"text": "Sea Breeze Rooms"},
+        "formattedAddress": "Castello 4145, Venice",
+        "location": {"latitude": 45.4380, "longitude": 12.3190},
     },
 }
 
@@ -91,6 +106,28 @@ def fake_urlopen(req, timeout=None, context=None):
     if url.startswith("https://maps.googleapis.com/maps/api/staticmap"):
         CALLS["static"].append(url)
         return _FakeResponse(FAKE_PNG)
+    if url.startswith("https://maps.googleapis.com/maps/api/geocode/json"):
+        CALLS.setdefault("geocode", []).append(url)
+        if FAKE_MODES["geocoding"] == "denied":
+            return _FakeResponse(json.dumps({"status": "REQUEST_DENIED"}).encode())
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+        addr = (qs.get("address") or [""])[0].casefold()
+        if addr in GEOCODES:
+            lat, lng = GEOCODES[addr]
+            body = {"status": "OK",
+                    "results": [{"geometry": {"location": {"lat": lat, "lng": lng}}}]}
+        else:
+            body = {"status": "ZERO_RESULTS", "results": []}
+        return _FakeResponse(json.dumps(body).encode())
+    if url.startswith("https://routes.googleapis.com/directions/v2:computeRoutes"):
+        CALLS.setdefault("routes", []).append(url)
+        if FAKE_MODES["routes"] == "denied":
+            raise urllib.error.HTTPError(url, 403, "routes api disabled", {}, io.BytesIO(b"{}"))
+        mode = json.loads(req.data.decode()).get("travelMode", "TRANSIT")
+        secs = ROUTE_SECONDS.get(mode, 19320)
+        body = {"routes": [{"duration": f"{secs}s", "distanceMeters": 261000,
+                            "polyline": {"encodedPolyline": f"poly_{mode.lower()}"}}]}
+        return _FakeResponse(json.dumps(body).encode())
     if "places.googleapis.com/v1/places:searchText" in url:
         query = json.loads(req.data.decode())["textQuery"].casefold()
         CALLS["places"].append(query)
@@ -282,5 +319,57 @@ res = client.get(f"/trips/{trip_id}/options", headers=HEADERS)
 ok("the board itself still serves", res.status_code == 200
    and len(res.json()["options"]["stay"]) == 3)
 os.environ["GOOGLE_PLACES_API_KEY"] = "test-key"
+
+# ---------------------------------------------------------------------------
+# 6. Routes API on: real paths, leg facts, from-center chips, cheap geocoder
+# ---------------------------------------------------------------------------
+print("routes api:")
+import backend.services.maps_service as maps_service  # noqa: E402
+
+FAKE_MODES["routes"] = "ok"
+maps_service._routes_api_denied = False  # earlier sections tripped the 403 flag
+
+r = maps_service.compute_route((41.8933, 12.4829), (43.77, 11.2577), "TRANSIT")
+ok("computeRoutes parsed", r is not None and r["minutes"] == 322 and r["label"] == "5h 22m"
+   and r["km"] == 261.0 and r["polyline"] == "poly_transit", r)
+routes_file = TMP / "map_cache" / "routes.json"
+ok("routes disk cache written", routes_file.exists()
+   and len(json.loads(routes_file.read_text())) >= 1)
+n_routes = len(CALLS.get("routes", []))
+maps_service.compute_route((41.8933, 12.4829), (43.77, 11.2577), "TRANSIT")
+ok("route cache hit (no Google traffic)", len(CALLS.get("routes", [])) == n_routes)
+
+facts = maps_service.leg_travel_facts("Rome, Italy", "Florence, Italy")
+ok("leg facts carry transit + drive", facts is not None and facts["transit"] == "5h 22m"
+   and facts["drive"] == "3h 05m" and facts["km"] == 261.0, facts)
+
+res = client.get(f"/trips/{trip_id}/map/route?w=639", headers=HEADERS)  # new size -> fresh URL
+ok("route map draws real polylines",
+   res.status_code == 200 and "enc:poly_" in urllib.parse.unquote(CALLS["static"][-1]),
+   urllib.parse.unquote(CALLS["static"][-1])[:300])
+
+res = client.get(f"/trips/{trip_id}/option-details/stay-plain", headers=HEADERS)
+d = res.json()["details"]
+ok("from-center chip on fresh details",
+   d.get("from_center") == "12 min walk from the center", d)
+ok("chip rides a places-sourced detail sheet", d.get("source") == "places")
+
+print("cheap geocoder:")
+FAKE_MODES["geocoding"] = "ok"
+maps_service._geocoding_api_denied = False
+n_places = len(CALLS["places"])
+coords = maps_service.geocode_place("Milan, Italy")
+ok("Geocoding API answers first (no Places call)",
+   coords == (45.4642, 9.19) and len(CALLS["places"]) == n_places
+   and len(CALLS.get("geocode", [])) > 0, coords)
+
+print("embed key:")
+res = client.get("/places/maps-embed-key", headers=HEADERS)
+ok("null without the env var", res.status_code == 200 and res.json()["key"] is None)
+os.environ["GOOGLE_MAPS_EMBED_KEY"] = "embed-browser-key"
+res = client.get("/places/maps-embed-key", headers=HEADERS)
+ok("returns the configured key", res.json()["key"] == "embed-browser-key")
+res = client.get("/places/maps-embed-key")
+ok("embed key requires auth", res.status_code in (401, 403))
 
 print(f"\nall {passed} checks passed")

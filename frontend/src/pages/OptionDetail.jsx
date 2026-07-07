@@ -216,6 +216,7 @@ export default function OptionDetail() {
   const [details, setDetails] = useState(null); // { data } | { err }
   const [media, setMedia] = useState(null);     // stay gallery + guest reviews
   const [isSample, setIsSample] = useState(false);
+  const [legFacts, setLegFacts] = useState(null); // transport: Google leg times
   const [starred, setStarred] = useState(Boolean(seed.starred));
   const [count, setCount] = useState(seed.count || 0);
   const [error, setError] = useState('');
@@ -234,6 +235,14 @@ export default function OptionDetail() {
       setIsSample(res.options.source === 'sample');
       setCount(res.star_counts?.[o.id] || 0);
       setStarred((res.my_stars || []).includes(o.id));
+      if (cat === 'transport') {
+        // This leg's Google-computed travel facts live on the route, keyed
+        // by the transport group this option belongs to
+        const groupKey = Object.keys(res.options.transport || {})
+          .find(k => (res.options.transport[k] || []).some(x => x.id === optionId));
+        const leg = (res.options.route?.legs || []).find(l => l.key === groupKey);
+        if (leg?.real_durations) setLegFacts(leg.real_durations);
+      }
     }).catch(err => {
       if (err.status === 401) navigate('/');
       else navigate(`/trips/${tripId}/plan`, { replace: true });
@@ -428,8 +437,19 @@ export default function OptionDetail() {
         <section style={{ marginTop: 14 }}>
           <FactRow icon={Clock} label="Departs">{opt.depart}</FactRow>
           <FactRow icon={Clock} label="Duration">{opt.duration}</FactRow>
+          {legFacts && (
+            <FactRow icon={TrainFront} label="Live times">
+              {[
+                legFacts.transit ? `${legFacts.transit} by transit` : null,
+                legFacts.drive ? `${legFacts.drive} by car` : null,
+                legFacts.km ? `${Math.round(legFacts.km)} km` : null,
+              ].filter(Boolean).join(' · ')}
+            </FactRow>
+          )}
           <p className="muted" style={{ fontSize: 13.5, marginTop: 10 }}>
-            Rovyn’s estimate for planning — live schedules and fares are one tap away on Rome2Rio.
+            {legFacts
+              ? 'Carrier times are Rovyn’s estimates; “Live times” come from Google for this leg. Fares are one tap away on Rome2Rio.'
+              : 'Rovyn’s estimate for planning — live schedules and fares are one tap away on Rome2Rio.'}
           </p>
         </section>
       )}
@@ -459,6 +479,7 @@ export default function OptionDetail() {
                 {d.check_in || '—'} / {d.check_out || '—'}
               </FactRow>
             )}
+            <FactRow icon={MapPin} label="From center">{d.from_center}</FactRow>
             <OpeningHours hours={d.hours} />
             <FactRow icon={MapPin} label="Address">{d.address}</FactRow>
             <FactRow icon={Phone} label="Phone">{d.phone}</FactRow>
@@ -471,6 +492,13 @@ export default function OptionDetail() {
               ratio={640 / 300}
               alt={`Map of ${title}`}
               style={{ marginTop: 18 }}
+              embed={(() => {
+                // Google matched the place by name (maps_url proves it) —
+                // ask for the labeled card; otherwise pin the coordinates
+                const q = d.maps_url && city ? `${title}, ${city}`
+                  : d.lat != null ? `${d.lat},${d.lng}` : null;
+                return q ? { mode: 'place', params: { q } } : null;
+              })()}
             />
           )}
 

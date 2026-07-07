@@ -178,6 +178,7 @@ export const api = {
   getReceipt: (tripId) => req(`/trips/${tripId}/receipt`),
 
   suggestCities: (q) => req(`/places/suggest?q=${encodeURIComponent(q)}`),
+  mapsEmbedKey: () => req('/places/maps-embed-key'),
 
   // Phase A booking checklist
   getBookings: (tripId) => req(`/trips/${tripId}/bookings`),

@@ -28,6 +28,7 @@ import certifi
 import pycountry
 
 from backend.services.links import safe_url
+from backend.services.maps_service import travel_from_center
 
 _SSL_CTX = ssl.create_default_context(cafile=certifi.where())
 _LITE_BASE = "https://api.liteapi.travel/v3.0"
@@ -714,6 +715,19 @@ def real_option_details(category: str, option: dict, context: dict) -> dict:
     details: dict = {"kind": "live", "source": "board"}
     where = option.get("city") or context.get("destination") or ""
 
+    def with_center_chip(d: dict) -> dict:
+        """"12 min walk from the center" — computed once the venue has
+        coordinates, cached with the rest of the details. Needs the Routes
+        API; silently absent until that's enabled on the key."""
+        if d.get("lat") is not None and where:
+            try:
+                chip = travel_from_center(d["lat"], d["lng"], where)
+            except Exception:
+                chip = None
+            if chip:
+                d["from_center"] = chip
+        return d
+
     if category == "stay":
         hotel_id = option.get("liteapi_hotel_id")
         if hotel_id and liteapi_available():
@@ -746,11 +760,12 @@ def real_option_details(category: str, option: dict, context: dict) -> dict:
                 for k, v in links.items():
                     details.setdefault(k, v)
                 details["source"] = "liteapi"
-                return details
+                return with_center_chip(details)
         found = place_details(option.get("name", ""), where)
         if found:
             details.update(found)
             details["source"] = "places"
+            return with_center_chip(details)
         return details
 
     if category in ("visits", "events"):
@@ -758,6 +773,7 @@ def real_option_details(category: str, option: dict, context: dict) -> dict:
         if found:
             details.update(found)
             details["source"] = "places"
+            return with_center_chip(details)
         return details
 
     return details
