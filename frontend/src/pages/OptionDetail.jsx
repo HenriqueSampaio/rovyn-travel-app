@@ -386,6 +386,7 @@ export default function OptionDetail() {
 
           {['stay', 'visits', 'events'].includes(category) && d.source !== 'board' && (
             <MapImage
+              key={optionId}
               load={() => api.optionMap(tripId, optionId)}
               ratio={640 / 300}
               alt={`Map of ${title}`}
