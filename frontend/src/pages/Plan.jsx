@@ -573,7 +573,6 @@ export default function Plan() {
   const pollRef = useRef(null);
   const starsInitialized = useRef(false);
   const stayMediaRequested = useRef(false);
-  const contentRef = useRef(null);
   const tabBtnRefs = useRef({});
 
   // Tab order is stable enough to wire gestures before the board loads
@@ -590,7 +589,7 @@ export default function Plan() {
 
   // Swiping the content area moves between the board's sections, exactly
   // like the Trips/Feed/Wishlist deck one level up
-  useSwipeTabs(contentRef, tabs.length, tabIdx, i => goTab(tabs[i].key));
+  const swipeRef = useSwipeTabs(tabs.length, tabIdx, i => goTab(tabs[i].key));
 
   // On phones the tab strip scrolls sideways — keep the active pill in view
   useEffect(() => {
@@ -1099,7 +1098,7 @@ export default function Plan() {
 
       <ErrorText>{error}</ErrorText>
 
-      <div ref={contentRef}>
+      <div ref={swipeRef}>
       <motion.div
         key={tab}
         initial={{ opacity: 0, x: tabDir ? tabDir * 42 : 0, y: tabDir ? 0 : 10 }}

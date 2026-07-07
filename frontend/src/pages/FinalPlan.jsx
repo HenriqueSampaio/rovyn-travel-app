@@ -451,7 +451,6 @@ export default function FinalPlan() {
   const [bookings, setBookings] = useState(null);
   const pollRef = useRef(null);
   const bookingsReqId = useRef(0);
-  const contentRef = useRef(null);
 
   async function refreshBookings() {
     // Monotonic counter: a stale poll response can never overwrite a newer one
@@ -510,7 +509,7 @@ export default function FinalPlan() {
     setTabDir(to > tabIdx ? 1 : to < tabIdx ? -1 : 0);
     setTab(key);
   }
-  useSwipeTabs(contentRef, visibleTabs.length, tabIdx, i => goTab(visibleTabs[i].key));
+  const swipeRef = useSwipeTabs(visibleTabs.length, tabIdx, i => goTab(visibleTabs[i].key));
 
   if (!data) return <Page><Loading text="Opening the final plan…" /></Page>;
   if (!data.plan) {
@@ -1164,7 +1163,7 @@ export default function FinalPlan() {
         })}
       </div>
 
-      <div ref={contentRef}>
+      <div ref={swipeRef}>
       <motion.div
         key={tab}
         initial={{ opacity: 0, x: tabDir ? tabDir * 42 : 0, y: tabDir ? 0 : 10 }}

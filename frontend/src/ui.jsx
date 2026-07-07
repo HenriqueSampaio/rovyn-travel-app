@@ -137,12 +137,15 @@ export const InSwipeDeck = createContext(false);
    once it's clearly horizontal, vertical scrolling stays native, and
    anything inside [data-noswipe] (photo carousels, sliders) keeps its own
    gestures. Unlike the shell there is no live track — a successful swipe
-   advances one tab and the page animates the change itself. */
-export function useSwipeTabs(ref, count, activeIndex, onGo) {
+   advances one tab and the page animates the change itself.
+
+   Returns a callback ref for the swipeable container (both pages render it
+   behind a loading screen, so a plain useRef would attach to nothing). */
+export function useSwipeTabs(count, activeIndex, onGo) {
   const state = useRef(null);
   state.current = { count, activeIndex, onGo };
+  const [el, setEl] = useState(null);
   useEffect(() => {
-    const el = ref.current;
     if (!el) return;
     let g = null; // active gesture
     function onStart(e) {
@@ -182,7 +185,8 @@ export function useSwipeTabs(ref, count, activeIndex, onGo) {
       el.removeEventListener('touchend', onEnd);
       el.removeEventListener('touchcancel', onEnd);
     };
-  }, [ref]);
+  }, [el]);
+  return setEl;
 }
 
 export function Page({ children, width = 680, nav = true }) {
