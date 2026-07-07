@@ -224,11 +224,11 @@ a { color: var(--pine); text-decoration: none; }
   gap: 20px;
 }
 
-/* Tab bar (planning board, final plan) */
+/* Tab bar (planning board, final plan) — the section you're in reads as a
+   filled pine pill, not an underline, so the active category pops */
 .tab-bar {
   display: flex;
-  gap: 26px;
-  border-bottom: 1px solid var(--line);
+  gap: 8px;
   margin-bottom: 34px;
   flex-wrap: wrap;
 }
@@ -236,12 +236,21 @@ a { color: var(--pine); text-decoration: none; }
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 10px 2px 12px;
-  font-size: 14.5px;
+  padding: 9px 15px;
+  font-size: 14px;
   font-weight: 700;
-  margin-bottom: -1px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  color: var(--ink-soft);
   white-space: nowrap;
   flex-shrink: 0;
+  transition: background 0.22s ease, color 0.22s ease, border-color 0.22s ease;
+}
+.tab-btn:hover { border-color: var(--line); }
+.tab-btn.active {
+  background: var(--pine);
+  border-color: var(--pine);
+  color: #F6F2E8;
 }
 
 /* Side-by-side fields/forms that stack on mobile */
@@ -347,11 +356,11 @@ a { color: var(--pine); text-decoration: none; }
   .nav-tabs { gap: 14px; }
   .nav-username { display: none; }
 
-  /* Tabs become a swipeable strip instead of wrapping */
+  /* Tabs become a sideways-scrolling strip instead of wrapping */
   .tab-bar {
     flex-wrap: nowrap;
     overflow-x: auto;
-    gap: 20px;
+    gap: 8px;
     margin-bottom: 26px;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;

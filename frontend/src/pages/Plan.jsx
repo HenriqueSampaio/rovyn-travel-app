@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  ArrowRight, BedDouble, Bus, Check, Compass, Landmark, Lock, LockOpen,
-  MapPin, Minus, PlaneTakeoff, Plus, Quote, Ship, Sparkles, Star, Ticket, TrainFront, Users,
+  ArrowRight, BedDouble, Bus, Check, Compass, Info, Landmark, Loader2, Lock, LockOpen,
+  MapPin, Minus, PlaneTakeoff, Plus, Quote, Ship, Sparkles, Star, Ticket, TrainFront, Users, X,
 } from 'lucide-react';
 import { api, auth } from '../api/index.js';
-import { Page, Loading, ErrorText, JourneyTracker, Hero, PhotoCarousel, RouteTimeline, Thumb, ThinkingLoader } from '../ui.jsx';
+import { Page, Loading, ErrorText, JourneyTracker, Hero, PhotoCarousel, RouteTimeline, Thumb, ThinkingLoader, useSwipeTabs } from '../ui.jsx';
 
 const TABS = [
   { key: 'overview', label: 'Overview', Icon: Compass },
@@ -26,6 +26,247 @@ const CATEGORY_INTRO = {
 };
 
 const MODE_ICONS = { train: TrainFront, flight: PlaneTakeoff, bus: Bus, ferry: Ship };
+
+/* "2026-08-14 09:40" → { date: "Thu, Aug 14", time: "09:40" } */
+function splitWhen(s = '') {
+  const [d, t] = s.split(' ');
+  const parsed = d ? new Date(`${d}T${t || '00:00'}`) : null;
+  const date = parsed && !isNaN(parsed)
+    ? parsed.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+    : (d || '');
+  return { date, time: t || '' };
+}
+
+function DetailsButton({ onClick }) {
+  return (
+    <button className="btn-quiet" style={{ fontSize: 13 }}
+            onClick={e => { e.stopPropagation(); onClick(); }}>
+      <Info size={13} strokeWidth={2.2} /> More details
+    </button>
+  );
+}
+
+/* One direction of a round trip, unpacked from the old single crammed line:
+   OUT  09:40  Thu, Aug 14   JFK → SPU (via VIE) */
+function FlightLegRow({ label, when, route }) {
+  const { date, time } = splitWhen(when);
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, padding: '6px 0', flexWrap: 'wrap' }}>
+      <span style={{
+        fontSize: 10.5, fontWeight: 700, letterSpacing: '0.12em', width: 38, flexShrink: 0,
+        color: label === 'OUT' ? 'var(--pine)' : 'var(--clay)',
+      }}>
+        {label}
+      </span>
+      <span style={{ fontSize: 15, fontWeight: 700, whiteSpace: 'nowrap' }}>{time}</span>
+      <span className="muted" style={{ fontSize: 13, whiteSpace: 'nowrap' }}>{date}</span>
+      <span style={{ fontSize: 13.5, color: 'var(--ink-soft)', marginLeft: 'auto' }}>{route}</span>
+    </div>
+  );
+}
+
+function FlightCard({ opt, starred, count, onStar, disabled, buddies, onDetails }) {
+  return (
+    <div style={{ display: 'flex', gap: 16, ...starredWash(starred), borderTop: '1px solid var(--line-soft)', alignItems: 'flex-start' }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ fontWeight: 700, fontSize: 16 }}>{opt.airline}</p>
+        <div style={{ margin: '6px 0 2px' }}>
+          <FlightLegRow label="OUT" when={opt.depart} route={opt.route} />
+          <FlightLegRow label="BACK" when={opt.return} route={opt.return_route || opt.route} />
+        </div>
+        <p className="muted" style={{ fontSize: 13 }}>
+          {opt.stops === 0 ? 'nonstop' : `${opt.stops} stop${opt.stops > 1 ? 's' : ''}`} · {opt.duration}
+        </p>
+        <p style={{ fontSize: 14, color: 'var(--ink-soft)', marginTop: 4 }}>{opt.why}</p>
+        <p style={{ marginTop: 8, display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
+          <span className="serif" style={{ fontSize: 24, color: 'var(--pine)' }}>${opt.est_price_per_person}</span>
+          <span className="muted" style={{ fontSize: 13 }}>est. round trip</span>
+          <DetailsButton onClick={onDetails} />
+          {opt.link && <a className="btn-quiet" href={opt.link} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>compare on Expedia</a>}
+        </p>
+        {buddies.length > 0 && (
+          <p style={{ marginTop: 8, display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 13.5, fontWeight: 600, color: 'var(--clay)' }}>
+            <Star size={13} fill="var(--clay)" />
+            {buddies[0]}{buddies.length > 1 ? ` +${buddies.length - 1} more` : ''} selected this flight!
+          </p>
+        )}
+      </div>
+      <StarButton starred={starred} count={count} onClick={onStar} disabled={disabled} />
+    </div>
+  );
+}
+
+/* Detail-sheet fields rendered as label/value rows, per category */
+const DETAIL_ROWS = {
+  stay: [['neighborhood', 'Neighborhood'], ['check_in', 'Check-in'], ['check_out', 'Check-out']],
+  flights: [['baggage', 'Baggage'], ['fare_notes', 'Fare']],
+  transport: [['boarding', 'Boarding'], ['luggage', 'Luggage']],
+  visits: [['hours', 'Hours'], ['how_long', 'How long'], ['getting_there', 'Getting there'], ['tickets', 'Tickets']],
+  events: [['when', 'When'], ['where', 'Where'], ['tickets', 'Tickets']],
+};
+
+const DETAIL_TITLES = {
+  stay: 'The stay', flights: 'This flight', transport: 'This leg',
+  visits: 'The visit', events: 'The event',
+};
+
+function DetailRow({ label, children }) {
+  if (!children) return null;
+  return (
+    <div style={{ display: 'flex', gap: 16, padding: '9px 0', borderTop: '1px dashed var(--line-soft)', fontSize: 14 }}>
+      <span className="muted" style={{ width: 110, flexShrink: 0, fontWeight: 600 }}>{label}</span>
+      <span style={{ color: 'var(--ink-soft)' }}>{children}</span>
+    </div>
+  );
+}
+
+function SegmentRows({ title, segments }) {
+  if (!segments?.length) return null;
+  return (
+    <div style={{ marginTop: 10 }}>
+      <p className="eyebrow" style={{ fontSize: 10.5, marginBottom: 2 }}>{title}</p>
+      {segments.map((s, i) => (
+        <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'baseline', padding: '7px 0', borderTop: '1px dashed var(--line-soft)', fontSize: 13.5, flexWrap: 'wrap' }}>
+          <span style={{ fontWeight: 700 }}>{s.leg}</span>
+          <span className="muted">{s.carrier}</span>
+          <span style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>
+            {s.depart}{s.arrive ? ` → ${s.arrive}` : ''}{s.duration ? ` · ${s.duration}` : ''}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* The full sheet for one board option — photos, board facts, and the
+   AI-researched details (rooms, segments, hours…), fetched on first open */
+function OptionDetailModal({ detail, sheet, media, isSample, starred, count, onStar, onClose }) {
+  const { category, opt } = detail;
+  const d = sheet?.data;
+  const title = opt.name || opt.airline || opt.carrier || opt.mode || 'Details';
+  const city = (opt.city || '').split(',')[0].trim();
+  const photos = media?.photos || [];
+  const facts = [
+    category === 'stay' && opt.type,
+    category === 'stay' && opt.area,
+    category === 'stay' && opt.rating ? `★ ${opt.rating}` : null,
+    category === 'stay' && opt.price_per_night ? `$${opt.price_per_night}/night` : null,
+    category === 'flights' && (opt.stops === 0 ? 'nonstop' : `${opt.stops} stop${opt.stops > 1 ? 's' : ''}`),
+    category === 'flights' && opt.duration,
+    category === 'flights' && opt.est_price_per_person ? `$${opt.est_price_per_person} round trip` : null,
+    category === 'transport' && opt.mode,
+    category === 'transport' && opt.duration,
+    category === 'transport' && opt.est_price_per_person ? `$${opt.est_price_per_person} one way` : null,
+    ['visits', 'events'].includes(category) && opt.duration,
+    ['visits', 'events'].includes(category) && opt.date_hint,
+    ['visits', 'events'].includes(category)
+      ? (opt.cost_per_person > 0 ? `$${opt.cost_per_person} per person` : 'free')
+      : null,
+  ].filter(Boolean);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(35, 49, 43, 0.45)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+      }}
+    >
+      <motion.div
+        className="modal-card"
+        style={{ maxWidth: 600 }}
+        initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+          <div style={{ flex: 1 }}>
+            <p className="eyebrow">{DETAIL_TITLES[category]}{city ? ` · ${city}` : ''}</p>
+            <h2 style={{ fontSize: 27, margin: '6px 0 2px' }}>{title}</h2>
+            {facts.length > 0 && <p className="muted" style={{ fontSize: 13.5 }}>{facts.join(' · ')}</p>}
+          </div>
+          <button aria-label="Close" onClick={onClose} style={{ color: 'var(--muted)', marginTop: 4 }}>
+            <X size={20} strokeWidth={2} />
+          </button>
+        </div>
+
+        {photos.length > 0
+          ? <PhotoCarousel photos={photos} height={230} style={{ margin: '14px 0 4px' }} />
+          : opt.image?.url && <Hero image={opt.image} height={200} style={{ margin: '14px 0 4px' }} />}
+
+        {!sheet || (!d && !sheet.err) ? (
+          <p className="muted" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '22px 0', fontStyle: 'italic' }}>
+            <Loader2 className="spin" size={16} strokeWidth={2} color="var(--pine)" />
+            Pulling together the details…
+          </p>
+        ) : sheet.err ? (
+          <p style={{ color: 'var(--clay)', fontSize: 14, padding: '18px 0' }}>{sheet.err}</p>
+        ) : (
+          <div style={{ marginTop: 12 }}>
+            {d.overview && <p style={{ fontSize: 14.5, color: 'var(--ink-soft)', marginBottom: 12 }}>{d.overview}</p>}
+
+            {category === 'stay' && d.rooms?.length > 0 && (
+              <div style={{ marginBottom: 12 }}>
+                <p className="eyebrow" style={{ fontSize: 10.5, marginBottom: 2 }}>Rooms & rates</p>
+                {d.rooms.map((r, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'baseline', padding: '8px 0', borderTop: '1px dashed var(--line-soft)', fontSize: 14, flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 700 }}>{r.name}</span>
+                    <span className="muted" style={{ fontSize: 13 }}>sleeps {r.sleeps}{r.note ? ` · ${r.note}` : ''}</span>
+                    <span style={{ marginLeft: 'auto', fontWeight: 600, whiteSpace: 'nowrap' }}>≈ ${r.est_price_per_night}/night</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {category === 'stay' && (d.amenities || opt.amenities)?.length > 0 && (
+              <p className="muted" style={{ fontSize: 13.5, marginBottom: 10 }}>
+                {(d.amenities || opt.amenities).join(' · ')}
+              </p>
+            )}
+
+            {category === 'flights' && <SegmentRows title="Outbound" segments={d.outbound} />}
+            {category === 'flights' && <SegmentRows title="Return" segments={d.return} />}
+
+            {(DETAIL_ROWS[category] || []).map(([key, label]) => (
+              <DetailRow key={key} label={label}>{d[key]}</DetailRow>
+            ))}
+
+            {d.good_to_know?.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <p className="eyebrow" style={{ fontSize: 10.5, marginBottom: 6 }}>Good to know</p>
+                {d.good_to_know.map((tip, i) => (
+                  <p key={i} style={{ fontSize: 13.5, color: 'var(--ink-soft)', padding: '3px 0', display: 'flex', gap: 8 }}>
+                    <span style={{ color: 'var(--clay)' }}>—</span> {tip}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            <p className="muted" style={{ fontSize: 12, marginTop: 14, fontStyle: 'italic' }}>
+              {isSample
+                ? 'Sample details — add an AI key for researched ones.'
+                : 'AI-researched estimates — verify times and prices when booking.'}
+            </p>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginTop: 18, flexWrap: 'wrap' }}>
+          <button className="btn" onClick={onStar}>
+            <Star size={15} fill={starred ? '#F6F2E8' : 'none'} />
+            {starred ? 'Starred' : 'Star this'}{count > 0 ? ` · ${count}` : ''}
+          </button>
+          {opt.official_website && (
+            <a className="btn-quiet" href={opt.official_website} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>official site</a>
+          )}
+          {(opt.links?.booking || opt.link) && (
+            <a className="btn-quiet" href={opt.links?.booking || opt.link} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>
+              {category === 'flights' ? 'compare on Expedia' : category === 'transport' ? 'compare on Rome2Rio' : 'see booking options'}
+            </a>
+          )}
+          <button className="btn-quiet" onClick={onClose} style={{ marginLeft: 'auto' }}>Close</button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
 
 /* Soft wash over a whole row/card once you've starred it — the star alone is
    easy to miss when scanning a long list. */
@@ -181,13 +422,26 @@ function StarButton({ starred, count, onClick, disabled }) {
 }
 
 /* Guest reviews under a stay — LiteAPI guest feedback (pros/cons) or Google
-   Places reviews (text), collapsed to two until expanded */
-function GuestReviews({ media, fallbackRating }) {
-  const [open, setOpen] = useState(false);
+   Places reviews (text). Fully tucked away until the traveler asks: the
+   closed state is a single quiet line, never a wall of review text. */
+function GuestReviews({ media, fallbackRating, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
   const reviews = media?.reviews || [];
   if (reviews.length === 0) return null;
   const rating = media?.rating10 ?? fallbackRating;
-  const shown = open ? reviews : reviews.slice(0, 2);
+  const summary = [
+    rating != null ? `${Number(rating).toFixed(1)}/10` : null,
+    media?.review_count > 0 ? `${media.review_count.toLocaleString()} reviews` : `${reviews.length} reviews`,
+  ].filter(Boolean).join(' · ');
+
+  if (!open) {
+    return (
+      <button className="btn-quiet" style={{ fontSize: 13, marginTop: 10 }} onClick={() => setOpen(true)}>
+        <Quote size={12} strokeWidth={2.5} /> Read guest reviews
+        <span className="muted" style={{ fontWeight: 600 }}>{summary}</span>
+      </button>
+    );
+  }
   return (
     <div style={{ marginTop: 14 }}>
       <p className="eyebrow" style={{ fontSize: 10.5, display: 'flex', alignItems: 'center', gap: 7, marginBottom: 2 }}>
@@ -199,7 +453,7 @@ function GuestReviews({ media, fallbackRating }) {
           </span>
         )}
       </p>
-      {shown.map((r, i) => (
+      {reviews.map((r, i) => (
         <div key={`${r.author}-${r.date}-${i}`} style={{ padding: '10px 0', borderTop: '1px dashed var(--line-soft)' }}>
           <p style={{ fontSize: 13.5 }}>
             <strong>{r.headline || 'A recent stay'}</strong>
@@ -223,9 +477,9 @@ function GuestReviews({ media, fallbackRating }) {
           {r.text && <p style={{ fontSize: 13.5, color: 'var(--ink-soft)', marginTop: 2 }}>{r.text}</p>}
         </div>
       ))}
-      {reviews.length > 2 && (
-        <button className="btn-quiet" style={{ fontSize: 13 }} onClick={() => setOpen(o => !o)}>
-          {open ? 'Show fewer reviews' : `Read all ${reviews.length} reviews`}
+      {!defaultOpen && (
+        <button className="btn-quiet" style={{ fontSize: 13 }} onClick={() => setOpen(false)}>
+          Hide reviews
         </button>
       )}
     </div>
@@ -233,8 +487,8 @@ function GuestReviews({ media, fallbackRating }) {
 }
 
 /* A stay option: photo gallery (real hotels get their full LiteAPI gallery),
-   the details, and guest reviews */
-function StayCard({ opt, media, starred, count, onStar }) {
+   the essentials, and reviews tucked behind a tap */
+function StayCard({ opt, media, starred, count, onStar, onDetails }) {
   const photos = media?.photos || [];
   return (
     <div style={{ ...starredWash(starred), borderTop: '1px solid var(--line-soft)' }}>
@@ -260,12 +514,12 @@ function StayCard({ opt, media, starred, count, onStar }) {
           </p>
           <p style={{ fontSize: 14.5, color: 'var(--ink-soft)' }}>{opt.why}</p>
           {(opt.amenities || []).length > 0 && (
-            <p className="muted" style={{ fontSize: 13, marginTop: 4 }}>{opt.amenities.join(' · ')}</p>
+            <p className="muted" style={{ fontSize: 13, marginTop: 4 }}>{opt.amenities.slice(0, 4).join(' · ')}</p>
           )}
           <p style={{ marginTop: 8, display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
             <span className="serif" style={{ fontSize: 24, color: 'var(--pine)' }}>${opt.price_per_night}<span style={{ fontSize: 14 }}> / night</span></span>
             <span className="muted" style={{ fontSize: 13 }}>≈ ${opt.total_per_person} per person total</span>
-            {opt.official_website && <a className="btn-quiet" href={opt.official_website} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>official site</a>}
+            <DetailsButton onClick={onDetails} />
             {opt.links?.booking && <a className="btn-quiet" href={opt.links.booking} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>{opt.live_price ? 'compare' : 'see similar'}</a>}
           </p>
         </div>
@@ -276,7 +530,7 @@ function StayCard({ opt, media, starred, count, onStar }) {
   );
 }
 
-function CategoryFooter({ status, onDone, onNoPref, onReset, busy }) {
+function CategoryFooter({ status, onDone, onNoPref, onReset }) {
   if (status) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginTop: 34 }}>
@@ -284,16 +538,16 @@ function CategoryFooter({ status, onDone, onNoPref, onReset, busy }) {
           <Check size={16} strokeWidth={2.6} />
           {status === 'done' ? 'Your picks are locked in' : 'You said you don\'t mind'}
         </span>
-        <button className="btn-quiet" onClick={onReset} disabled={busy}>Change my mind</button>
+        <button className="btn-quiet" onClick={onReset}>Change my mind</button>
       </div>
     );
   }
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 22, marginTop: 34, flexWrap: 'wrap' }}>
-      <button className="btn" onClick={onDone} disabled={busy}>
+      <button className="btn" onClick={onDone}>
         Lock in my picks <Check size={15} strokeWidth={2.5} />
       </button>
-      <button className="btn-quiet" onClick={onNoPref} disabled={busy}>
+      <button className="btn-quiet" onClick={onNoPref}>
         I don't mind — happy with anything
       </button>
     </div>
@@ -309,14 +563,39 @@ export default function Plan() {
   const [myStars, setMyStars] = useState(new Set());
   const [counts, setCounts] = useState({});
   const [tab, setTab] = useState('overview');
+  const [tabDir, setTabDir] = useState(0); // which way the content slides in
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [stayMedia, setStayMedia] = useState(null); // null = not loaded yet
   const [cityFilter, setCityFilter] = useState('all'); // multi-city: which city a tab shows
+  const [detail, setDetail] = useState(null); // { category, opt } — open detail sheet
+  const [detailSheets, setDetailSheets] = useState({}); // option id -> { data } | { err }
   const pollRef = useRef(null);
   const starsInitialized = useRef(false);
   const stayMediaRequested = useRef(false);
+  const contentRef = useRef(null);
+  const tabBtnRefs = useRef({});
+
+  // Tab order is stable enough to wire gestures before the board loads
+  const tabs = board?.options?.transport && board?.options?.route
+    ? [TABS[0], TABS[1], TRANSPORT_TAB, ...TABS.slice(2)]
+    : TABS;
+  const tabIdx = Math.max(0, tabs.findIndex(t => t.key === tab));
+
+  function goTab(key) {
+    const to = tabs.findIndex(t => t.key === key);
+    setTabDir(to > tabIdx ? 1 : to < tabIdx ? -1 : 0);
+    setTab(key);
+  }
+
+  // Swiping the content area moves between the board's sections, exactly
+  // like the Trips/Feed/Wishlist deck one level up
+  useSwipeTabs(contentRef, tabs.length, tabIdx, i => goTab(tabs[i].key));
+
+  // On phones the tab strip scrolls sideways — keep the active pill in view
+  useEffect(() => {
+    tabBtnRefs.current[tab]?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  }, [tab]);
 
   // Entering a tab resets the city pills: Stay opens on the first city (you
   // pick one stay per city), Visits/Events open on the full list.
@@ -371,9 +650,6 @@ export default function Plan() {
 
   const options = board.options;
   const route = options.route;
-  const tabs = options.transport && route
-    ? [TABS[0], TABS[1], TRANSPORT_TAB, ...TABS.slice(2)]
-    : TABS;
   const myCats = trip.me.categories || {};
   const catStatus = c => myCats[c];
   const isSample = options.source === 'sample';
@@ -400,24 +676,41 @@ export default function Plan() {
     }
   }
 
-  async function setStatus(category, status) {
-    setBusy(true);
+  function setStatus(category, status) {
+    // Optimistic: the checkmark lands the moment you tap — the server call
+    // settles in the background and only a rejection rolls it back.
+    const prevMe = trip.me;
+    const prevStars = myStars;
     setError('');
-    try {
-      const res = await api.setCuration(tripId, category, status);
-      setTrip(t => ({ ...t, me: res.me, all_curated: res.all_curated }));
-      if (status === 'no_preference') {
-        // server clears this category's stars
-        const ids = category === 'flights'
-          ? Object.values(options.flights || {}).flat().map(o => o.id)
-          : (options[category] || []).map(o => o.id);
-        setMyStars(prev => new Set([...prev].filter(id => !ids.includes(id))));
-      }
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
+    setTrip(t => {
+      const categories = { ...(t.me.categories || {}) };
+      if (status === 'reset') delete categories[category];
+      else categories[category] = status;
+      return { ...t, me: { ...t.me, categories } };
+    });
+    if (status === 'no_preference') {
+      // the server clears this category's stars — mirror it locally
+      const ids = ['flights', 'transport'].includes(category)
+        ? Object.values(options[category] || {}).flat().map(o => o.id)
+        : (options[category] || []).map(o => o.id);
+      setMyStars(prev => new Set([...prev].filter(id => !ids.includes(id))));
     }
+    api.setCuration(tripId, category, status)
+      .then(res => setTrip(t => ({ ...t, me: res.me, all_curated: res.all_curated })))
+      .catch(err => {
+        setError(err.message);
+        setTrip(t => ({ ...t, me: prevMe }));
+        if (status === 'no_preference') setMyStars(prevStars);
+      });
+  }
+
+  function openDetails(category, opt) {
+    setDetail({ category, opt });
+    if (detailSheets[opt.id]?.data) return; // cached from a previous open
+    setDetailSheets(prev => ({ ...prev, [opt.id]: {} }));
+    api.getOptionDetails(tripId, opt.id)
+      .then(res => setDetailSheets(prev => ({ ...prev, [opt.id]: { data: res.details } })))
+      .catch(err => setDetailSheets(prev => ({ ...prev, [opt.id]: { err: err.message } })));
   }
 
   async function finalize() {
@@ -437,57 +730,44 @@ export default function Plan() {
   function renderStars(category, list, { disabled } = {}) {
     return list.map(opt => {
       const buddies = (board.star_names?.[opt.id] || []).filter(n => n !== me?.name);
+      if (category === 'flights') {
+        return (
+          <FlightCard
+            key={opt.id}
+            opt={opt}
+            starred={myStars.has(opt.id)}
+            count={counts[opt.id] || 0}
+            onStar={() => star(category, opt.id)}
+            disabled={disabled}
+            buddies={buddies}
+            onDetails={() => openDetails('flights', opt)}
+          />
+        );
+      }
       return (
       <div key={opt.id} style={{ display: 'flex', gap: 16, ...starredWash(myStars.has(opt.id)), borderTop: '1px solid var(--line-soft)', alignItems: 'flex-start' }}>
-        {category !== 'flights' && <Thumb image={opt.image} size={76} />}
+        <Thumb image={opt.image} size={76} />
         <div style={{ flex: 1 }}>
-          {category === 'flights' ? (
-            <>
-              <p style={{ fontWeight: 700, fontSize: 16 }}>{opt.airline}
-                <span className="muted" style={{ fontWeight: 400, marginLeft: 10, fontSize: 14 }}>{opt.route}</span>
-              </p>
-              {opt.return_route && (
-                <p className="muted" style={{ fontSize: 13.5, margin: '2px 0 0' }}>
-                  return · {opt.return_route}
-                </p>
-              )}
-              <p className="muted" style={{ fontSize: 14, margin: '4px 0' }}>
-                Out {opt.depart} · back {opt.return} · {opt.stops === 0 ? 'nonstop' : `${opt.stops} stop${opt.stops > 1 ? 's' : ''}`} · {opt.duration}
-              </p>
-              <p style={{ fontSize: 14, color: 'var(--ink-soft)' }}>{opt.why}</p>
-              <p style={{ marginTop: 6, display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
-                <span className="serif" style={{ fontSize: 24, color: 'var(--pine)' }}>${opt.est_price_per_person}</span>
-                <span className="muted" style={{ fontSize: 13 }}>est. round trip</span>
-                {opt.link && <a className="btn-quiet" href={opt.link} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>compare on Expedia</a>}
-              </p>
-              {buddies.length > 0 && (
-                <p style={{ marginTop: 8, display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 13.5, fontWeight: 600, color: 'var(--clay)' }}>
-                  <Star size={13} fill="var(--clay)" />
-                  {buddies[0]}{buddies.length > 1 ? ` +${buddies.length - 1} more` : ''} selected this flight!
-                </p>
-              )}
-            </>
-          ) : (
-            <>
-              <p style={{ fontWeight: 700, fontSize: 16 }}>
-                {opt.name}
-                {route && opt.city && (
-                  <span style={{
-                    marginLeft: 10, fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
-                    color: 'var(--pine)', border: '1px solid var(--line)', borderRadius: 999,
-                    padding: '2px 9px', verticalAlign: 2, whiteSpace: 'nowrap', display: 'inline-block',
-                  }}>
-                    {opt.city.split(',')[0].trim().toUpperCase()}
-                  </span>
-                )}
-              </p>
-              <p style={{ fontSize: 14.5, color: 'var(--ink-soft)', margin: '3px 0' }}>{opt.description}</p>
-              <p className="muted" style={{ fontSize: 13 }}>
-                {opt.duration ? `${opt.duration} · ` : ''}{opt.date_hint ? `${opt.date_hint} · ` : ''}
-                {opt.cost_per_person > 0 ? `$${opt.cost_per_person} per person` : 'free'}
-              </p>
-            </>
-          )}
+          <p style={{ fontWeight: 700, fontSize: 16 }}>
+            {opt.name}
+            {route && opt.city && (
+              <span style={{
+                marginLeft: 10, fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
+                color: 'var(--pine)', border: '1px solid var(--line)', borderRadius: 999,
+                padding: '2px 9px', verticalAlign: 2, whiteSpace: 'nowrap', display: 'inline-block',
+              }}>
+                {opt.city.split(',')[0].trim().toUpperCase()}
+              </span>
+            )}
+          </p>
+          <p style={{ fontSize: 14.5, color: 'var(--ink-soft)', margin: '3px 0' }}>{opt.description}</p>
+          <p className="muted" style={{ fontSize: 13, display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+            <span>
+              {opt.duration ? `${opt.duration} · ` : ''}{opt.date_hint ? `${opt.date_hint} · ` : ''}
+              {opt.cost_per_person > 0 ? `$${opt.cost_per_person} per person` : 'free'}
+            </span>
+            <DetailsButton onClick={() => openDetails(category, opt)} />
+          </p>
         </div>
         <StarButton
           starred={myStars.has(opt.id)}
@@ -570,6 +850,7 @@ export default function Plan() {
                     <p style={{ marginTop: 6, display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
                       <span className="serif" style={{ fontSize: 24, color: 'var(--pine)' }}>${opt.est_price_per_person}</span>
                       <span className="muted" style={{ fontSize: 13 }}>per person, one way</span>
+                      <DetailsButton onClick={() => openDetails('transport', opt)} />
                       {opt.link && <a className="btn-quiet" href={opt.link} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>compare on Rome2Rio</a>}
                     </p>
                     {buddies.length > 0 && (
@@ -603,6 +884,7 @@ export default function Plan() {
         starred={myStars.has(opt.id)}
         count={counts[opt.id] || 0}
         onStar={() => star('stay', opt.id)}
+        onDetails={() => openDetails('stay', opt)}
       />
     );
     if (!route) return stays.map(card);
@@ -698,7 +980,7 @@ export default function Plan() {
           {tabs.slice(1).map(({ key, label, Icon }) => {
             const st = catStatus(key);
             return (
-              <button key={key} className="opt-row" onClick={() => setTab(key)}>
+              <button key={key} className="opt-row" onClick={() => goTab(key)}>
                 <Icon size={18} strokeWidth={1.7} color={st ? 'var(--pine)' : 'var(--muted)'} />
                 <span className="opt-title" style={{ flex: 1 }}>{label}</span>
                 {st ? (
@@ -795,7 +1077,7 @@ export default function Plan() {
 
       <JourneyTracker status={trip.status} style={{ marginTop: 26 }} />
 
-      {/* Tab bar */}
+      {/* Tab bar — the active section is a filled pill; swipe the content to move between them */}
       <div className="tab-bar">
         {tabs.map(({ key, label, Icon }) => {
           const active = tab === key;
@@ -803,16 +1085,13 @@ export default function Plan() {
           return (
             <button
               key={key}
-              className="tab-btn"
-              onClick={() => setTab(key)}
-              style={{
-                color: active ? 'var(--ink)' : 'var(--muted)',
-                borderBottom: active ? '2px solid var(--pine)' : '2px solid transparent',
-              }}
+              ref={el => { tabBtnRefs.current[key] = el; }}
+              className={`tab-btn${active ? ' active' : ''}`}
+              onClick={() => goTab(key)}
             >
               <Icon size={15} strokeWidth={2} />
               {label}
-              {done && <Check size={13} strokeWidth={3} color="var(--pine)" />}
+              {done && <Check size={13} strokeWidth={3} color={active ? '#F6F2E8' : 'var(--pine)'} />}
             </button>
           );
         })}
@@ -820,7 +1099,13 @@ export default function Plan() {
 
       <ErrorText>{error}</ErrorText>
 
-      <motion.div key={tab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+      <div ref={contentRef}>
+      <motion.div
+        key={tab}
+        initial={{ opacity: 0, x: tabDir ? tabDir * 42 : 0, y: tabDir ? 0 : 10 }}
+        animate={{ opacity: 1, x: 0, y: 0 }}
+        transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+      >
         {tab === 'overview' && renderOverview()}
         {tab !== 'overview' && (
           <>
@@ -871,7 +1156,6 @@ export default function Plan() {
               : renderStars(tab, byCity(options[tab] || []))}
             <CategoryFooter
               status={catStatus(tab)}
-              busy={busy}
               onDone={() => setStatus(tab, 'done')}
               onNoPref={() => setStatus(tab, 'no_preference')}
               onReset={() => setStatus(tab, 'reset')}
@@ -879,6 +1163,20 @@ export default function Plan() {
           </>
         )}
       </motion.div>
+      </div>
+
+      {detail && (
+        <OptionDetailModal
+          detail={detail}
+          sheet={detailSheets[detail.opt.id]}
+          media={detail.category === 'stay' ? stayMedia?.[detail.opt.id] : null}
+          isSample={isSample}
+          starred={myStars.has(detail.opt.id)}
+          count={counts[detail.opt.id] || 0}
+          onStar={() => star(detail.category, detail.opt.id)}
+          onClose={() => setDetail(null)}
+        />
+      )}
     </Page>
   );
 }

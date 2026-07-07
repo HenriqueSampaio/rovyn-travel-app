@@ -132,6 +132,59 @@ export function Nav() {
    the sliding track, so pages in the deck must not render their own. */
 export const InSwipeDeck = createContext(false);
 
+/* Horizontal swipe between a page's tabs (planning board, final plan).
+   Direction-locked like the top-level SwipeShell: the gesture only counts
+   once it's clearly horizontal, vertical scrolling stays native, and
+   anything inside [data-noswipe] (photo carousels, sliders) keeps its own
+   gestures. Unlike the shell there is no live track — a successful swipe
+   advances one tab and the page animates the change itself. */
+export function useSwipeTabs(ref, count, activeIndex, onGo) {
+  const state = useRef(null);
+  state.current = { count, activeIndex, onGo };
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let g = null; // active gesture
+    function onStart(e) {
+      if (e.touches.length !== 1) return;
+      if (e.target.closest('[data-noswipe], input, textarea, select, video')) return;
+      g = { x: e.touches[0].clientX, y: e.touches[0].clientY, locked: false, dx: 0 };
+    }
+    function onMove(e) {
+      if (!g) return;
+      const t = e.touches[0];
+      const dx = t.clientX - g.x;
+      const dy = t.clientY - g.y;
+      if (!g.locked) {
+        if (Math.abs(dx) < 12 && Math.abs(dy) < 12) return; // not decided yet
+        if (Math.abs(dx) <= Math.abs(dy)) { g = null; return; } // vertical — let it scroll
+        g.locked = true;
+      }
+      e.preventDefault(); // clearly horizontal — keep the page still
+      g.dx = dx;
+    }
+    function onEnd() {
+      if (!g) return;
+      const { locked, dx } = g;
+      g = null;
+      if (!locked || Math.abs(dx) < 48) return;
+      const { count, activeIndex, onGo } = state.current;
+      const next = activeIndex + (dx < 0 ? 1 : -1);
+      if (next >= 0 && next < count) onGo(next);
+    }
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: false });
+    el.addEventListener('touchend', onEnd, { passive: true });
+    el.addEventListener('touchcancel', onEnd, { passive: true });
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+      el.removeEventListener('touchcancel', onEnd);
+    };
+  }, [ref]);
+}
+
 export function Page({ children, width = 680, nav = true }) {
   const inDeck = useContext(InSwipeDeck);
   return (
@@ -433,16 +486,26 @@ export function Hero({ image, height = 230, style }) {
   );
 }
 
-/* Photo gallery — browse a stay's real photos in place with arrows and dots */
+/* Photo gallery — browse a stay's real photos in place. Swipe on touch,
+   arrows on desktop. data-noswipe keeps the tab-level swipe hands-off. */
 export function PhotoCarousel({ photos, height = 220, style }) {
   const [idx, setIdx] = useState(0);
+  const touch = useRef(null);
   if (!photos?.length) return null;
   const i = Math.min(idx, photos.length - 1);
   const photo = photos[i];
   const next = photos[(i + 1) % photos.length];
-  const go = (delta, e) => {
-    e.stopPropagation();
-    setIdx((i + delta + photos.length) % photos.length);
+  const go = delta => setIdx((i + delta + photos.length) % photos.length);
+  const onTouchStart = e => {
+    touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  };
+  const onTouchEnd = e => {
+    const t = touch.current;
+    touch.current = null;
+    if (!t || photos.length < 2) return;
+    const dx = e.changedTouches[0].clientX - t.x;
+    const dy = e.changedTouches[0].clientY - t.y;
+    if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.2) go(dx < 0 ? 1 : -1);
   };
   const arrowStyle = side => ({
     position: 'absolute', top: '50%', transform: 'translateY(-50%)', [side]: 10,
@@ -452,7 +515,12 @@ export function PhotoCarousel({ photos, height = 220, style }) {
     transition: 'background 0.2s ease',
   });
   return (
-    <div style={{ position: 'relative', borderRadius: 4, overflow: 'hidden', background: 'var(--bg-soft)', ...style }}>
+    <div
+      data-noswipe
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+      style={{ position: 'relative', borderRadius: 4, overflow: 'hidden', background: 'var(--bg-soft)', ...style }}
+    >
       <motion.img
         className="hero-img"
         key={photo.url}
@@ -469,10 +537,12 @@ export function PhotoCarousel({ photos, height = 220, style }) {
         <>
           {/* warm the next photo so browsing feels instant */}
           <img src={next.url} alt="" aria-hidden="true" style={{ display: 'none' }} />
-          <button type="button" aria-label="Previous photo" onClick={e => go(-1, e)} style={arrowStyle('left')}>
+          <button type="button" aria-label="Previous photo"
+                  onClick={e => { e.stopPropagation(); go(-1); }} style={arrowStyle('left')}>
             <ChevronLeft size={18} strokeWidth={2.4} />
           </button>
-          <button type="button" aria-label="Next photo" onClick={e => go(1, e)} style={arrowStyle('right')}>
+          <button type="button" aria-label="Next photo"
+                  onClick={e => { e.stopPropagation(); go(1); }} style={arrowStyle('right')}>
             <ChevronRight size={18} strokeWidth={2.4} />
           </button>
           <span style={{

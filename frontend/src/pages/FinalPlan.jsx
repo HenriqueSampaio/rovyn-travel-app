@@ -8,7 +8,7 @@ import {
   Send, Ship, Star, Sun, Sunset, Ticket, TrainFront, Undo2, Users, Wallet, X,
 } from 'lucide-react';
 import { api, auth } from '../api/index.js';
-import { Page, Loading, ErrorText, JourneyTracker, Hero, RouteTimeline, Thumb, ThinkingLoader } from '../ui.jsx';
+import { Page, Loading, ErrorText, JourneyTracker, Hero, RouteTimeline, Thumb, ThinkingLoader, useSwipeTabs } from '../ui.jsx';
 
 const COST_LABELS = {
   stay: 'Accommodation (your share)',
@@ -438,6 +438,7 @@ export default function FinalPlan() {
   const me = auth.user();
   const [data, setData] = useState(null);
   const [tab, setTab] = useState('overview');
+  const [tabDir, setTabDir] = useState(0); // which way the content slides in
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [editText, setEditText] = useState('');
@@ -450,6 +451,7 @@ export default function FinalPlan() {
   const [bookings, setBookings] = useState(null);
   const pollRef = useRef(null);
   const bookingsReqId = useRef(0);
+  const contentRef = useRef(null);
 
   async function refreshBookings() {
     // Monotonic counter: a stale poll response can never overwrite a newer one
@@ -500,6 +502,16 @@ export default function FinalPlan() {
     if (tab === 'bookings' && !bookingsTabAllowed) setTab('overview');
   }, [bookingsTabAllowed, tab]);
 
+  // Same swipe-between-tabs gesture as the planning board
+  const visibleTabs = bookingsTabAllowed ? [...TABS, BOOKINGS_TAB] : TABS;
+  const tabIdx = Math.max(0, visibleTabs.findIndex(t => t.key === tab));
+  function goTab(key) {
+    const to = visibleTabs.findIndex(t => t.key === key);
+    setTabDir(to > tabIdx ? 1 : to < tabIdx ? -1 : 0);
+    setTab(key);
+  }
+  useSwipeTabs(contentRef, visibleTabs.length, tabIdx, i => goTab(visibleTabs[i].key));
+
   if (!data) return <Page><Loading text="Opening the final plan…" /></Page>;
   if (!data.plan) {
     return (
@@ -526,7 +538,6 @@ export default function FinalPlan() {
   const selfBooked = trip?.me?.booking_mode === 'self_book' || receipt?.mode === 'self_book';
   const days = plan.itinerary?.days || [];
   const canBook = ['approved', 'booked'].includes(status);
-  const visibleTabs = canBook ? [...TABS, BOOKINGS_TAB] : TABS;
 
   async function confirmBooking(itemKey, code, note) {
     setBusy(true);
@@ -603,7 +614,7 @@ export default function FinalPlan() {
       await load();
       if (mode === 'self_book') {
         await refreshBookings();
-        setTab('bookings'); // straight to the checklist they just committed to
+        goTab('bookings'); // straight to the checklist they just committed to
       }
     } catch (err) {
       setError(err.message);
@@ -624,7 +635,7 @@ export default function FinalPlan() {
       );
       if (bookings && bookings.booked < bookings.total) {
         action = (
-          <button className="btn" onClick={() => setTab('bookings')}>
+          <button className="btn" onClick={() => goTab('bookings')}>
             <ClipboardCheck size={15} /> Book your trip — {bookings.booked} of {bookings.total} done
           </button>
         );
@@ -632,7 +643,7 @@ export default function FinalPlan() {
     } else if (status === 'approved') {
       statusText = <span className="muted">{trip.paid_count} of {trip.total_members} locked in</span>;
       action = !iPaid ? (
-        <button className="btn clay" onClick={() => setTab('money')} disabled={busy}>
+        <button className="btn clay" onClick={() => goTab('money')} disabled={busy}>
           <Wallet size={15} /> Choose how to book — ${myCheck?.total.toLocaleString()}
         </button>
       ) : (
@@ -959,6 +970,31 @@ export default function FinalPlan() {
           <p className="muted" style={{ fontSize: 13, marginTop: 8 }}>
             Flights are added per traveler from their own departure city — totals differ per person.
           </p>
+          {plan.budget_per_person?.max > 0 && (() => {
+            // The band everyone agreed to in the questionnaire, flights excluded —
+            // held against the shared costs so the group sees the verdict, not math
+            const b = plan.budget_per_person;
+            const shared = plan.cost_per_person?.shared_total || 0;
+            const over = shared - b.max;
+            const within = over <= 0;
+            return (
+              <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px dashed var(--line-soft)' }}>
+                <p style={{
+                  fontSize: 14.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8,
+                  color: within ? 'var(--pine)' : 'var(--clay)',
+                }}>
+                  <Scale size={15} strokeWidth={2.2} />
+                  {within
+                    ? `Within the group's budget — $${Math.abs(over).toLocaleString()} under the $${b.max.toLocaleString()} ceiling`
+                    : `$${over.toLocaleString()} over the group's $${b.max.toLocaleString()} ceiling`}
+                </p>
+                <p className="muted" style={{ fontSize: 13, marginTop: 4 }}>
+                  The group agreed on ${b.min.toLocaleString()}–${b.max.toLocaleString()} per person, flights excluded.
+                  {within ? '' : ' “Request a change” with a cheaper stay or fewer paid activities brings it back inside.'}
+                </p>
+              </div>
+            );
+          })()}
         </Section>
 
         {myCheck && (
@@ -1005,7 +1041,7 @@ export default function FinalPlan() {
                     Your total above is what you'll pay sellers directly. Record each confirmation on the
                     checklist so the group sees what's done.
                   </p>
-                  <button className="btn" onClick={() => setTab('bookings')}>
+                  <button className="btn" onClick={() => goTab('bookings')}>
                     <ClipboardCheck size={15} /> Open the booking checklist
                   </button>
                 </div>
@@ -1111,19 +1147,15 @@ export default function FinalPlan() {
 
       <ErrorText>{error}</ErrorText>
 
-      {/* Tab bar */}
+      {/* Tab bar — active section as a filled pill; swipe the content to move between tabs */}
       <div className="tab-bar" style={{ marginBottom: 30 }}>
         {visibleTabs.map(({ key, label, Icon }) => {
           const active = tab === key;
           return (
             <button
               key={key}
-              className="tab-btn"
-              onClick={() => setTab(key)}
-              style={{
-                color: active ? 'var(--ink)' : 'var(--muted)',
-                borderBottom: active ? '2px solid var(--pine)' : '2px solid transparent',
-              }}
+              className={`tab-btn${active ? ' active' : ''}`}
+              onClick={() => goTab(key)}
             >
               <Icon size={15} strokeWidth={2} />
               {label}
@@ -1132,7 +1164,13 @@ export default function FinalPlan() {
         })}
       </div>
 
-      <motion.div key={tab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+      <div ref={contentRef}>
+      <motion.div
+        key={tab}
+        initial={{ opacity: 0, x: tabDir ? tabDir * 42 : 0, y: tabDir ? 0 : 10 }}
+        animate={{ opacity: 1, x: 0, y: 0 }}
+        transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+      >
         {tab === 'overview' && <Overview />}
         {tab === 'itinerary' && <Itinerary />}
         {tab === 'travel' && <Travel />}
@@ -1141,6 +1179,7 @@ export default function FinalPlan() {
           <BookingsChecklist bookings={bookings} busy={busy} onConfirm={confirmBooking} onUnbook={unbookBooking} />
         )}
       </motion.div>
+      </div>
 
       {/* Replace-or-free modal */}
       {slotModal && (

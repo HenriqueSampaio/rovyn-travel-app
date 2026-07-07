@@ -122,6 +122,8 @@ export const api = {
   getOptions: (tripId) => req(`/trips/${tripId}/options`),
   generateOptions: (tripId) => req(`/trips/${tripId}/options`, { method: 'POST' }),
   getStayMedia: (tripId) => req(`/trips/${tripId}/stay-media`),
+  getOptionDetails: (tripId, optionId) =>
+    req(`/trips/${tripId}/option-details/${encodeURIComponent(optionId)}`),
   toggleStar: (tripId, category, optionId, starred) =>
     req(`/trips/${tripId}/star`, { method: 'POST', body: JSON.stringify({ category, option_id: optionId, starred }) }),
   setCuration: (tripId, category, status) =>
