@@ -8,7 +8,7 @@ import {
   Send, Ship, Star, Sun, Sunset, Ticket, TrainFront, Undo2, Users, Wallet, X,
 } from 'lucide-react';
 import { api, auth } from '../api/index.js';
-import { Page, Loading, ErrorText, JourneyTracker, Hero, RouteTimeline, Thumb, ThinkingLoader, useSwipeTabs } from '../ui.jsx';
+import { Page, Loading, ErrorText, JourneyTracker, Hero, MapImage, RouteTimeline, Thumb, ThinkingLoader, useSwipeTabs } from '../ui.jsx';
 
 const COST_LABELS = {
   stay: 'Accommodation (your share)',
@@ -758,6 +758,11 @@ export default function FinalPlan() {
   function Itinerary() {
     return (
       <Section eyebrow={`Day by day — “${plan.itinerary?.title || 'the plan'}”`} Icon={Sun}>
+        <MapImage
+          load={() => api.routeMap(tripId)}
+          alt={plan.route ? 'Route map' : `Map of ${plan.destination}`}
+          style={{ margin: '4px 0 18px' }}
+        />
         {plan.route && (
           <div style={{ margin: '4px 0 22px' }}>
             <RouteTimeline route={plan.route} />

@@ -6,7 +6,7 @@ import {
   MapPin, Minus, PlaneTakeoff, Plus, Ship, Sparkles, Star, Ticket, TrainFront, Users,
 } from 'lucide-react';
 import { api, auth } from '../api/index.js';
-import { Page, Loading, ErrorText, GuestReviews, JourneyTracker, Hero, PhotoCarousel, RouteTimeline, Thumb, ThinkingLoader, useSwipeTabs } from '../ui.jsx';
+import { Page, Loading, ErrorText, GuestReviews, JourneyTracker, Hero, MapImage, PhotoCarousel, RouteTimeline, Thumb, ThinkingLoader, useSwipeTabs } from '../ui.jsx';
 
 const TABS = [
   { key: 'overview', label: 'Overview', Icon: Compass },
@@ -694,11 +694,24 @@ export default function Plan() {
   function renderOverview() {
     return (
       <>
+        {!route && (
+          <MapImage
+            load={() => api.routeMap(tripId)}
+            alt={`Map of ${options.destination}`}
+            style={{ marginBottom: 52 }}
+            header={
+              <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                <MapPin size={13} strokeWidth={2.5} /> The destination
+              </p>
+            }
+          />
+        )}
         {route && (
           <section style={{ marginBottom: 52 }}>
             <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
               <TrainFront size={13} strokeWidth={2.5} /> The route
             </p>
+            <MapImage load={() => api.routeMap(tripId)} alt="Route map" style={{ marginBottom: 16 }} />
             <RouteTimeline route={route} style={{ maxWidth: 560 }} />
             <RouteSplitEditor
               route={route}

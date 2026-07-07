@@ -49,6 +49,26 @@ async function req(path, options = {}) {
   return data;
 }
 
+/* Map images come from the backend as PNGs behind the same Bearer auth an
+   <img src> can't send — fetch the bytes, hand back a blob URL. URLs live in
+   a session-lived cache so re-mounting a tab never refetches or flashes. */
+const mapBlobUrls = new Map();
+async function mapBlob(path) {
+  if (mapBlobUrls.has(path)) return mapBlobUrls.get(path);
+  const headers = {};
+  const t = token();
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const res = await fetch(`${BASE}${path}`, { headers });
+  if (!res.ok) {
+    const err = new Error('No map available');
+    err.status = res.status;
+    throw err;
+  }
+  const url = URL.createObjectURL(await res.blob());
+  mapBlobUrls.set(path, url);
+  return url;
+}
+
 export const auth = {
   mode: supabase ? 'supabase' : 'local',
   /* Components call subscribe(cb) to re-render on sign-in/out. */
@@ -124,6 +144,10 @@ export const api = {
   getStayMedia: (tripId) => req(`/trips/${tripId}/stay-media`),
   getOptionDetails: (tripId, optionId) =>
     req(`/trips/${tripId}/option-details/${encodeURIComponent(optionId)}`),
+  routeMap: (tripId, w = 640, h = 320) =>
+    mapBlob(`/trips/${tripId}/map/route?w=${w}&h=${h}`),
+  optionMap: (tripId, optionId, w = 640, h = 300) =>
+    mapBlob(`/trips/${tripId}/map/option/${encodeURIComponent(optionId)}?w=${w}&h=${h}`),
   toggleStar: (tripId, category, optionId, starred) =>
     req(`/trips/${tripId}/star`, { method: 'POST', body: JSON.stringify({ category, option_id: optionId, starred }) }),
   setCuration: (tripId, category, status) =>
