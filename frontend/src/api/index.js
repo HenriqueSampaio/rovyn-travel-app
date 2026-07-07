@@ -1,6 +1,9 @@
 import { supabase } from '../lib/supabase.js';
 
-const BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+// Default to whatever host is serving the frontend, so a phone on the same
+// Wi-Fi (loading via the Mac's LAN IP) reaches the backend on that machine
+// instead of trying to talk to itself via "localhost".
+const BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`;
 
 /* In Supabase mode the session lives in supabase-js (which refreshes it in
    the background); we mirror it here so token/user reads stay synchronous. */

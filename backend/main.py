@@ -19,7 +19,9 @@ _extra_origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000", *_extra_origins],
-    allow_origin_regex=r"http://localhost:\d+",
+    # localhost for development, plus private LAN IPs so a phone on the same
+    # Wi-Fi can hit the dev servers (http://192.168.x.x:5173 etc.).
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}):\d+",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
