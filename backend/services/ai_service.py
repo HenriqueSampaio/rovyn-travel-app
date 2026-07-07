@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime as dt, timedelta
 
 from backend.services import links, llm
+from backend.services.flight_service import flights_available, real_flight_options
 from backend.services.hotel_service import official_website, real_stay_options
 from backend.services.image_service import first_image, image_for, nth_image
 
@@ -53,6 +54,7 @@ def _aggregate_preferences(responses: list[dict]) -> dict:
     trip_styles: list[str] = []
     departure_cities: list[str] = []
     return_by_city: dict[str, str] = {}
+    travelers_by_city: dict[str, int] = {}
     budgets_min, budgets_max = [], []
     dates_start, dates_end = [], []
     requirements: list[str] = []
@@ -73,11 +75,12 @@ def _aggregate_preferences(responses: list[dict]) -> dict:
             # "new york" and "New York" are the same place — keep first-seen casing
             if not any(c.casefold() == city.casefold() for c in departure_cities):
                 departure_cities.append(city)
+            canonical = next(c for c in departure_cities if c.casefold() == city.casefold())
+            travelers_by_city[canonical] = travelers_by_city.get(canonical, 0) + 1
             ret = (r.get("return_city") or "").strip()
             if ret and ret.casefold() != city.casefold():
                 # First traveler from a city to name a different way home wins;
                 # everyone else from that city defaults to a plain round trip.
-                canonical = next(c for c in departure_cities if c.casefold() == city.casefold())
                 return_by_city.setdefault(canonical, ret)
         seen_picks = set()
         for pick in r.get("multi_city_picks") or []:
@@ -151,6 +154,7 @@ def _aggregate_preferences(responses: list[dict]) -> dict:
         "city_votes": city_votes,
         "departure_cities": sorted(departure_cities),
         "return_by_city": return_by_city,
+        "travelers_by_city": travelers_by_city,
         "special_requirements": requirements,
     }
 
@@ -703,7 +707,11 @@ def generate_trip_options(destination: str, responses: list[dict], trip_name: st
                 options["stay"] = ai_stay_future.result()
             except Exception:
                 options["stay"] = []  # _ensure_categories backfills below
-        options["flights"] = flights_future.result()
+        options["flights"], flights_live = flights_future.result()
+        if flights_live:
+            options["flights_source"] = "liteapi"
+            options["flights_all_live"] = all(
+                o.get("live_price") for opts in options["flights"].values() for o in opts)
         if transport_future:
             options["transport"] = transport_future.result()
 
@@ -814,13 +822,44 @@ def _attach_images(options: dict, destination: str) -> dict:
     return options
 
 
-def _flight_options(destination: str, prefs: dict, route: dict | None = None) -> dict:
+def _flight_options(destination: str, prefs: dict, route: dict | None = None) -> tuple[dict, bool]:
+    """Per-city flight menus, live-first: LiteAPI fares when the key is set,
+    the AI menu for any city the live search couldn't cover, samples last.
+    Returns (flights by city, whether any city got live fares)."""
     cities = prefs["departure_cities"] or ["Your city"]
     dates = prefs["travel_dates"]
+
+    # Live fares from LiteAPI, one search per departure city, in parallel —
+    # _lite_request already retries the occasional 429 with backoff.
+    live: dict[str, list] = {}
+    if flights_available() and dates.get("start") and dates.get("end"):
+        arrive_city = route["cities"][0]["city"] if route else destination
+        return_from = route["cities"][-1]["city"] if route else None
+        if return_from and _same_town(arrive_city, return_from):
+            return_from = None
+
+        def search(city: str) -> list:
+            return real_flight_options(
+                city, arrive_city, dates["start"], dates["end"],
+                travelers=prefs.get("travelers_by_city", {}).get(city, 1),
+                return_from_city=return_from,
+                return_to_city=prefs.get("return_by_city", {}).get(city) or None,
+            )
+
+        with ThreadPoolExecutor(max_workers=min(3, len(cities))) as pool:
+            futures = {city: pool.submit(search, city) for city in cities}
+            for city, future in futures.items():
+                try:
+                    live[city] = future.result()
+                except Exception:
+                    live[city] = []  # this city falls back to the AI menu
+
+    # AI estimates only for the cities the live search left empty.
+    missing = [c for c in cities if not live.get(c)]
     raw = {}
-    if ai_available():
+    if missing and ai_available():
         try:
-            raw = _ai_flights(destination, cities, dates, prefs["group_size"], route,
+            raw = _ai_flights(destination, missing, dates, prefs["group_size"], route,
                               prefs.get("return_by_city", {}))
         except Exception:
             raw = {}  # never let flight generation sink the whole board
@@ -833,9 +872,9 @@ def _flight_options(destination: str, prefs: dict, route: dict | None = None) ->
     raw_by_norm = {norm(k): v for k, v in raw.items() if isinstance(v, list) and v}
     flights = {}
     for city in cities:
-        flights[city] = raw_by_norm.get(norm(city)) or _sample_flights_for_city(
+        flights[city] = live.get(city) or raw_by_norm.get(norm(city)) or _sample_flights_for_city(
             city, destination, dates, route, prefs.get("return_by_city", {}).get(city, ""))
-    return flights
+    return flights, any(live.values())
 
 
 def _ai_flights(destination: str, cities: list[str], dates: dict, group_size: int,

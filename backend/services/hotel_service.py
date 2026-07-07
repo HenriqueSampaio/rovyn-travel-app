@@ -57,7 +57,13 @@ def places_available() -> bool:
     return bool(os.environ.get("GOOGLE_PLACES_API_KEY"))
 
 
-def _lite_request(path: str, payload: dict | None = None, params: dict | None = None):
+def _lite_request(path: str, payload: dict | None = None, params: dict | None = None,
+                  timeout: int = 20, attempts: int = 3):
+    """One LiteAPI call (hotels or flights — same base, key and etiquette).
+
+    Flight-rate searches routinely take 10s+, so they pass a longer timeout;
+    business errors that retrying can't fix (like a sold-out offer on
+    /flights/verify) pass attempts=1."""
     url = _LITE_BASE + path
     if params:
         url += "?" + urllib.parse.urlencode(params)
@@ -66,7 +72,7 @@ def _lite_request(path: str, payload: dict | None = None, params: dict | None = 
     # LiteAPI's rate limit — retry throttles/hiccups with a short backoff
     # instead of silently degrading a whole city to AI estimates.
     last_err = None
-    for attempt in range(3):
+    for attempt in range(attempts):
         if attempt:
             time.sleep(1.2 * attempt)
         req = urllib.request.Request(
@@ -81,7 +87,7 @@ def _lite_request(path: str, payload: dict | None = None, params: dict | None = 
             method="POST" if payload is not None else "GET",
         )
         try:
-            with urllib.request.urlopen(req, timeout=20, context=_SSL_CTX) as res:
+            with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as res:
                 return json.loads(res.read().decode())
         except urllib.error.HTTPError as exc:
             last_err = exc
@@ -613,8 +619,10 @@ def real_option_details(category: str, option: dict, context: dict) -> dict:
     stay with liteapi_hotel_id -> LiteAPI hotel page + live room offers
     stay (AI/sample)           -> Google Places lookup of the property
     visits / events            -> Google Places (hours, address, reviews…)
-    flights / transport        -> no live source wired yet: source="board",
+    transport                  -> no live source wired yet: source="board",
                                   the screen shows the board's own facts
+    (flights never reach here — the router serves them via
+     flight_service.live_flight_details)
 
     Every branch degrades to {"source": "board"} instead of raising, so the
     detail screen always renders something."""
