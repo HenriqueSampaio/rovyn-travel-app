@@ -201,15 +201,24 @@ _WHY = {
 
 
 def _pick_diverse(cands: list[dict], limit: int = 4) -> list[tuple[str, dict]]:
-    """[(role, candidate), ...] — up to `limit` genuinely different journeys."""
-    seen: dict[str, str] = {}  # journey_key -> role that claimed it
-
-    def claim(role: str, cand: dict | None):
-        if cand and cand["journey_key"] not in seen:
-            seen[cand["journey_key"]] = role
-
+    """[(role, candidate), ...] — up to `limit` genuinely different journeys.
+    A pick must EARN its slot: near-identical price and door-to-door time to
+    an existing pick reads as a duplicate on the board, so it's skipped."""
     def total_minutes(c):
         return (c["out_minutes"] or 0) + (c["back_minutes"] or 0)
+
+    picks: list[tuple[str, dict]] = []
+
+    def claim(role: str, cand: dict | None):
+        if not cand:
+            return
+        for _, taken in picks:
+            same = taken["journey_key"] == cand["journey_key"]
+            similar = (abs(taken["price"] - cand["price"]) < max(10, 0.02 * taken["price"])
+                       and abs(total_minutes(taken) - total_minutes(cand)) <= 20)
+            if same or similar:
+                return
+        picks.append((role, cand))
 
     if not cands:
         return []
@@ -218,14 +227,11 @@ def _pick_diverse(cands: list[dict], limit: int = 4) -> list[tuple[str, dict]]:
     claim("fastest", min(cands, key=lambda c: (total_minutes(c), c["price"])))
     floor_price = cands[0]["price"] or 1
     floor_time = min(total_minutes(c) for c in cands) or 1
-    remaining = [c for c in cands if c["journey_key"] not in seen]
+    taken_keys = {c["journey_key"] for _, c in picks}
+    remaining = [c for c in cands if c["journey_key"] not in taken_keys]
     if remaining:
         claim("balanced", min(remaining, key=lambda c: c["price"] / floor_price
                               + total_minutes(c) / floor_time))
-    by_key = {c["journey_key"]: c for c in cands}
-    order = {"cheapest": 0, "nonstop": 1, "fastest": 2, "balanced": 3}
-    picks = sorted(((role, by_key[k]) for k, role in seen.items()),
-                   key=lambda rc: order[rc[0]])
     return picks[:limit]
 
 
