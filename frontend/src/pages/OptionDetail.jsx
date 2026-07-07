@@ -417,7 +417,7 @@ export default function OptionDetail() {
           <LegRow label="BACK" when={opt.return} route={opt.return_route || opt.route} />
           <p className="muted" style={{ fontSize: 13.5, marginTop: 10 }}>
             {opt.live_price
-              ? (details?.err
+              ? (details
                 ? 'Live fare from the board — the segment details didn’t load this time. Go back and reopen to retry.'
                 : 'Live fare via LiteAPI — loading the full segment details…')
               : 'Rovyn’s estimate for planning — exact times, baggage and fare rules live on the airline and Expedia.'}
