@@ -8,7 +8,7 @@ import {
   Send, Ship, Star, Sun, Sunset, Ticket, TrainFront, Undo2, Users, Wallet, X,
 } from 'lucide-react';
 import { api, auth } from '../api/index.js';
-import { Page, Loading, ErrorText, JourneyTracker, Hero, MapImage, RouteTimeline, Thumb, ThinkingLoader, useSwipeTabs } from '../ui.jsx';
+import { Page, Loading, ErrorText, JourneyTracker, Hero, MapImage, RouteTimeline, Thumb, ThinkingLoader, TripAvatar, useSwipeTabs } from '../ui.jsx';
 
 const COST_LABELS = {
   stay: 'Accommodation (your share)',
@@ -1111,10 +1111,18 @@ export default function FinalPlan() {
 
   return (
     <Page width={760}>
-      <p className="eyebrow">{trip?.name}</p>
-      <h1 style={{ fontSize: 42, margin: '10px 0 4px' }}>
-        {status === 'booked' ? <>You're going to <em style={{ color: 'var(--pine)' }}>{plan.destination}</em>!</> : `The plan — ${plan.destination}`}
-      </h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 4 }}>
+        {trip && (
+          <TripAvatar tripId={tripId} name={trip.name} photoUrl={trip.photo_url} size={64}
+                      onChange={url => setData(d => ({ ...d, trip: { ...d.trip, photo_url: url } }))} />
+        )}
+        <div style={{ minWidth: 0 }}>
+          <p className="eyebrow">{trip?.name}</p>
+          <h1 style={{ fontSize: 42, margin: '8px 0 0' }}>
+            {status === 'booked' ? <>You're going to <em style={{ color: 'var(--pine)' }}>{plan.destination}</em>!</> : `The plan — ${plan.destination}`}
+          </h1>
+        </div>
+      </div>
       <p className="muted" style={{ marginBottom: 6 }}>
         {plan.country ? `${plan.country} · ` : ''}{plan.duration_days} days · {plan.dates?.start} → {plan.dates?.end}
       </p>

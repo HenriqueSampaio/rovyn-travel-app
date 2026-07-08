@@ -6,7 +6,7 @@ import {
   MapPin, Minus, PlaneTakeoff, Plus, Ship, Sparkles, Star, Ticket, TrainFront, Users,
 } from 'lucide-react';
 import { api, auth } from '../api/index.js';
-import { Page, Loading, ErrorText, FlightLeg, GuestReviews, JourneyTracker, Hero, MapImage, PhotoCarousel, RouteTimeline, Thumb, ThinkingLoader, useSwipeTabs } from '../ui.jsx';
+import { Page, Loading, ErrorText, FlightLeg, GuestReviews, JourneyTracker, Hero, MapImage, PhotoCarousel, RouteTimeline, Thumb, ThinkingLoader, TripAvatar, useSwipeTabs } from '../ui.jsx';
 
 const TABS = [
   { key: 'overview', label: 'Overview', Icon: Compass },
@@ -331,6 +331,7 @@ export default function Plan() {
   const [cityFilter, setCityFilterRaw] = useState(() => sessionStorage.getItem(`rovyn-plan-city-${tripId}`) || 'all');
   const [legFilter, setLegFilterRaw] = useState(() => sessionStorage.getItem(`rovyn-plan-leg-${tripId}`) || 'all');
   const pollRef = useRef(null);
+  const lastPollRaw = useRef({ status: '', opts: '' });
   const starsInitialized = useRef(false);
   const stayMediaRequested = useRef(false);
   const detailsPrefetched = useRef(false);
@@ -401,9 +402,15 @@ export default function Plan() {
           navigate(`/trips/${tripId}`);
           return;
         }
-        setTrip(status);
-        setBoard(opts);
-        setCounts(opts.star_counts || {});
+        // A poll that changed nothing must not re-render the whole board —
+        // most 3.5s ticks are identical, and the deck is a heavy tree
+        const raw = { status: JSON.stringify(status), opts: JSON.stringify(opts) };
+        if (raw.status !== lastPollRaw.current.status) setTrip(status);
+        if (raw.opts !== lastPollRaw.current.opts) {
+          setBoard(opts);
+          setCounts(opts.star_counts || {});
+        }
+        lastPollRaw.current = raw;
         if (!starsInitialized.current) {
           setMyStars(new Set(opts.my_stars || []));
           starsInitialized.current = true;
@@ -430,7 +437,7 @@ export default function Plan() {
 
   // Warm every option's live details in the background (the backend caches
   // each one on the trip), so tapping a card opens a complete page instantly
-  // instead of a half-loaded one chasing Google. Two lanes keep it gentle on
+  // instead of a half-loaded one chasing Google. Four lanes keep it gentle on
   // the live APIs; failures just mean that option fetches on open, as before.
   useEffect(() => {
     if (!hasBoard || detailsPrefetched.current) return;
@@ -443,8 +450,7 @@ export default function Plan() {
       const id = ids.shift();
       if (id) api.getOptionDetails(tripId, id).catch(() => {}).finally(next);
     };
-    next();
-    next();
+    for (let lane = 0; lane < 4; lane++) next();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasBoard, tripId]);
 
@@ -905,10 +911,16 @@ export default function Plan() {
 
   return (
     <Page width={760}>
-      <p className="eyebrow">{trip.name}</p>
-      <h1 style={{ fontSize: 42, margin: '10px 0 6px' }}>
-        Curate <em style={{ color: 'var(--pine)' }}>{options.destination}</em>
-      </h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 6 }}>
+        <TripAvatar tripId={tripId} name={trip.name} photoUrl={trip.photo_url} size={64}
+                    onChange={url => setTrip(t => ({ ...t, photo_url: url }))} />
+        <div style={{ minWidth: 0 }}>
+          <p className="eyebrow">{trip.name}</p>
+          <h1 style={{ fontSize: 42, margin: '8px 0 0' }}>
+            Curate <em style={{ color: 'var(--pine)' }}>{options.destination}</em>
+          </h1>
+        </div>
+      </div>
       <p className="muted" style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
         <MapPin size={13} /> {options.country || options.destination} · {options.dates?.start} → {options.dates?.end}
       </p>

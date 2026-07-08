@@ -5,7 +5,7 @@ import {
   ArrowRight, Check, ClipboardList, Copy, Crown, Link2, MapPin, Sparkles, Users,
 } from 'lucide-react';
 import { api } from '../api/index.js';
-import { Page, Loading, ErrorText, JourneyTracker, ThinkingLoader } from '../ui.jsx';
+import { Page, Loading, ErrorText, JourneyTracker, ThinkingLoader, TripAvatar } from '../ui.jsx';
 
 /* Sends each trip status to the page that owns that phase. */
 export function phaseRoute(trip, tripId) {
@@ -77,8 +77,14 @@ export default function Dashboard() {
 
   return (
     <Page>
-      <p className="eyebrow">{solo ? 'Your solo trip' : trip.is_leader ? 'You lead this trip' : 'You are traveling on'}</p>
-      <h1 style={{ fontSize: 44, margin: '10px 0 6px' }}>{trip.name}</h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 22 }}>
+        <TripAvatar tripId={tripId} name={trip.name} photoUrl={trip.photo_url}
+                    onChange={url => setTrip(t => ({ ...t, photo_url: url }))} />
+        <div style={{ minWidth: 0 }}>
+          <p className="eyebrow">{solo ? 'Your solo trip' : trip.is_leader ? 'You lead this trip' : 'You are traveling on'}</p>
+          <h1 style={{ fontSize: 44, margin: '10px 0 6px' }}>{trip.name}</h1>
+        </div>
+      </div>
       <p className="muted" style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
         {fixed && (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--pine)', fontWeight: 600 }}>

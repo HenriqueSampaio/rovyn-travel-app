@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence, animate, motionValue, useTransform } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Check, ChevronLeft, ChevronRight, Compass, LogOut, Loader2, MapPin, Maximize2, Quote } from 'lucide-react';
+import { ArrowLeft, Camera, Check, ChevronLeft, ChevronRight, Compass, LogOut, Loader2, MapPin, Maximize2, Quote } from 'lucide-react';
 import { api, auth } from './api/index.js';
 
 export function Wordmark({ size = 26 }) {
@@ -203,6 +203,98 @@ export function Page({ children, width = 680, nav = true }) {
           {children}
         </motion.div>
       </div>
+    </div>
+  );
+}
+
+/* The trip's group picture — tap to change it, WhatsApp style. Any member
+   can set one; without a photo it falls back to a tinted serif initial.
+   Self-contained: it talks to the API itself and reports the new URL via
+   onChange so the page can patch its own trip state. Rendered on the
+   dashboard AND every phase page header (vote / plan / final), because the
+   dashboard redirects away once planning has started. */
+export function TripAvatar({ tripId, name, photoUrl, onChange, size = 76 }) {
+  const inputRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  async function run(fn) {
+    setBusy(true);
+    setErr('');
+    try {
+      await fn();
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const badge = Math.round(size * 0.36);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+      <button
+        type="button"
+        title="Change trip photo"
+        aria-label="Change trip photo"
+        onClick={() => inputRef.current?.click()}
+        disabled={busy}
+        style={{ position: 'relative', width: size, height: size, borderRadius: '50%', padding: 0 }}
+      >
+        {photoUrl ? (
+          <img
+            src={api.mediaUrl(photoUrl)} alt={`${name} photo`}
+            style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', display: 'block' }}
+          />
+        ) : (
+          <span className="serif" style={{
+            width: '100%', height: '100%', borderRadius: '50%',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(46, 93, 79, 0.11)', color: 'var(--pine)',
+            fontSize: Math.round(size * 0.42),
+          }}>
+            {((name || '').trim()[0] || '·').toUpperCase()}
+          </span>
+        )}
+        <span style={{
+          position: 'absolute', right: -3, bottom: -3, width: badge, height: badge,
+          borderRadius: '50%', background: 'var(--pine)', color: '#F6F2E8',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          border: '2px solid var(--bg)',
+        }}>
+          {busy
+            ? <Loader2 className="spin" size={Math.round(badge * 0.5)} />
+            : <Camera size={Math.round(badge * 0.5)} strokeWidth={2.2} />}
+        </span>
+      </button>
+      {photoUrl && !busy && (
+        <button className="muted" style={{ fontSize: 11.5 }}
+                onClick={() => run(async () => {
+                  await api.removeTripPhoto(tripId);
+                  onChange?.(null);
+                })}>
+          remove
+        </button>
+      )}
+      {err && (
+        <span style={{ color: 'var(--clay)', fontSize: 11, maxWidth: size + 44, textAlign: 'center' }}>
+          {err}
+        </span>
+      )}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/gif"
+        hidden
+        onChange={e => {
+          const f = e.target.files?.[0];
+          e.target.value = ''; // re-picking the same file should fire again
+          if (f) run(async () => {
+            const { photo_url } = await api.setTripPhoto(tripId, f);
+            onChange?.(photo_url);
+          });
+        }}
+      />
     </div>
   );
 }

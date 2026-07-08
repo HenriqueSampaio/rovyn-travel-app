@@ -5,8 +5,9 @@ import string
 import uuid
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
 
 from backend.auth import get_current_user
 from backend.db import IS_POSTGRES, fetch_many, get_conn
@@ -30,6 +31,7 @@ from backend.services.maps_service import (
 from backend.services.flight_service import (
     live_flight_details,
 )
+from backend.routers.social import MEDIA_DIR
 
 router = APIRouter()
 
@@ -52,7 +54,7 @@ def _load_trip(conn, trip_id: str):
 # The status payload only needs to know WHETHER the big AI blobs exist —
 # selecting them would ship megabytes of JSON per request from a remote DB.
 _LIGHT_TRIP_COLUMNS = """tr.id, tr.name, tr.invite_code, tr.status, tr.leader_id,
-           tr.destination, tr.selected_destination, tr.trip_mode, tr.solo,
+           tr.destination, tr.selected_destination, tr.trip_mode, tr.solo, tr.photo_url,
            tr.recommendations_generating, tr.itinerary_generating,
            tr.options_generating, tr.final_plan_generating,
            (tr.recommendations IS NOT NULL) AS recommendations,
@@ -135,6 +137,7 @@ def _status_payload(conn, trip, user_id: str) -> dict:
         "invite_code": trip["invite_code"],
         "status": trip["status"],
         "leader_id": trip["leader_id"],
+        "photo_url": trip["photo_url"],
         "is_leader": user_id == trip["leader_id"],
         "destination_fixed": bool(trip["destination"]),
         "solo": bool(trip["solo"]),
@@ -204,7 +207,7 @@ _TRIP_DATES_SQL = (
 def my_trips(user: dict = Depends(get_current_user)):
     with get_conn(readonly=True) as conn:
         rows = conn.execute(
-            f"""SELECT tr.id, tr.name, tr.invite_code, tr.status, tr.selected_destination, tr.destination, tr.leader_id,
+            f"""SELECT tr.id, tr.name, tr.invite_code, tr.status, tr.selected_destination, tr.destination, tr.leader_id, tr.photo_url,
                       {_TRIP_DATES_SQL},
                       (SELECT COUNT(*) FROM trip_members m WHERE m.trip_id = tr.id) AS member_count
                FROM trips tr JOIN trip_members tm ON tm.trip_id = tr.id
@@ -228,6 +231,7 @@ def my_trips(user: dict = Depends(get_current_user)):
                 "invite_code": r["invite_code"],
                 "status": r["status"],
                 "selected_destination": r["selected_destination"] or r["destination"],
+                "photo_url": r["photo_url"],
                 "is_leader": r["leader_id"] == user["id"],
                 "member_count": r["member_count"],
                 "dates": trip_dates(r),
@@ -314,6 +318,7 @@ def delete_trip(trip_id: str, user: dict = Depends(get_current_user)):
         # Feed posts keep working off their frozen snapshot; only the live link goes
         conn.execute("UPDATE posts SET trip_id = NULL WHERE trip_id = ?", (trip_id,))
         conn.execute("DELETE FROM trips WHERE id = ?", (trip_id,))
+    _delete_photo_file(trip["photo_url"])
     return {"success": True}
 
 
@@ -330,6 +335,56 @@ def leave_trip(trip_id: str, user: dict = Depends(get_current_user)):
             raise HTTPException(status_code=400, detail="You've already paid your share — the trip is locked in.")
         for table in _TRIP_CHILD_TABLES:
             conn.execute(f"DELETE FROM {table} WHERE trip_id = ? AND user_id = ?", (trip_id, user["id"]))
+    return {"success": True}
+
+
+# ---------------------------------------------------------------------------
+# Trip photo — a WhatsApp-style group picture any member can set
+# ---------------------------------------------------------------------------
+
+_PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+_MAX_PHOTO_BYTES = 8 * 1024 * 1024
+
+
+def _delete_photo_file(url: str | None) -> None:
+    """Remove a replaced/abandoned trip photo; only touches files in MEDIA_DIR."""
+    if not url or not url.startswith("/media/"):
+        return
+    (MEDIA_DIR / Path(url).name).unlink(missing_ok=True)
+
+
+@router.post("/{trip_id}/photo")
+def set_trip_photo(trip_id: str, file: UploadFile, user: dict = Depends(get_current_user)):
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in _PHOTO_EXTS:
+        raise HTTPException(status_code=400, detail="Use a JPG, PNG, WebP or GIF image.")
+    data = file.file.read(_MAX_PHOTO_BYTES + 1)
+    if len(data) > _MAX_PHOTO_BYTES:
+        raise HTTPException(status_code=400, detail="Keep the photo under 8 MB.")
+    if not data:
+        raise HTTPException(status_code=400, detail="The file is empty.")
+
+    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+    name = f"{uuid.uuid4().hex}{ext}"
+    url = f"/media/{name}"
+    (MEDIA_DIR / name).write_bytes(data)
+    try:
+        with get_conn() as conn:
+            trip = _member_trip(conn, trip_id, user["id"], light=True)
+            conn.execute("UPDATE trips SET photo_url = ? WHERE id = ?", (url, trip_id))
+    except Exception:
+        _delete_photo_file(url)  # membership check failed — don't strand the file
+        raise
+    _delete_photo_file(trip["photo_url"])
+    return {"photo_url": url}
+
+
+@router.delete("/{trip_id}/photo")
+def remove_trip_photo(trip_id: str, user: dict = Depends(get_current_user)):
+    with get_conn() as conn:
+        trip = _member_trip(conn, trip_id, user["id"], light=True)
+        conn.execute("UPDATE trips SET photo_url = NULL WHERE id = ?", (trip_id,))
+    _delete_photo_file(trip["photo_url"])
     return {"success": True}
 
 
