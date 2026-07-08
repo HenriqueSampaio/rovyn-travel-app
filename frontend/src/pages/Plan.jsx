@@ -6,7 +6,7 @@ import {
   MapPin, Minus, PlaneTakeoff, Plus, Ship, Sparkles, Star, Ticket, TrainFront, Users,
 } from 'lucide-react';
 import { api, auth } from '../api/index.js';
-import { Page, Loading, ErrorText, GuestReviews, JourneyTracker, Hero, MapImage, PhotoCarousel, RouteTimeline, Thumb, ThinkingLoader, useSwipeTabs } from '../ui.jsx';
+import { Page, Loading, ErrorText, GuestReviews, JourneyTracker, Hero, MapImage, PhotoCarousel, RouteTimeline, Thumb, ThinkingLoader, TripAvatar, useSwipeTabs } from '../ui.jsx';
 
 const TABS = [
   { key: 'overview', label: 'Overview', Icon: Compass },
@@ -870,10 +870,16 @@ export default function Plan() {
 
   return (
     <Page width={760}>
-      <p className="eyebrow">{trip.name}</p>
-      <h1 style={{ fontSize: 42, margin: '10px 0 6px' }}>
-        Curate <em style={{ color: 'var(--pine)' }}>{options.destination}</em>
-      </h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 6 }}>
+        <TripAvatar tripId={tripId} name={trip.name} photoUrl={trip.photo_url} size={64}
+                    onChange={url => setTrip(t => ({ ...t, photo_url: url }))} />
+        <div style={{ minWidth: 0 }}>
+          <p className="eyebrow">{trip.name}</p>
+          <h1 style={{ fontSize: 42, margin: '8px 0 0' }}>
+            Curate <em style={{ color: 'var(--pine)' }}>{options.destination}</em>
+          </h1>
+        </div>
+      </div>
       <p className="muted" style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
         <MapPin size={13} /> {options.country || options.destination} · {options.dates?.start} → {options.dates?.end}
       </p>
