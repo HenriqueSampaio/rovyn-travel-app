@@ -22,12 +22,13 @@ const COST_LABELS = {
 
 const MODE_ICONS = { train: TrainFront, flight: PlaneTakeoff, bus: Bus, ferry: Ship };
 
+// The itinerary IS the plan — it leads; the how-we-decided overview closes.
 const TABS = [
-  { key: 'overview', label: 'Overview', Icon: Compass },
   { key: 'itinerary', label: 'Itinerary', Icon: CalendarDays },
   { key: 'travel', label: 'Travel & stay', Icon: PlaneTakeoff },
   { key: 'money', label: 'Costs & payment', Icon: Wallet },
 ];
+const OVERVIEW_TAB = { key: 'overview', label: 'Overview', Icon: Compass };
 const BOOKINGS_TAB = { key: 'bookings', label: 'Bookings', Icon: ClipboardCheck };
 
 function sellerLabel(link) {
@@ -437,7 +438,7 @@ export default function FinalPlan() {
   const { tripId } = useParams();
   const me = auth.user();
   const [data, setData] = useState(null);
-  const [tab, setTab] = useState('overview');
+  const [tab, setTab] = useState('itinerary');
   const [tabDir, setTabDir] = useState(0); // which way the content slides in
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -494,15 +495,17 @@ export default function FinalPlan() {
   }, [data?.trip?.me?.paid]);
 
   // If the plan is re-opened while someone is on the Bookings tab, the tab
-  // disappears — land them on Overview instead of a blank pane. (Must live
-  // above the early returns: hooks can't be conditional.)
+  // disappears — land them on the itinerary instead of a blank pane. (Must
+  // live above the early returns: hooks can't be conditional.)
   const bookingsTabAllowed = ['approved', 'booked'].includes(data?.status);
   useEffect(() => {
-    if (tab === 'bookings' && !bookingsTabAllowed) setTab('overview');
+    if (tab === 'bookings' && !bookingsTabAllowed) setTab('itinerary');
   }, [bookingsTabAllowed, tab]);
 
   // Same swipe-between-tabs gesture as the planning board
-  const visibleTabs = bookingsTabAllowed ? [...TABS, BOOKINGS_TAB] : TABS;
+  const visibleTabs = bookingsTabAllowed
+    ? [...TABS, BOOKINGS_TAB, OVERVIEW_TAB]
+    : [...TABS, OVERVIEW_TAB];
   const tabIdx = Math.max(0, visibleTabs.findIndex(t => t.key === tab));
   function goTab(key) {
     const to = visibleTabs.findIndex(t => t.key === key);

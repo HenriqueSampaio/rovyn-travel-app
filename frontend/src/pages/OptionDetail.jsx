@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowLeft, Bus, Check, Clock, Globe, Loader2, MapPin, Phone,
+  ArrowLeft, Bus, Check, Clock, Globe, MapPin, Phone,
   PlaneTakeoff, Ship, Star, TrainFront,
 } from 'lucide-react';
 import { api } from '../api/index.js';
-import { Page, Loading, ErrorText, Hero, MapImage, PhotoCarousel, GuestReviews } from '../ui.jsx';
+import { Page, Loading, ErrorText, FlightLeg, Hero, LegBadge, MapImage, PhotoCarousel, GuestReviews, splitWhen } from '../ui.jsx';
 
 const TITLES = {
   stay: 'The stay', flights: 'This flight', transport: 'This leg',
@@ -26,33 +26,6 @@ function findOption(options, optionId) {
   return [null, null];
 }
 
-/* "2026-08-14 09:40" → { date: "Thu, Aug 14", time: "09:40" } */
-function splitWhen(s = '') {
-  const [d, t] = s.split(' ');
-  const parsed = d ? new Date(`${d}T${t || '00:00'}`) : null;
-  const date = parsed && !isNaN(parsed)
-    ? parsed.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
-    : (d || '');
-  return { date, time: t || '' };
-}
-
-function LegRow({ label, when, route }) {
-  const { date, time } = splitWhen(when);
-  return (
-    <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, padding: '8px 0', borderTop: '1px dashed var(--line-soft)', flexWrap: 'wrap' }}>
-      <span style={{
-        fontSize: 10.5, fontWeight: 700, letterSpacing: '0.12em', width: 38, flexShrink: 0,
-        color: label === 'OUT' ? 'var(--pine)' : 'var(--clay)',
-      }}>
-        {label}
-      </span>
-      <span style={{ fontSize: 16, fontWeight: 700, whiteSpace: 'nowrap' }}>{time}</span>
-      <span className="muted" style={{ fontSize: 13.5, whiteSpace: 'nowrap' }}>{date}</span>
-      <span style={{ fontSize: 14, color: 'var(--ink-soft)', marginLeft: 'auto' }}>{route}</span>
-    </div>
-  );
-}
-
 /* One direction of a LIVE itinerary: every real segment (carrier, flight
    number, times, duration) with layover hints between them. */
 function SegmentLeg({ label, rows, duration }) {
@@ -67,13 +40,8 @@ function SegmentLeg({ label, rows, duration }) {
   };
   return (
     <div style={{ padding: '10px 0', borderTop: '1px dashed var(--line-soft)' }}>
-      <p style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
-        <span style={{
-          fontSize: 10.5, fontWeight: 700, letterSpacing: '0.12em',
-          color: label === 'OUT' ? 'var(--pine)' : 'var(--clay)',
-        }}>
-          {label}
-        </span>
+      <p style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <LegBadge label={label} />
         <span className="muted" style={{ fontSize: 13 }}>{splitWhen(rows[0].depart).date}</span>
         {duration && <span className="muted" style={{ fontSize: 13, marginLeft: 'auto' }}>{duration} total</span>}
       </p>
@@ -213,12 +181,13 @@ export default function OptionDetail() {
   const seed = location.state || {};
   const [category, setCategory] = useState(seed.category || '');
   const [opt, setOpt] = useState(seed.opt || null);
-  const [details, setDetails] = useState(null); // { data } | { err }
-  const [media, setMedia] = useState(null);     // stay gallery + guest reviews
+  const [details, setDetails] = useState(null);  // { data } | { err }
+  const [media, setMedia] = useState(undefined); // stay gallery + reviews; null = none
   const [isSample, setIsSample] = useState(false);
   const [legFacts, setLegFacts] = useState(null); // transport: Google leg times
   const [starred, setStarred] = useState(Boolean(seed.starred));
   const [count, setCount] = useState(seed.count || 0);
+  const [lockedSection, setLockedSection] = useState(false); // "Lock in my picks" freezes stars
   const [error, setError] = useState('');
   const detailsRequested = useRef(false);
 
@@ -250,31 +219,69 @@ export default function OptionDetail() {
     return () => { dead = true; };
   }, [tripId, optionId, navigate]);
 
-  // Live details — transport and AI-estimated flights have no live source,
-  // so they render instantly from the board's own facts without a request.
-  // Live flights fetch their real segments (and a fare re-check when the
-  // quoted offer is still fresh enough to verify).
+  // Live details, all at once — the page waits for everything instead of
+  // rendering half and streaming the rest in. Transport, AI flights and live
+  // flights build instantly from the board's own facts (live flights carry
+  // their real segments on the option); stays/visits/events render straight
+  // from the details the board prefetched, falling back to one fetch for
+  // options opened before the prefetch reached them. Background refreshes
+  // (fare re-verify, live room rates) land silently after.
   useEffect(() => {
     if (!category || !opt || detailsRequested.current) return;
     detailsRequested.current = true;
-    if (category === 'transport' || (category === 'flights' && !opt.live_price)) {
+    if (category === 'transport') {
       setDetails({ data: { source: 'board' } });
       return;
     }
+    if (category === 'flights') {
+      setDetails({
+        data: opt.live_price && opt.segments?.out?.length ? {
+          source: 'liteapi',
+          segments: opt.segments,
+          out_duration: opt.duration || '',
+          back_duration: opt.return_duration || '',
+          fare_family: opt.fare_family || '',
+          bags: opt.bags || {},
+          price_per_person: opt.est_price_per_person,
+          priced_at: opt.priced_at || '',
+          price_fresh: false,
+        } : { source: 'board' },
+      });
+      if (opt.live_price) {
+        // fare re-verify — updates the freshness note when it lands
+        api.getOptionDetails(tripId, optionId)
+          .then(res => { if (res.details?.source === 'liteapi') setDetails({ data: res.details }); })
+          .catch(() => {});
+      }
+      return;
+    }
+    const cached = opt.details?.kind === 'live' ? opt.details : null;
+    if (cached) setDetails({ data: cached });
     api.getOptionDetails(tripId, optionId)
       .then(res => setDetails({ data: res.details }))
-      .catch(err => setDetails({ err: err.message }));
+      .catch(err => { if (!cached) setDetails({ err: err.message }); });
   }, [category, opt, tripId, optionId]);
+
+  // Starring is frozen while this section is locked in — mirror the board
+  useEffect(() => {
+    if (!category) return;
+    let dead = false;
+    api.tripStatus(tripId)
+      .then(s => { if (!dead) setLockedSection((s.me?.categories || {})[category] === 'done'); })
+      .catch(() => {});
+    return () => { dead = true; };
+  }, [category, tripId]);
 
   // Stays reuse the board's cached galleries + guest reviews
   useEffect(() => {
     if (category !== 'stay') return;
     api.getStayMedia(tripId)
       .then(res => setMedia(res.media?.[optionId] || null))
-      .catch(() => {});
+      .catch(() => setMedia(null));
   }, [category, tripId, optionId]);
 
   async function toggleStar() {
+    if (lockedSection) return;
     const next = !starred;
     setStarred(next);
     setCount(c => Math.max(0, c + (next ? 1 : -1)));
@@ -295,11 +302,12 @@ export default function OptionDetail() {
     else navigate(`/trips/${tripId}/plan`);
   }
 
-  if (!opt) return <Page><Loading text="Opening the details…" /></Page>;
+  // Everything or nothing: the page appears once ALL its information is in —
+  // no half-rendered card with a spinner chasing the rest.
+  const stillLoading = !opt || !details || (category === 'stay' && media === undefined);
+  if (stillLoading) return <Page><Loading text="Getting every detail…" /></Page>;
 
   const d = details?.data;
-  const skipsFetch = category === 'transport' || (category === 'flights' && !opt.live_price);
-  const loadingLive = !details && !skipsFetch;
   const liveSegs = category === 'flights' && d?.source === 'liteapi' && d.segments?.out?.length
     ? d.segments : null;
   const title = opt.name || opt.airline || opt.carrier || opt.mode || 'Details';
@@ -375,11 +383,18 @@ export default function OptionDetail() {
           {price[1] && <span className="serif" style={{ fontSize: 15, color: 'var(--pine)' }}>{price[1]}</span>}
           {price[2] && <span className="muted" style={{ fontSize: 13, marginLeft: 10 }}>{price[2]}</span>}
         </span>
-        <button className="btn" onClick={toggleStar} style={{ marginLeft: 'auto' }}>
+        <button className="btn" onClick={toggleStar} disabled={lockedSection}
+                title={lockedSection ? 'You locked in your picks for this section — “Change my mind” on the board reopens them' : undefined}
+                style={{ marginLeft: 'auto' }}>
           <Star size={15} fill={starred ? '#F6F2E8' : 'none'} />
           {starred ? 'Starred' : 'Star this'}{count > 0 ? ` · ${count}` : ''}
         </button>
       </div>
+      {lockedSection && (
+        <p className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
+          Your picks for this section are locked in — tap “Change my mind” on the board to edit them.
+        </p>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', marginBottom: 8 }}>
         {website && (
           <a className="btn-quiet" href={website} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>
@@ -422,13 +437,13 @@ export default function OptionDetail() {
         </section>
       ) : (
         <section style={{ marginTop: 14 }}>
-          <LegRow label="OUT" when={opt.depart} route={opt.route} />
-          <LegRow label="BACK" when={opt.return} route={opt.return_route || opt.route} />
+          <FlightLeg label="OUT" depart={opt.depart} arrive={opt.arrive}
+                     route={opt.route} duration={opt.duration} />
+          <FlightLeg label="BACK" depart={opt.return} arrive={opt.return_arrive}
+                     route={opt.return_route || opt.route} duration={opt.return_duration} />
           <p className="muted" style={{ fontSize: 13.5, marginTop: 10 }}>
             {opt.live_price
-              ? (details
-                ? 'Live fare from the board — the segment details didn’t load this time. Go back and reopen to retry.'
-                : 'Live fare via LiteAPI — loading the full segment details…')
+              ? 'Live fare via LiteAPI — the full segment breakdown isn’t available for this flight.'
               : 'Rovyn’s estimate for planning — exact times, baggage and fare rules live on the airline and Expedia.'}
           </p>
         </section>
@@ -455,12 +470,6 @@ export default function OptionDetail() {
       )}
 
       {/* Live sections — only what the real sources actually returned */}
-      {loadingLive && (
-        <p className="muted" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '20px 0', fontStyle: 'italic' }}>
-          <Loader2 className="spin" size={16} strokeWidth={2} color="var(--pine)" />
-          Fetching live details…
-        </p>
-      )}
       {details?.err && <p style={{ color: 'var(--clay)', fontSize: 14, padding: '14px 0' }}>{details.err}</p>}
 
       {d && (

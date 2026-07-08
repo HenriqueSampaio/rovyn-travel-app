@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence, animate, motionValue, useTransform } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Check, ChevronLeft, ChevronRight, Compass, LogOut, Loader2, MapPin, Quote } from 'lucide-react';
+import { ArrowLeft, Check, ChevronLeft, ChevronRight, Compass, LogOut, Loader2, MapPin, Maximize2, Quote } from 'lucide-react';
 import { api, auth } from './api/index.js';
 
 export function Wordmark({ size = 26 }) {
@@ -433,6 +433,70 @@ export function ErrorText({ children }) {
   return <p style={{ color: 'var(--clay)', fontSize: 14, marginTop: 14 }}>{children}</p>;
 }
 
+/* "2026-08-14 09:40" → { date: "Thu, Aug 14", time: "09:40" } */
+export function splitWhen(s = '') {
+  const [d, t] = s.split(' ');
+  const parsed = d ? new Date(`${d}T${t || '00:00'}`) : null;
+  const date = parsed && !isNaN(parsed)
+    ? parsed.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+    : (d || '');
+  return { date, time: t || '' };
+}
+
+/* The OUT/BACK direction marker on flight rows — a filled chip, loud enough
+   to scan a list by. */
+export function LegBadge({ label }) {
+  return (
+    <span style={{
+      fontSize: 11, fontWeight: 800, letterSpacing: '0.1em', flexShrink: 0,
+      padding: '3px 10px', borderRadius: 999, color: '#F6F2E8',
+      background: label === 'OUT' ? 'var(--pine)' : 'var(--clay)',
+    }}>
+      {label}
+    </span>
+  );
+}
+
+/* One direction of a round trip, reading like a boarding pass:
+   [OUT] Thu, Aug 14                    JFK → SPU (via VIE)
+   09:40 → 23:55 ⁺¹                                9h 30m
+   Older boards may lack an arrival — the row degrades to departure-only. */
+export function FlightLeg({ label, depart, arrive, route, duration }) {
+  const d = splitWhen(depart);
+  const a = splitWhen(arrive || '');
+  const dayDelta = (() => {
+    const d1 = (depart || '').slice(0, 10);
+    const d2 = (arrive || '').slice(0, 10);
+    if (!d1 || !d2 || d1 === d2) return 0;
+    return Math.round((new Date(d2) - new Date(d1)) / 86400000);
+  })();
+  return (
+    <div style={{ padding: '9px 0', borderTop: '1px dashed var(--line-soft)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <LegBadge label={label} />
+        <span className="muted" style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}>{d.date}</span>
+        <span style={{ fontSize: 13, color: 'var(--ink-soft)', marginLeft: 'auto' }}>{route}</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 5 }}>
+        <span style={{ fontSize: 18, fontWeight: 700, whiteSpace: 'nowrap' }}>{d.time}</span>
+        {a.time && (
+          <>
+            <span className="muted" aria-label="arriving">→</span>
+            <span style={{ fontSize: 18, fontWeight: 700, whiteSpace: 'nowrap' }}>
+              {a.time}
+              {dayDelta > 0 && (
+                <sup title={`lands ${dayDelta === 1 ? 'the next day' : `${dayDelta} days later`}`}
+                     style={{ fontSize: 10.5, color: 'var(--clay)', fontWeight: 700 }}> +{dayDelta}</sup>
+              )}
+            </span>
+          </>
+        )}
+        {duration && <span className="muted" style={{ fontSize: 13, marginLeft: 'auto', whiteSpace: 'nowrap' }}>{duration}</span>}
+      </div>
+    </div>
+  );
+}
+
 /* Multi-city route at a glance: one band per city, width proportional to the
    nights spent there, with dates underneath. Reads route = {cities: [...]}
    as produced by the backend's route planner. */
@@ -509,16 +573,19 @@ function embedUrl(key, embed) {
   return `https://www.google.com/maps/embed/v1/${embed.mode}?${params}`;
 }
 
-/* A Rovyn-styled map from the backend's Static Maps proxy. `load` returns a
-   blob URL (api.routeMap / api.optionMap — session-cached, so re-mounts are
-   instant). Reserves its aspect ratio while loading; vanishes quietly if no
-   map exists — maps are an enhancement, never a hole in the page.
-   With an `embed` prop ({mode, params} for the Maps Embed API) and a
-   configured browser key, tapping the picture opens the interactive map. */
+/* A trip map, interactive right in the page. With an `embed` prop ({mode,
+   params} for the Maps Embed API) and a configured browser key, the live
+   Google map renders inline — pan, zoom, transit — with an expand button
+   for the full-screen sheet. Without a key it falls back to the Rovyn-styled
+   Static Maps picture (`load` returns a blob URL; api.routeMap /
+   api.optionMap are session-cached, so re-mounts are instant). Reserves its
+   aspect ratio while loading; vanishes quietly if no map exists — maps are
+   an enhancement, never a hole in the page. */
 export function MapImage({ load, ratio = 2, alt = 'Map', style, header = null, embed = null }) {
   const [src, setSrc] = useState(null);
   const [failed, setFailed] = useState(false);
-  const [embedKey, setEmbedKey] = useState(null);
+  // undefined = still asking for the key; null = no key, static picture only
+  const [embedKey, setEmbedKey] = useState(embed ? undefined : null);
   const [open, setOpen] = useState(false);
   useEffect(() => {
     let dead = false;
@@ -534,30 +601,41 @@ export function MapImage({ load, ratio = 2, alt = 'Map', style, header = null, e
     return () => { dead = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [Boolean(embed)]);
-  if (failed) return null; // the header vanishes with the map — no orphans
-  const interactive = Boolean(embed && embedKey && src);
+  const interactive = Boolean(embed && embedKey);
+  if (failed && !interactive) return null; // the header vanishes with the map — no orphans
   return (
     <>
       {header}
-      {src ? (
-        <div style={{ position: 'relative', ...style }}>
-          <motion.img
-            src={src} alt={alt} draggable={false}
-            onClick={() => interactive && setOpen(true)}
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.35 }}
-            style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 4,
-                     cursor: interactive ? 'pointer' : 'default' }}
+      {interactive ? (
+        <div data-noswipe style={{ position: 'relative', aspectRatio: `${ratio} / 1`, ...style }}>
+          <iframe
+            title={alt}
+            src={embedUrl(embedKey, embed)}
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0, borderRadius: 4 }}
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
           />
-          {interactive && (
-            <span style={{
-              position: 'absolute', right: 10, bottom: 10, padding: '4px 12px',
-              borderRadius: 999, background: 'rgba(35, 49, 43, 0.62)', color: '#F6F2E8',
-              fontSize: 11.5, fontWeight: 700, pointerEvents: 'none',
-            }}>
-              tap to explore
-            </span>
-          )}
+          <button
+            type="button"
+            title="Expand the map"
+            aria-label="Expand the map"
+            onClick={() => setOpen(true)}
+            style={{
+              position: 'absolute', right: 10, top: 10, width: 34, height: 34,
+              borderRadius: '50%', display: 'inline-flex', alignItems: 'center',
+              justifyContent: 'center', background: 'rgba(35, 49, 43, 0.62)',
+              color: '#F6F2E8', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.25)',
+            }}
+          >
+            <Maximize2 size={15} strokeWidth={2.2} />
+          </button>
         </div>
+      ) : src ? (
+        <motion.img
+          src={src} alt={alt} draggable={false}
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.35 }}
+          style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 4, ...style }}
+        />
       ) : (
         <div className="map-loading" style={{ aspectRatio: `${ratio} / 1`, ...style }} />
       )}
