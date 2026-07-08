@@ -2,10 +2,67 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  ArrowRight, Check, ClipboardList, Copy, Crown, Link2, MapPin, Sparkles, Users,
+  ArrowRight, Camera, Check, ClipboardList, Copy, Crown, Link2, Loader2, MapPin, Sparkles, Users,
 } from 'lucide-react';
 import { api } from '../api/index.js';
 import { Page, Loading, ErrorText, JourneyTracker, ThinkingLoader } from '../ui.jsx';
+
+/* The trip's group picture — tap to change it, WhatsApp style. Any member
+   can set one; without a photo it falls back to the tinted initial disc. */
+function TripAvatar({ trip, busy, onPick, onRemove }) {
+  const inputRef = useRef(null);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+      <button
+        type="button"
+        title="Change trip photo"
+        aria-label="Change trip photo"
+        onClick={() => inputRef.current?.click()}
+        disabled={busy}
+        style={{ position: 'relative', width: 76, height: 76, borderRadius: '50%', padding: 0 }}
+      >
+        {trip.photo_url ? (
+          <img
+            src={api.mediaUrl(trip.photo_url)} alt={`${trip.name} photo`}
+            style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', display: 'block' }}
+          />
+        ) : (
+          <span className="serif" style={{
+            width: '100%', height: '100%', borderRadius: '50%',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(46, 93, 79, 0.11)', color: 'var(--pine)', fontSize: 32,
+          }}>
+            {(trip.name.trim()[0] || '·').toUpperCase()}
+          </span>
+        )}
+        <span style={{
+          position: 'absolute', right: -3, bottom: -3, width: 27, height: 27,
+          borderRadius: '50%', background: 'var(--pine)', color: '#F6F2E8',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          border: '2px solid var(--bg)',
+        }}>
+          {busy ? <Loader2 className="spin" size={13} /> : <Camera size={13} strokeWidth={2.2} />}
+        </span>
+      </button>
+      {trip.photo_url && !busy && (
+        <button className="muted" style={{ fontSize: 11.5 }} onClick={onRemove}>
+          remove
+        </button>
+      )}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/gif"
+        hidden
+        onChange={e => {
+          const f = e.target.files?.[0];
+          if (f) onPick(f);
+          e.target.value = ''; // re-picking the same file should fire again
+        }}
+      />
+    </div>
+  );
+}
 
 /* Sends each trip status to the page that owns that phase. */
 export function phaseRoute(trip, tripId) {
@@ -23,6 +80,7 @@ export default function Dashboard() {
   const [error, setError] = useState('');
   const [generating, setGenerating] = useState(false);
   const [copied, setCopied] = useState('');
+  const [photoBusy, setPhotoBusy] = useState(false);
   const pollRef = useRef(null);
 
   useEffect(() => {
@@ -58,6 +116,32 @@ export default function Dashboard() {
     setTimeout(() => setCopied(''), 2000);
   }
 
+  async function changePhoto(file) {
+    setPhotoBusy(true);
+    setError('');
+    try {
+      const { photo_url } = await api.setTripPhoto(tripId, file);
+      setTrip(t => ({ ...t, photo_url }));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
+  async function removePhoto() {
+    setPhotoBusy(true);
+    setError('');
+    try {
+      await api.removeTripPhoto(tripId);
+      setTrip(t => ({ ...t, photo_url: null }));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
   async function generate() {
     setGenerating(true);
     setError('');
@@ -77,8 +161,13 @@ export default function Dashboard() {
 
   return (
     <Page>
-      <p className="eyebrow">{solo ? 'Your solo trip' : trip.is_leader ? 'You lead this trip' : 'You are traveling on'}</p>
-      <h1 style={{ fontSize: 44, margin: '10px 0 6px' }}>{trip.name}</h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 22 }}>
+        <TripAvatar trip={trip} busy={photoBusy} onPick={changePhoto} onRemove={removePhoto} />
+        <div style={{ minWidth: 0 }}>
+          <p className="eyebrow">{solo ? 'Your solo trip' : trip.is_leader ? 'You lead this trip' : 'You are traveling on'}</p>
+          <h1 style={{ fontSize: 44, margin: '10px 0 6px' }}>{trip.name}</h1>
+        </div>
+      </div>
       <p className="muted" style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
         {fixed && (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--pine)', fontWeight: 600 }}>
