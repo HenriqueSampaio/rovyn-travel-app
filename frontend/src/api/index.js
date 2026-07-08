@@ -115,6 +115,21 @@ export const api = {
   deleteTrip: (tripId) => req(`/trips/${tripId}`, { method: 'DELETE' }),
   leaveTrip: (tripId) => req(`/trips/${tripId}/leave`, { method: 'POST' }),
 
+  // Trip photo — the group picture shown in the trip's round avatar
+  setTripPhoto: async (tripId, file) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${BASE}/trips/${tripId}/photo`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token()}` },
+      body: form,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Upload failed');
+    return data;
+  },
+  removeTripPhoto: (tripId) => req(`/trips/${tripId}/photo`, { method: 'DELETE' }),
+
   submitQuestionnaire: (tripId, data) =>
     req(`/trips/${tripId}/questionnaire`, { method: 'POST', body: JSON.stringify(data) }),
   getDateVotes: (tripId) => req(`/trips/${tripId}/date-votes`),

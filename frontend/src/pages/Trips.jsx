@@ -223,13 +223,20 @@ export default function Trips() {
                   style={{ cursor: 'pointer' }}
                   onClick={() => navigate(`/trips/${t.id}`)}
                 >
-                  <span className="serif" aria-hidden="true" style={{
-                    width: 44, height: 44, borderRadius: '50%', flexShrink: 0,
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    background: disc.tint, color: disc.solid, fontSize: 20,
-                  }}>
-                    {(t.name.trim()[0] || '·').toUpperCase()}
-                  </span>
+                  {t.photo_url ? (
+                    <img
+                      src={api.mediaUrl(t.photo_url)} alt="" loading="lazy"
+                      style={{ width: 44, height: 44, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
+                    />
+                  ) : (
+                    <span className="serif" aria-hidden="true" style={{
+                      width: 44, height: 44, borderRadius: '50%', flexShrink: 0,
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      background: disc.tint, color: disc.solid, fontSize: 20,
+                    }}>
+                      {(t.name.trim()[0] || '·').toUpperCase()}
+                    </span>
+                  )}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: '0 12px', flexWrap: 'wrap' }}>
                       <span className="opt-title serif" style={{ fontSize: 22 }}>{t.name}</span>
