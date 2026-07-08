@@ -5,23 +5,41 @@ import { ArrowRight, Check, CheckCircle2, Compass, LogOut, MapPin, Plus, Ticket,
 import { api } from '../api/index.js';
 import { Page, Field, Loading, ErrorText, CityInput } from '../ui.jsx';
 
+/* The three accents trip rows and status pills draw from — solid for text,
+   tint for fills. `sun` is defined in index.css alongside pine and clay. */
+const PALETTE = {
+  pine: { solid: 'var(--pine)', tint: 'rgba(46, 93, 79, 0.11)' },
+  clay: { solid: 'var(--clay)', tint: 'rgba(190, 107, 63, 0.13)' },
+  sun: { solid: 'var(--sun)', tint: 'rgba(169, 128, 43, 0.15)' },
+};
+const DISC_CYCLE = ['pine', 'clay', 'sun'];
+
+function Pill({ color, children }) {
+  const c = PALETTE[color] || PALETTE.pine;
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      padding: '3px 11px', borderRadius: 999, whiteSpace: 'nowrap',
+      fontSize: 12, fontWeight: 700, background: c.tint, color: c.solid,
+    }}>
+      {children}
+    </span>
+  );
+}
+
 function Countdown({ dates }) {
   if (!dates?.start) return null;
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const start = new Date(`${dates.start}T00:00:00`);
   const end = dates.end ? new Date(`${dates.end}T00:00:00`) : start;
   const days = Math.round((start - today) / 86400000);
-  let text;
+  let text, color = 'clay';
   if (days > 1) text = `✈ ${days} days to go`;
   else if (days === 1) text = '✈ Tomorrow!';
   else if (days === 0) text = '✈ Today — bon voyage!';
-  else if (today <= end) text = '🌴 Trip in progress';
-  else text = 'Trip completed';
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--clay)', fontWeight: 700 }}>
-      {text}
-    </span>
-  );
+  else if (today <= end) { text = '🌴 Trip in progress'; color = 'pine'; }
+  else { text = 'Trip completed'; color = 'sun'; }
+  return <Pill color={color}>{text}</Pill>;
 }
 
 // How the trip's destination gets decided: pinned by the creator, or
@@ -53,7 +71,7 @@ function ModePills({ value, onChange }) {
   );
 }
 
-/* Reveal-on-change wrapper for the create form's conditional rows */
+/* Reveal-on-change wrapper for the conditional form sections */
 function Unfold({ id, children }) {
   return (
     <motion.div key={id} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
@@ -64,19 +82,52 @@ function Unfold({ id, children }) {
   );
 }
 
-const STATUS_LABEL = {
-  waiting: 'Gathering preferences',
-  voting: 'Voting on destinations',
-  selected: 'Destination chosen',
-  curating: 'Starring favorites',
-  final_review: 'Final plan ready',
-  approved: 'Approved — payment open',
-  booked: 'Booked ✓',
+// Where a trip sits in the journey sets its pill color: pine while the
+// group gathers, sun through the deciding middle, clay at the finish line.
+const STATUS_META = {
+  waiting: { label: 'Gathering preferences', color: 'pine' },
+  voting: { label: 'Voting on destinations', color: 'sun' },
+  selected: { label: 'Destination chosen', color: 'sun' },
+  curating: { label: 'Starring favorites', color: 'sun' },
+  final_review: { label: 'Final plan ready', color: 'clay' },
+  approved: { label: 'Approved — payment open', color: 'clay' },
 };
+
+/* One of the two entry doors: a tinted tappable card that opens its form.
+   Both stay side by side on phones — no scrolling past one to reach the other. */
+function ActionCard({ active, Icon, title, sub, color, onClick }) {
+  const c = PALETTE[color];
+  return (
+    <button type="button" onClick={onClick} aria-expanded={active}
+            style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12,
+              padding: '18px 16px 15px', borderRadius: 16, textAlign: 'left',
+              border: '1.5px solid', borderColor: active ? c.solid : 'transparent',
+              background: c.tint,
+              transition: 'border-color 0.2s ease, transform 0.15s ease',
+            }}>
+      <span style={{
+        width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        background: active ? c.solid : 'transparent',
+        border: `1.5px solid ${c.solid}`,
+        color: active ? '#F6F2E8' : c.solid,
+        transition: 'background 0.2s ease, color 0.2s ease',
+      }}>
+        <Icon size={17} strokeWidth={2.2} />
+      </span>
+      <span>
+        <span className="serif" style={{ display: 'block', fontSize: 19, color: 'var(--ink)' }}>{title}</span>
+        <span className="muted" style={{ display: 'block', fontSize: 12.5, marginTop: 2 }}>{sub}</span>
+      </span>
+    </button>
+  );
+}
 
 export default function Trips() {
   const navigate = useNavigate();
   const [trips, setTrips] = useState(null);
+  const [mode, setMode] = useState(null); // null | 'create' | 'join'
   const [name, setName] = useState('');
   const [destMode, setDestMode] = useState('known');
   const [destination, setDestination] = useState('');
@@ -87,7 +138,13 @@ export default function Trips() {
   const [confirmId, setConfirmId] = useState(null);
 
   useEffect(() => {
-    api.myTrips().then(d => setTrips(d.trips)).catch(err => setError(err.message));
+    api.myTrips()
+      .then(d => {
+        setTrips(d.trips);
+        // A brand-new traveler has nothing to tap through — open the door for them
+        if (d.trips.length === 0) setMode('create');
+      })
+      .catch(err => setError(err.message));
   }, []);
 
   async function removeTrip(t) {
@@ -140,10 +197,12 @@ export default function Trips() {
   return (
     <Page>
       <p className="eyebrow">Your journeys</p>
-      <h1 style={{ fontSize: 42, margin: '10px 0 40px' }}>Where to next?</h1>
+      <h1 style={{ fontSize: 42, margin: '10px 0 40px' }}>
+        Where to <em style={{ color: 'var(--clay)' }}>next?</em>
+      </h1>
 
       {trips.length > 0 && (
-        <div style={{ marginBottom: 64 }}>
+        <div style={{ marginBottom: 56 }}>
           {[
             { key: 'planning', label: 'Organization in progress', Icon: Compass, list: trips.filter(t => t.status !== 'booked') },
             { key: 'confirmed', label: 'Confirmed', Icon: CheckCircle2, list: trips.filter(t => t.status === 'booked') },
@@ -152,7 +211,9 @@ export default function Trips() {
               <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                 <section.Icon size={13} strokeWidth={2.5} /> {section.label} · {section.list.length}
               </p>
-              {section.list.map((t, i) => (
+              {section.list.map((t, i) => {
+                const disc = PALETTE[DISC_CYCLE[i % DISC_CYCLE.length]];
+                return (
                 <motion.div
                   key={t.id}
                   initial={{ opacity: 0, y: 10 }}
@@ -162,20 +223,37 @@ export default function Trips() {
                   style={{ cursor: 'pointer' }}
                   onClick={() => navigate(`/trips/${t.id}`)}
                 >
-                  <div style={{ flex: 1 }}>
-                    <div className="opt-title serif" style={{ fontSize: 22 }}>
-                      {t.selected_destination ? `${t.name} — ${t.selected_destination}` : t.name}
+                  <span className="serif" aria-hidden="true" style={{
+                    width: 44, height: 44, borderRadius: '50%', flexShrink: 0,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    background: disc.tint, color: disc.solid, fontSize: 20,
+                  }}>
+                    {(t.name.trim()[0] || '·').toUpperCase()}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '0 12px', flexWrap: 'wrap' }}>
+                      <span className="opt-title serif" style={{ fontSize: 22 }}>{t.name}</span>
+                      {t.selected_destination && (
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 4,
+                          color: 'var(--clay)', fontSize: 14, fontWeight: 700, whiteSpace: 'nowrap',
+                        }}>
+                          <MapPin size={13} strokeWidth={2.2} /> {t.selected_destination}
+                        </span>
+                      )}
                     </div>
-                    <div className="opt-desc" style={{ display: 'flex', alignItems: 'center', gap: '2px 14px', flexWrap: 'wrap', marginTop: 4 }}>
+                    <div className="opt-desc" style={{ display: 'flex', alignItems: 'center', gap: '4px 14px', flexWrap: 'wrap', marginTop: 6 }}>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
                         <Users size={13} /> {t.member_count} traveler{t.member_count === 1 ? '' : 's'}
                       </span>
                       {t.is_leader && (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap', color: 'var(--sun)', fontWeight: 700 }}>
                           <Crown size={13} /> You lead
                         </span>
                       )}
-                      {t.status === 'booked' ? <Countdown dates={t.dates} /> : <span>{STATUS_LABEL[t.status] || t.status}</span>}
+                      {t.status === 'booked'
+                        ? <Countdown dates={t.dates} />
+                        : <Pill color={STATUS_META[t.status]?.color || 'pine'}>{STATUS_META[t.status]?.label || t.status}</Pill>}
                     </div>
                   </div>
                   {confirmId === t.id ? (
@@ -200,91 +278,110 @@ export default function Trips() {
                   )}
                   <ArrowRight size={18} color="var(--pine)" />
                 </motion.div>
-              ))}
+                );
+              })}
             </div>
           ))}
         </div>
       )}
 
-      <div className="two-col" style={{ rowGap: 56 }}>
-        <form onSubmit={create}>
-          <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-            <Plus size={13} strokeWidth={2.5} /> Start a trip
-          </p>
-          <Field label="Trip name">
-            <input placeholder="Summer in the Algarve" value={name} onChange={e => setName(e.target.value)} />
-          </Field>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, flexWrap: 'wrap', marginBottom: 14 }}>
-            <p className="eyebrow" style={{ fontSize: 11 }}>Destination</p>
-            <ModePills value={destMode} onChange={setDestMode} />
-          </div>
-          <AnimatePresence initial={false} mode="wait">
-            {destMode === 'known' ? (
-              <Unfold id="known">
-                <Field label="Where to?">
-                  <CityInput placeholder="Hvar, Croatia" value={destination} onChange={setDestination} />
-                </Field>
-              </Unfold>
-            ) : (
-              <Unfold id="suggest">
-                <p className="muted" style={{ fontSize: 13, marginBottom: 26, maxWidth: 400 }}>
-                  {solo
-                    ? 'Rovyn reads your answers and proposes five matched destinations — you pick your favorite.'
-                    : 'Rovyn reads everyone’s answers and proposes five matched destinations — the group votes.'}
-                </p>
-              </Unfold>
-            )}
-          </AnimatePresence>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', margin: '2px 0 26px' }}>
-            <button type="button" onClick={() => setSolo(s => !s)}
-                    style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 9,
-                      fontSize: 13.5, fontWeight: 600,
-                      color: solo ? 'var(--pine)' : 'var(--ink-soft)',
-                    }}>
-              <span style={{
-                width: 17, height: 17, borderRadius: 5, border: '1.5px solid',
-                borderColor: solo ? 'var(--pine)' : 'var(--line)',
-                background: solo ? 'var(--pine)' : 'transparent',
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                transition: 'all 0.15s ease', flexShrink: 0,
-              }}>
-                {solo && <Check size={12} strokeWidth={3.2} color="#F6F2E8" />}
-              </span>
-              Travelling solo?
-            </button>
-            <AnimatePresence>
-              {solo && (
-                <motion.span className="muted" style={{ fontSize: 12.5 }}
-                             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                  No invites — this journey is all yours.
-                </motion.span>
-              )}
-            </AnimatePresence>
-          </div>
-          <button className="btn" disabled={busy || !name.trim() || (destMode === 'known' && !destination.trim())}>
-            Create <ArrowRight size={16} />
-          </button>
-        </form>
-
-        <form onSubmit={join}>
-          <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-            <Ticket size={13} strokeWidth={2.5} /> Have an invite?
-          </p>
-          <Field label="Invite code">
-            <input
-              placeholder="AB12CD"
-              value={code}
-              onChange={e => setCode(e.target.value.toUpperCase())}
-              maxLength={6}
-              style={{ letterSpacing: 6, fontWeight: 600 }}
-            />
-          </Field>
-          <button className="btn clay" disabled={busy || !code.trim()}>
-            Join <ArrowRight size={16} />
-          </button>
-        </form>
+      {/* Two doors in, side by side even on a phone — tap one and its form unfolds */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 8 }}>
+        <ActionCard
+          Icon={Plus} color="pine" title="Start a trip" sub="Plan something new"
+          active={mode === 'create'}
+          onClick={() => setMode(m => m === 'create' ? null : 'create')}
+        />
+        <ActionCard
+          Icon={Ticket} color="clay" title="Have an invite?" sub="Join with a code"
+          active={mode === 'join'}
+          onClick={() => setMode(m => m === 'join' ? null : 'join')}
+        />
       </div>
+
+      <AnimatePresence initial={false} mode="wait">
+        {mode === 'create' && (
+          <Unfold id="create-form">
+            <form onSubmit={create} style={{ padding: '26px 4px 8px' }}>
+              <Field label="Trip name">
+                <input placeholder="Summer in the Algarve" value={name} autoFocus
+                       onChange={e => setName(e.target.value)} />
+              </Field>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, flexWrap: 'wrap', marginBottom: 14 }}>
+                <p className="eyebrow" style={{ fontSize: 11 }}>Destination</p>
+                <ModePills value={destMode} onChange={setDestMode} />
+              </div>
+              <AnimatePresence initial={false} mode="wait">
+                {destMode === 'known' ? (
+                  <Unfold id="known">
+                    <Field label="Where to?">
+                      <CityInput placeholder="Hvar, Croatia" value={destination} onChange={setDestination} />
+                    </Field>
+                  </Unfold>
+                ) : (
+                  <Unfold id="suggest">
+                    <p className="muted" style={{ fontSize: 13, marginBottom: 26, maxWidth: 400 }}>
+                      {solo
+                        ? 'Rovyn reads your answers and proposes five matched destinations — you pick your favorite.'
+                        : 'Rovyn reads everyone’s answers and proposes five matched destinations — the group votes.'}
+                    </p>
+                  </Unfold>
+                )}
+              </AnimatePresence>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', margin: '2px 0 26px' }}>
+                <button type="button" onClick={() => setSolo(s => !s)}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 9,
+                          fontSize: 13.5, fontWeight: 600,
+                          color: solo ? 'var(--pine)' : 'var(--ink-soft)',
+                        }}>
+                  <span style={{
+                    width: 17, height: 17, borderRadius: 5, border: '1.5px solid',
+                    borderColor: solo ? 'var(--pine)' : 'var(--line)',
+                    background: solo ? 'var(--pine)' : 'transparent',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'all 0.15s ease', flexShrink: 0,
+                  }}>
+                    {solo && <Check size={12} strokeWidth={3.2} color="#F6F2E8" />}
+                  </span>
+                  Travelling solo?
+                </button>
+                <AnimatePresence>
+                  {solo && (
+                    <motion.span className="muted" style={{ fontSize: 12.5 }}
+                                 initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                      No invites — this journey is all yours.
+                    </motion.span>
+                  )}
+                </AnimatePresence>
+              </div>
+              <button className="btn" disabled={busy || !name.trim() || (destMode === 'known' && !destination.trim())}>
+                Create <ArrowRight size={16} />
+              </button>
+            </form>
+          </Unfold>
+        )}
+
+        {mode === 'join' && (
+          <Unfold id="join-form">
+            <form onSubmit={join} style={{ padding: '26px 4px 8px' }}>
+              <Field label="Invite code">
+                <input
+                  placeholder="AB12CD"
+                  value={code}
+                  autoFocus
+                  onChange={e => setCode(e.target.value.toUpperCase())}
+                  maxLength={6}
+                  style={{ letterSpacing: 6, fontWeight: 600 }}
+                />
+              </Field>
+              <button className="btn clay" disabled={busy || !code.trim()}>
+                Join <ArrowRight size={16} />
+              </button>
+            </form>
+          </Unfold>
+        )}
+      </AnimatePresence>
 
       <ErrorText>{error}</ErrorText>
     </Page>
