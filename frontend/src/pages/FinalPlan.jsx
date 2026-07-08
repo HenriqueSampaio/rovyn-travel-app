@@ -98,10 +98,10 @@ function BookingsChecklist({ bookings, busy, onConfirm, onUnbook }) {
                     <p style={{ fontWeight: 600, fontSize: 15 }}>
                       {item.title}
                       {item.category === 'flight' && item.mine && !item.stale && (
-                        <span style={{ marginLeft: 10, fontSize: 11, color: 'var(--clay)', fontWeight: 700, letterSpacing: '0.08em' }}>YOURS</span>
+                        <span style={{ marginLeft: 10, fontSize: 10.5, color: 'var(--sun)', background: 'rgba(169, 128, 43, 0.15)', fontWeight: 700, letterSpacing: '0.08em', borderRadius: 999, padding: '3px 9px', whiteSpace: 'nowrap', display: 'inline-block' }}>YOURS</span>
                       )}
                       {item.stale && (
-                        <span style={{ marginLeft: 10, fontSize: 11, color: 'var(--clay)', fontWeight: 700, letterSpacing: '0.08em', border: '1px solid var(--clay)', borderRadius: 999, padding: '2px 8px', whiteSpace: 'nowrap', display: 'inline-block' }}>
+                        <span style={{ marginLeft: 10, fontSize: 10.5, color: 'var(--clay)', background: 'rgba(190, 107, 63, 0.13)', fontWeight: 700, letterSpacing: '0.08em', borderRadius: 999, padding: '3px 9px', whiteSpace: 'nowrap', display: 'inline-block' }}>
                           NO LONGER IN THE PLAN
                         </span>
                       )}
@@ -1116,7 +1116,9 @@ export default function FinalPlan() {
         <div style={{ minWidth: 0 }}>
           <p className="eyebrow">{trip?.name}</p>
           <h1 style={{ fontSize: 42, margin: '8px 0 0' }}>
-            {status === 'booked' ? <>You're going to <em style={{ color: 'var(--pine)' }}>{plan.destination}</em>!</> : `The plan — ${plan.destination}`}
+            {status === 'booked'
+              ? <>You're going to <em style={{ color: 'var(--pine)' }}>{plan.destination}</em>!</>
+              : <>The plan — <em style={{ color: 'var(--pine)' }}>{plan.destination}</em></>}
           </h1>
         </div>
       </div>

@@ -355,7 +355,7 @@ export default function OptionDetail() {
             ? 'Real bookable flights with a live fare for your dates'
             : 'Real property with live availability for your dates'} style={{
             fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em',
-            color: 'var(--pine)', border: '1px solid var(--pine)', borderRadius: 999,
+            color: 'var(--pine)', background: 'rgba(46, 93, 79, 0.11)', borderRadius: 999,
             padding: '3px 9px', whiteSpace: 'nowrap',
           }}>
             LIVE PRICE

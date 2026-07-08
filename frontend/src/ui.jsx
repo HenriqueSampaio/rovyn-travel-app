@@ -15,6 +15,47 @@ export function Wordmark({ size = 26 }) {
   );
 }
 
+/* The three accents the whole app draws from — solid for text and icons,
+   tint for fills. Cycle through PALETTE_CYCLE when coloring repeated rows
+   (trip discs, traveler monograms). --sun is defined in index.css alongside
+   pine and clay. */
+export const PALETTE = {
+  pine: { solid: 'var(--pine)', tint: 'rgba(46, 93, 79, 0.11)' },
+  clay: { solid: 'var(--clay)', tint: 'rgba(190, 107, 63, 0.13)' },
+  sun: { solid: 'var(--sun)', tint: 'rgba(169, 128, 43, 0.15)' },
+};
+export const PALETTE_CYCLE = ['pine', 'clay', 'sun'];
+
+/* Small tinted status chip — journey phases, counts, badges */
+export function Pill({ color = 'pine', children, style }) {
+  const c = PALETTE[color] || PALETTE.pine;
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      padding: '3px 11px', borderRadius: 999, whiteSpace: 'nowrap',
+      fontSize: 12, fontWeight: 700, background: c.tint, color: c.solid,
+      ...style,
+    }}>
+      {children}
+    </span>
+  );
+}
+
+/* Round tinted serif monogram — trips without a photo, travelers, authors */
+export function Disc({ label, color = 'pine', size = 40, style }) {
+  const c = PALETTE[color] || PALETTE.pine;
+  return (
+    <span className="serif" aria-hidden="true" style={{
+      width: size, height: size, borderRadius: '50%', flexShrink: 0,
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      background: c.tint, color: c.solid, fontSize: Math.round(size * 0.45),
+      ...style,
+    }}>
+      {((label || '').trim()[0] || '·').toUpperCase()}
+    </span>
+  );
+}
+
 /* Shared position across the three top-level pages, as a fractional index
    (0 = Trips, 1 = Feed, 2 = Wishlist). The SwipeShell writes to it while a
    finger drags; the tab underline below reads from it — so both the page
@@ -247,14 +288,7 @@ export function TripAvatar({ tripId, name, photoUrl, onChange, size = 76 }) {
             style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', display: 'block' }}
           />
         ) : (
-          <span className="serif" style={{
-            width: '100%', height: '100%', borderRadius: '50%',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: 'rgba(46, 93, 79, 0.11)', color: 'var(--pine)',
-            fontSize: Math.round(size * 0.42),
-          }}>
-            {((name || '').trim()[0] || '·').toUpperCase()}
-          </span>
+          <Disc label={name} size={size} style={{ display: 'flex' }} />
         )}
         <span style={{
           position: 'absolute', right: -3, bottom: -3, width: badge, height: badge,
@@ -536,7 +570,7 @@ export function RouteTimeline({ route, style }) {
     const d = new Date(`${iso}T00:00:00`);
     return isNaN(d) ? '' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   };
-  const shades = ['var(--pine)', 'var(--clay)'];
+  const shades = ['var(--pine)', 'var(--clay)', 'var(--sun)'];
   return (
     <div style={{ display: 'flex', gap: 3, alignItems: 'stretch', ...style }}>
       {cities.map((c, i) => (
