@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowLeft, Bus, Check, Clock, Globe, MapPin, Phone,
+  ArrowLeft, Bus, Check, Clock, Globe, Loader2, MapPin, Phone,
   PlaneTakeoff, Ship, Star, TrainFront,
 } from 'lucide-react';
 import { api } from '../api/index.js';
@@ -302,17 +302,18 @@ export default function OptionDetail() {
     else navigate(`/trips/${tripId}/plan`);
   }
 
-  // Everything or nothing: the page appears once ALL its information is in —
-  // no half-rendered card with a spinner chasing the rest.
-  const stillLoading = !opt || !details || (category === 'stay' && media === undefined);
-  if (stillLoading) return <Page><Loading text="Getting every detail…" /></Page>;
+  // Booking/Airbnb-style: the facts the board already showed (photo, name,
+  // price, star) paint instantly; everything live appears below as ONE block
+  // once it has all arrived — never half a card with content trickling in.
+  if (!opt || !category) return <Page><Loading text="Getting every detail…" /></Page>;
+  const liveReady = Boolean(details) && (category !== 'stay' || media !== undefined);
 
   const d = details?.data;
   const liveSegs = category === 'flights' && d?.source === 'liteapi' && d.segments?.out?.length
     ? d.segments : null;
   const title = opt.name || opt.airline || opt.carrier || opt.mode || 'Details';
   const city = (opt.city || '').split(',')[0].trim();
-  const photos = (category === 'stay' ? media?.photos : d?.photos) || [];
+  const photos = liveReady ? ((category === 'stay' ? media?.photos : d?.photos) || []) : [];
   const ModeIcon = MODE_ICONS[(opt.mode || '').toLowerCase()] || TrainFront;
 
   const facts = [
@@ -416,6 +417,16 @@ export default function OptionDetail() {
 
       {opt.why && <p className="serif muted" style={{ fontStyle: 'italic', fontSize: 15.5, margin: '8px 0 4px' }}>{opt.why}</p>}
 
+      {/* Everything live renders below in ONE shot; until it has all arrived,
+         the board facts above stand alone with a quiet loader at the bottom. */}
+      {!liveReady && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '46px 0 40px' }}>
+          <Loader2 className="spin" size={20} strokeWidth={1.8} color="var(--pine)" />
+          <span className="muted serif" style={{ fontStyle: 'italic', fontSize: 15.5 }}>Loading live information…</span>
+        </div>
+      )}
+
+      {liveReady && <>
       {/* Flights: real segments once live details land; board facts otherwise */}
       {category === 'flights' && (liveSegs ? (
         <section style={{ marginTop: 14 }}>
@@ -532,6 +543,7 @@ export default function OptionDetail() {
           })()}
         </div>
       )}
+      </>}
     </Page>
   );
 }
