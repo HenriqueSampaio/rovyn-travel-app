@@ -5,7 +5,7 @@ import {
   ArrowRight, BedDouble, Check, MapPin, PlaneTakeoff, Plus, Route, Sparkles, Ticket, Trophy, Vote as VoteIcon, X,
 } from 'lucide-react';
 import { api } from '../api/index.js';
-import { Page, Loading, ErrorText, Hero, ThinkingLoader, CityInput } from '../ui.jsx';
+import { Page, Loading, ErrorText, Hero, ThinkingLoader, CityInput, TripAvatar } from '../ui.jsx';
 
 export default function Vote() {
   const navigate = useNavigate();
@@ -113,12 +113,18 @@ export default function Vote() {
 
   return (
     <Page width={760}>
-      <p className="eyebrow">{trip.name}</p>
-      <h1 style={{ fontSize: 42, margin: '10px 0 10px' }}>
-        {winner
-          ? <>Next stop, <em style={{ color: 'var(--pine)' }}>{winner}</em></>
-          : solo ? 'Pick your destination' : 'Cast your vote'}
-      </h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 10 }}>
+        <TripAvatar tripId={tripId} name={trip.name} photoUrl={trip.photo_url} size={64}
+                    onChange={url => setTrip(t => ({ ...t, photo_url: url }))} />
+        <div style={{ minWidth: 0 }}>
+          <p className="eyebrow">{trip.name}</p>
+          <h1 style={{ fontSize: 42, margin: '8px 0 0' }}>
+            {winner
+              ? <>Next stop, <em style={{ color: 'var(--pine)' }}>{winner}</em></>
+              : solo ? 'Pick your destination' : 'Cast your vote'}
+          </h1>
+        </div>
+      </div>
       <p className="muted" style={{ marginBottom: isSample ? 10 : 40, maxWidth: 520 }}>
         {winner
           ? solo ? 'Decided — pack your bags.' : 'The group has decided.'
