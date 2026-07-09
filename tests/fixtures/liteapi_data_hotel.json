@@ -1,0 +1,543 @@
+{
+ "data": {
+  "id": "lp1c4b4",
+  "name": "Hotel Quirinale",
+  "hotelDescription": "<p><strong>Historical Charm and Modern Comfort</strong><br>Step back in time at the Quirinale, a 19th-century gem just a short stroll from the iconic Coliseum. Connected to the Rome Opera House, this historical hotel off\u2026",
+  "hotelImportantInformation": "Please note that due to the unique style of each room, the decoration in some ro",
+  "checkinCheckoutTimes": {
+   "checkin_start": "02:30 PM",
+   "checkin_end": "12:00 AM",
+   "checkout": "12:00 PM",
+   "instructions": [],
+   "special_instructions": ""
+  },
+  "main_photo": "https://static.cupid.travel/hotels/44743773.jpg",
+  "thumbnail": "https://static.cupid.travel/hotels/thumbnail/44743773.jpg",
+  "country": "it",
+  "city": "Rome",
+  "starRating": 4,
+  "location": {
+   "latitude": 41.901662,
+   "longitude": 12.494848
+  },
+  "address": "Via Nazionale 7",
+  "hotelFacilities": [
+   "WiFi available",
+   "Free WiFi",
+   "Parking",
+   "Non-smoking rooms",
+   "Air conditioning",
+   "Fitness center",
+   "24-hour front desk",
+   "Restaurant"
+  ],
+  "zip": "00184",
+  "chain": "Not Available",
+  "facilities": [
+   {
+    "facilityId": 47,
+    "name": "WiFi available"
+   },
+   {
+    "facilityId": 107,
+    "name": "Free WiFi"
+   },
+   {
+    "facilityId": 2,
+    "name": "Parking"
+   },
+   {
+    "facilityId": 16,
+    "name": "Non-smoking rooms"
+   },
+   {
+    "facilityId": 109,
+    "name": "Air conditioning"
+   }
+  ],
+  "rooms": [
+   {
+    "id": 183642,
+    "roomName": "Standard Triple Room",
+    "description": "Room with attached bathroom with free Wi-Fi, air conditioning, and a 21-inch int",
+    "roomSizeSquare": 24,
+    "roomSizeUnit": "sqm",
+    "hotelId": "lp1c4b4",
+    "maxAdults": 3,
+    "maxChildren": 1,
+    "maxOccupancy": 3,
+    "bedTypes": [],
+    "roomAmenities": [
+     {
+      "amenitiesId": 64,
+      "name": "Coffee/tea maker",
+      "sort": 0
+     },
+     {
+      "amenitiesId": 312,
+      "name": "Shower",
+      "sort": 0
+     },
+     {
+      "amenitiesId": 293,
+      "name": "Safety deposit box",
+      "sort": 17
+     }
+    ],
+    "views": [],
+    "bedRelation": ""
+   },
+   {
+    "id": 183638,
+    "roomName": "Superior Double or Twin Room",
+    "description": "Large, room with attached bathroom with free Wi-Fi, air conditioning, and a 21-i",
+    "roomSizeSquare": 30,
+    "roomSizeUnit": "sqm",
+    "hotelId": "lp1c4b4",
+    "maxAdults": 3,
+    "maxChildren": 1,
+    "maxOccupancy": 3,
+    "bedTypes": [
+     {
+      "quantity": 1,
+      "bedType": "Twin bed",
+      "bedSize": "90-130 cm wide",
+      "id": 166
+     },
+     {
+      "quantity": 2,
+      "bedType": "Twin bed",
+      "bedSize": "90-130 cm wide",
+      "id": 166
+     }
+    ],
+    "roomAmenities": [
+     {
+      "amenitiesId": 64,
+      "name": "Coffee/tea maker",
+      "sort": 0
+     },
+     {
+      "amenitiesId": 312,
+      "name": "Shower",
+      "sort": 0
+     },
+     {
+      "amenitiesId": 293,
+      "name": "Safety deposit box",
+      "sort": 17
+     }
+    ],
+    "views": [],
+    "bedRelation": "OR"
+   },
+   {
+    "id": 183639,
+    "roomName": "Executive Double or Twin Room",
+    "description": "Large, room with attached bathroom with free Wi-Fi, air conditioning, and a 40-i",
+    "roomSizeSquare": 28,
+    "roomSizeUnit": "sqm",
+    "hotelId": "lp1c4b4",
+    "maxAdults": 2,
+    "maxChildren": 1,
+    "maxOccupancy": 2,
+    "bedTypes": [
+     {
+      "quantity": 1,
+      "bedType": "Queen bed",
+      "bedSize": "151-180 cm wide",
+      "id": 167
+     },
+     {
+      "quantity": 2,
+      "bedType": "Twin bed",
+      "bedSize": "90-130 cm wide",
+      "id": 166
+     }
+    ],
+    "roomAmenities": [
+     {
+      "amenitiesId": 64,
+      "name": "Coffee/tea maker",
+      "sort": 0
+     },
+     {
+      "amenitiesId": 312,
+      "name": "Shower",
+      "sort": 0
+     },
+     {
+      "amenitiesId": 293,
+      "name": "Safety deposit box",
+      "sort": 17
+     }
+    ],
+    "views": [],
+    "bedRelation": "OR"
+   },
+   {
+    "id": 183640,
+    "roomName": "Small Double or Twin Room",
+    "description": "Compact room with attached bathroom with free Wi-Fi, air conditioning, and a 21-",
+    "roomSizeSquare": 15,
+    "roomSizeUnit": "sqm",
+    "hotelId": "lp1c4b4",
+    "maxAdults": 2,
+    "maxChildren": 1,
+    "maxOccupancy": 2,
+    "bedTypes": [
+     {
+      "quantity": 1,
+      "bedType": "Queen bed",
+      "bedSize": "151-180 cm wide",
+      "id": 167
+     },
+     {
+      "quantity": 2,
+      "bedType": "Twin bed",
+      "bedSize": "90-130 cm wide",
+      "id": 166
+     }
+    ],
+    "roomAmenities": [
+     {
+      "amenitiesId": 64,
+      "name": "Coffee/tea maker",
+      "sort": 0
+     },
+     {
+      "amenitiesId": 312,
+      "name": "Shower",
+      "sort": 0
+     },
+     {
+      "amenitiesId": 293,
+      "name": "Safety deposit box",
+      "sort": 17
+     }
+    ],
+    "views": [],
+    "bedRelation": "OR"
+   },
+   {
+    "id": 183641,
+    "roomName": "Standard Double or Twin Room",
+    "description": "Room with attached bathroom with free Wi-Fi, air conditioning, and a 21-inch int",
+    "roomSizeSquare": 23,
+    "roomSizeUnit": "sqm",
+    "hotelId": "lp1c4b4",
+    "maxAdults": 2,
+    "maxChildren": 1,
+    "maxOccupancy": 2,
+    "bedTypes": [
+     {
+      "quantity": 1,
+      "bedType": "Queen bed",
+      "bedSize": "151-180 cm wide",
+      "id": 167
+     },
+     {
+      "quantity": 2,
+      "bedType": "Twin bed",
+      "bedSize": "90-130 cm wide",
+      "id": 166
+     }
+    ],
+    "roomAmenities": [
+     {
+      "amenitiesId": 64,
+      "name": "Coffee/tea maker",
+      "sort": 0
+     },
+     {
+      "amenitiesId": 312,
+      "name": "Shower",
+      "sort": 0
+     },
+     {
+      "amenitiesId": 293,
+      "name": "Safety deposit box",
+      "sort": 17
+     }
+    ],
+    "views": [],
+    "bedRelation": "OR"
+   },
+   {
+    "id": 183643,
+    "roomName": "Junior Suite",
+    "description": "Spacious junior suite with a seating area. Offers free Wi-Fi, air conditioning, ",
+    "roomSizeSquare": 39,
+    "roomSizeUnit": "sqm",
+    "hotelId": "lp1c4b4",
+    "maxAdults": 4,
+    "maxChildren": 2,
+    "maxOccupancy": 4,
+    "bedTypes": [
+     {
+      "quantity": 2,
+      "bedType": "Twin bed",
+      "bedSize": "90-130 cm wide",
+      "id": 166
+     },
+     {
+      "quantity": 1,
+      "bedType": "Queen bed",
+      "bedSize": "151-180 cm wide",
+      "id": 167
+     }
+    ],
+    "roomAmenities": [
+     {
+      "amenitiesId": 64,
+      "name": "Coffee/tea maker",
+      "sort": 0
+     },
+     {
+      "amenitiesId": 312,
+      "name": "Shower",
+      "sort": 0
+     },
+     {
+      "amenitiesId": 293,
+      "name": "Safety deposit box",
+      "sort": 17
+     }
+    ],
+    "views": [],
+    "bedRelation": "AND"
+   },
+   {
+    "id": 183644,
+    "roomName": "Suite",
+    "description": "Spacious suite with independent living room. Offers free Wi-Fi, air conditioning",
+    "roomSizeSquare": 45,
+    "roomSizeUnit": "sqm",
+    "hotelId": "lp1c4b4",
+    "maxAdults": 2,
+    "maxChildren": 1,
+    "maxOccupancy": 2,
+    "bedTypes": [
+     {
+      "quantity": 1,
+      "bedType": "Queen bed",
+      "bedSize": "151-180 cm wide",
+      "id": 167
+     }
+    ],
+    "roomAmenities": [
+     {
+      "amenitiesId": 64,
+      "name": "Coffee/tea maker",
+      "sort": 0
+     },
+     {
+      "amenitiesId": 312,
+      "name": "Shower",
+      "sort": 0
+     },
+     {
+      "amenitiesId": 293,
+      "name": "Safety deposit box",
+      "sort": 17
+     }
+    ],
+    "views": [],
+    "bedRelation": "NONE"
+   },
+   {
+    "id": 183645,
+    "roomName": "Single Room French Bed",
+    "description": "Providing free toiletries, this double room includes a private bathroom with a s",
+    "roomSizeSquare": 15,
+    "roomSizeUnit": "sqm",
+    "hotelId": "lp1c4b4",
+    "maxAdults": 1,
+    "maxChildren": 0,
+    "maxOccupancy": 1,
+    "bedTypes": [
+     {
+      "quantity": 1,
+      "bedType": "Twin bed",
+      "bedSize": "90-130 cm wide",
+      "id": 166
+     }
+    ],
+    "roomAmenities": [
+     {
+      "amenitiesId": 64,
+      "name": "Coffee/tea maker",
+      "sort": 0
+     },
+     {
+      "amenitiesId": 312,
+      "name": "Shower",
+      "sort": 0
+     },
+     {
+      "amenitiesId": 293,
+      "name": "Safety deposit box",
+      "sort": 17
+     }
+    ],
+    "views": [],
+    "bedRelation": "NONE"
+   },
+   {
+    "id": 183646,
+    "roomName": "Double or Twin Room - Disability Access",
+    "description": "This twin/double room has a private bathroom and air conditioning. The unit has ",
+    "roomSizeSquare": 23,
+    "roomSizeUnit": "sqm",
+    "hotelId": "lp1c4b4",
+    "maxAdults": 2,
+    "maxChildren": 1,
+    "maxOccupancy": 2,
+    "bedTypes": [
+     {
+      "quantity": 2,
+      "bedType": "Twin bed",
+      "bedSize": "90-130 cm wide",
+      "id": 166
+     },
+     {
+      "quantity": 1,
+      "bedType": "Queen bed",
+      "bedSize": "151-180 cm wide",
+      "id": 167
+     }
+    ],
+    "roomAmenities": [
+     {
+      "amenitiesId": 11,
+      "name": "Air conditioning",
+      "sort": 0
+     },
+     {
+      "amenitiesId": 266,
+      "name": "Private bathroom",
+      "sort": 0
+     }
+    ],
+    "views": [],
+    "bedRelation": "AND"
+   }
+  ],
+  "phone": "+39064707",
+  "fax": "",
+  "email": "",
+  "hotelType": "Hotels",
+  "hotelTypeId": 204,
+  "airportCode": "FCO",
+  "rating": 8.2,
+  "reviewCount": 7741,
+  "parking": "NOT_AVAILABLE",
+  "groupRoomMin": 0,
+  "childAllowed": true,
+  "petsAllowed": false,
+  "policies": [
+   {
+    "id": 949,
+    "policy_type": "POLICY_HOTEL_GROUPS",
+    "name": "Groups",
+    "description": "When booking more than 5 rooms, different policies and additional supplements may apply.\n",
+    "child_allowed": "",
+    "pets_allowed": "",
+    "parking": ""
+   },
+   {
+    "id": 1915,
+    "policy_type": "POLICY_HOTEL_PARKING",
+    "name": "Parking",
+    "description": "No parking available.\n",
+    "child_allowed": "",
+    "pets_allowed": "",
+    "parking": ""
+   },
+   {
+    "id": 6206,
+    "policy_type": "POLICY_HOTEL_PETS",
+    "name": "Pets",
+    "description": "Pets are not allowed.\n",
+    "child_allowed": "",
+    "pets_allowed": "",
+    "parking": ""
+   },
+   {
+    "id": 6308,
+    "policy_type": "POLICY_HOTEL_INTERNET",
+    "name": "Internet",
+    "description": "WiFi is available in the hotel rooms and is free of charge.\n",
+    "child_allowed": "",
+    "pets_allowed": "",
+    "parking": ""
+   },
+   {
+    "id": 8910,
+    "policy_type": "POLICY_CHILDREN",
+    "name": "Children and extra bed policy",
+    "description": "Children of any age are allowed.\nChildren up to and including 6 years old stay for free when using an available cot.\nChildren up to and including 6 years old stay for free when using an existing bed.\nChildren up to and including 6 years old stay for free when using an available extra bed.\nPeople 7 years old and over stay for \u20ac\u00a035 per person per night when using an available extra bed.\nAny type of extra bed or child's cot/crib is upon request and needs to be confirmed by management.\nSupplements are not calculated automatically in the total costs and will have to be paid for separately during your stay.",
+    "child_allowed": "",
+    "pets_allowed": "",
+    "parking": ""
+   }
+  ],
+  "rohId": 183641,
+  "sentiment_analysis": {
+   "cons": [
+    "Noise issues",
+    "Bad odors in room",
+    "Outdated room quality"
+   ],
+   "pros": [
+    "Great location",
+    "Helpful staff",
+    "Good breakfast"
+   ],
+   "categories": [
+    {
+     "name": "Cleanliness",
+     "rating": 7.55,
+     "description": "Positive sentiments about cleanliness were mentioned, but some reviews noted issues such as bad odors and a need for refurbishment."
+    },
+    {
+     "name": "Service",
+     "rating": 9.05,
+     "description": "Multiple reviews highlighted very good service and helpful staff."
+    },
+    {
+     "name": "Location",
+     "rating": 9.05,
+     "description": "Numerous mentions described the location as excellent and close to attractions."
+    },
+    {
+     "name": "Room Quality",
+     "rating": 7.55,
+     "description": "Some reviews indicated issues with room quality including noise and outdated furnishings."
+    },
+    {
+     "name": "Amenities",
+     "rating": 8.05,
+     "description": "Several amenities are appreciated but issues noted with gym facilities."
+    },
+    {
+     "name": "Value for Money",
+     "rating": 8.05,
+     "description": "Overall good value for location and service, but issues with room comfort were mentioned."
+    },
+    {
+     "name": "Food and Beverage",
+     "rating": 8.05,
+     "description": "Breakfast was praised, although some found it too rich."
+    },
+    {
+     "name": "Overall Experience",
+     "rating": 8.25,
+     "description": "Generally a positive experience, with some noted drawbacks."
+    }
+   ]
+  },
+  "sentiment_updated_at": "2026-01-09T04:18:19Z",
+  "deletedAt": null
+ }
+}

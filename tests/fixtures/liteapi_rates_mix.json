@@ -1,0 +1,358 @@
+{
+ "sandbox": true,
+ "data": [
+  {
+   "hotelId": "lp445b7",
+   "roomTypes": [
+    {
+     "roomTypeId": "GE4DCNZNGI3TSOJZGF6FERSOPQZDAMRWGA4DCOJRGAYDA7BZPRJDCMJVGB6DCMBXGY3DM",
+     "offerId": "3gAWonJzko-kc3JpZNoBGkdZWlRNWlJXTVEzRE1OVEdHNFpET05CU0dBM1RJTlpTR1k0VE9NQldNTTNESzdCUkVNWkRBTVJXR0E0REVNMzRHSVlERU5SUUhBWkRNN0RGTlpQVktVMzRLVkpYWVZLVElSNkRHUUpRSU1YVEVRSlFJTjZESU5KU0hGNkdTVURIS1ZFSFlNSlhIQVpUS05aUkdZM1RPTUJXR1pTSElSU1hFTVpET09KWkhFWVNHTUpZR0UzUzJNUlhIRTRUU01MNEtKREU0N0JTR0FaRE1NQllHRTRUQ01CUUdCNkRTN0NTR0VZVEtNRDRHRVlET05SV0dZUlZFVFpES0pERTRJWlNHQVpETUxKUUhBV1RDT0pBR0VZRFVNQlFFTaNwcmPLQIMsj1wo9cOlb3JfcHLLAAAAAAAAAAClb3JfY23LAAAAAAAAAACiY23LAAAAAAAAAACjcGNkszIwMjYtMDgtMjIgMTA6MDA6MDCjYnJkolJPpG1yaWTAo21ybsCjaGRwwKNmcm6go3Nybq5Db21mb3J0IFRyaXBsZaNvY24BpHBya3PAo2RldMsAAAAAAAAAAI-kc3JpZNoBN0c0WlRNWkJXR0UzR0dOVERHSVlETU5CV01ZM1RLTlJTR1pSVE1OSlNHQTNETU5aU0dZMlRNWkpXR00zRFFNUlFHWVpETU5KV0dSNkRFSVpTR0FaRE1NQllHSVpYWU1SUUdJM0RBT0JTR1o2R0szUzdLVkpYWVZLVFBSS1ZHUkQ0R05BVEFRWlBHSkFUQVEzNEdRMlRFT0w0TkZJR09WS0lQUVlUT09CVEdVM1RDTlJYRzRZRE1OVEVPUkRGT0laU0c0NFRTT0pSRU1ZVFFNSlhGVVpET09KWkhFWVhZVVNHSlo2REVNQlNHWVlEUU1KWkdFWURBTUQ0SEY2RkVNSlJHVVlIWU1KUUc0M0RNTlJES0pIU0dVU0dKWVJURU1CU0dZV1RBT0JOR0U0U0FNSlFISVlEQUlZo3ByY8tAfPFwo9cKPaVvcl9wcssAAAAAAAAAAKVvcl9jbcsAAAAAAAAAAKJjbcsAAAAAAAAAAKNwY2SzMjAyNi0wOC0yMiAxMDowMDowMKNicmSiUk-kbXJpZMCjbXJuwKNoZHDAo2ZybqCjc3Jut1NtYWxsIERvdWJsZSBGcmVuY2ggQmVko29jbgKkcHJrc8CjZGV0ywAAAAAAAAAApHNoaWSmMjc5OTkxo3NpZAKjaGlkp2xwNDQ1Yjejb2NjkoGhYQOBoWECo2N1cqNVU0SiZ26iVVOiY2mqMjAyNi0wOC0yM6Jjb6oyMDI2LTA4LTI2o2dpZKCiY3LLAAAAAAAAAACkc3NpZNkwc2Vzc2lvbl8wMTlmNDUyN2ZmN2NOUllFWHpDNU9YN3pVdWpncXN0YnplbllpZ255o2lzaMKjc3NwoKNpZm3CpWlmY2hywqNpZnLCpXNlYWlkp2xwNDQ1YjeibmuxbGl0ZWFwaW9uYm9hcmRpbmeidHiRhKFpwqFkqGNpdHkgdGF4oWHLQER-uFHrhR-hY6NVU0SibHDAo2JrdAM=",
+     "supplier": "nuitee",
+     "supplierId": 2,
+     "rates": [
+      {
+       "rateId": "I5MVUVCNLJJFOTKRGNCE2TSUI5DTIWSEJ5HEEU2HIEZVISKOLJJUOWJUKRHU2QSXJVGTGRCLG5BFERKNLJCECTKSK5DUCNCEIVGTGNCHJFMUIRKOKJIUQQK2IRGTORCGJZNFAVSLKUZTIS2WJJMFSVSLKREVENSEI5IUUUKJJVMFIRKRJJIUSTRWIREU4SSTJBDDMR2TKVCEQS2WIVEFSTKKLBEECWSUJNHFUUSHLEZVIT2NIJLUOWSTJBEVEU2YIVGVURCPJ5FFUSCFLFJUOTKKLFDUKM2TGJGVEWCIIU2FIU2NJQ2EWSSEIU2DOQSTI5AVURCNJVBFSR2FGRKEGTKCKFDUENSEKM3UGU2HIVMVIS2NIQ2EORKZIRHU4USXI5MVEVSFKRNEIS2KIRCTISK2KNDUCWSEJVGEUUKIIFLVIQ2PJJAUORKZIRKU2QSRIVGXYNRRGMXDKN34GIYDENRNGA4C2MRSEAYTAORQGA5DAMD4KJHXY7D4PRBW63LGN5ZHIICUOJUXA3DFPQYC4MBQPQYC4MBQPR6DALRQGB6DALRQGA",
+       "occupancyNumber": 1,
+       "name": "Comfort Triple",
+       "maxOccupancy": 3,
+       "adultCount": 3,
+       "childCount": 0,
+       "childrenAges": [],
+       "boardType": "RO",
+       "boardName": "Room Only",
+       "remarks": "C.I.N. IT058091A1BKURIB8A<br/>Half Board details: no lunch, only dinner. 3 courses, coffee and water included.<br/>5 rooms or more for the same dates will be considered as a group, and the hotel will have the right to reject it or to confirm them at different rates and conditions.Group reservations are considered to be those reservations or blocks made by the agency for 5 rooms or more, having the same or several locations/origin, with identical creation date or made on different dates and the dates of stay of the reservations coincide on several or all days. Therefore, in these situations, the hotel reserves the right not to accept these reservations, being necessary to confirm the price and availability of these rooms expressly by the hotel and after the quotation of availability and prices through the group department.<br/>Tourist City taxes and Resort Fees to be paid on the spot, if any / Tasse di soggiorno da pagarsi in loco, se previste.<br/>Note that some hotels may require cash or credit card deposit as guarantee. This will be returned on departure minus any deduction incurred during the stay.<br/>C.I.N. IT058091A1BKURIB8A<br/>Half Board details: no lunch, only dinner. 3 courses, coffee and water included.<br/>5 rooms or more for the same dates will be considered as a group, and the hotel will have the right to reject it or to confirm them at different rates and conditions.Group reservations are considered to be those reservations or blocks made by the agency for 5 rooms or more, having the same or several locations/origin, with identical creation date or made on different dates and the dates of stay of the reservations coincide on several or all days. Therefore, in these situations, the hotel reserves the right not to accept these reservations, being necessary to confirm the price and availability of these rooms expressly by the hotel and after the quotation of availability and prices through the group department.<br/>Tourist City taxes and Resort Fees to be paid on the spot, if any / Tasse di soggiorno da pagarsi in loco, se previste.<br/>Note that some hotels may require cash or credit card deposit as guarantee. This will be returned on departure minus any deduction incurred during the stay.<br/>",
+       "priceType": "commission",
+       "commission": [
+        {
+         "amount": 0,
+         "currency": "USD"
+        }
+       ],
+       "retailRate": {
+        "total": [
+         {
+          "amount": 613.57,
+          "currency": "USD"
+         }
+        ],
+        "suggestedSellingPrice": [
+         {
+          "amount": 705.6060698827858,
+          "currency": "USD",
+          "source": ""
+         }
+        ],
+        "initialPrice": [
+         {
+          "amount": 613.57,
+          "currency": "USD"
+         }
+        ],
+        "taxesAndFees": [
+         {
+          "included": false,
+          "description": "city tax",
+          "amount": 40.99,
+          "currency": "USD"
+         }
+        ]
+       },
+       "cancellationPolicies": {
+        "cancelPolicyInfos": [
+         {
+          "cancelTime": "2026-08-19 10:00:00",
+          "amount": 358.88,
+          "currency": "USD",
+          "type": "amount",
+          "timezone": "GMT"
+         },
+         {
+          "cancelTime": "2026-08-22 10:00:00",
+          "amount": 613.57,
+          "currency": "USD",
+          "type": "amount",
+          "timezone": "GMT"
+         }
+        ],
+        "hotelRemarks": [],
+        "refundableTag": "RFN"
+       },
+       "paymentTypes": [
+        "NUITEE_PAY"
+       ],
+       "providerCommission": {
+        "amount": 0,
+        "currency": ""
+       },
+       "perks": [],
+       "promotions": null
+      },
+      {
+       "rateId": "I42FUVCNLJBFOR2FGNDUOTSUIRDUSWKEJVHEEV2NLEZVIS2OKJJUOWSSKRGU4SSTI5ATGRCNJZNFGR2ZGJKE2WSKK5DU2M2EKFGVEUKHLFNEITKOJJLUOURWIRCUSWSTI5AVURCNJVBFSR2JLJMFSTKSKFDUSM2EIFHUEU2HLI3EOSZTKM3UWVSKLBMVMS2UKBJEWVSHKJCDIR2OIFKECUK2KBDUUQKUIFITGNCHKEZFIRKPJQ2E4RSJI5HVMS2JKBIVSVCPJ5BFIR2VGNKEGTSSLBDTIWKEJVHFIRKPKJCEMT2JLJJUONBUKRJU6SSSIVGVSVCRJVFFQRSVLJCE6T2KLJEEKWKYLFKVGR2KLI3EIRKNIJJUOWKZIRIU2SS2I5CVSRCBJVCDISCGGZDEKTKKKJDVKWKILFGUUUKHGQZUITKOKJCEWSSIKNDVKU2HJJMVEVCFJVBFGR2ZK5KECT2CJZDUKNCTIFGUUUKIJFMUIQKJLF6DINRTFYYDS7BSGAZDMLJQHAWTEMRAGEYDUMBQHIYDA7CSJ56HY7D4KNWWC3DMEBCG65LCNRSSARTSMVXGG2BAIJSWI7BQFYYDA7BQFYYDA7D4GAXDAMD4GAXDAMA",
+       "occupancyNumber": 2,
+       "name": "Small Double French Bed",
+       "maxOccupancy": 2,
+       "adultCount": 2,
+       "childCount": 0,
+       "childrenAges": [],
+       "boardType": "RO",
+       "boardName": "Room Only",
+       "remarks": "C.I.N. IT058091A1BKURIB8A<br/>Half Board details: no lunch, only dinner. 3 courses, coffee and water included.<br/>5 rooms or more for the same dates will be considered as a group, and the hotel will have the right to reject it or to confirm them at different rates and conditions.Group reservations are considered to be those reservations or blocks made by the agency for 5 rooms or more, having the same or several locations/origin, with identical creation date or made on different dates and the dates of stay of the reservations coincide on several or all days. Therefore, in these situations, the hotel reserves the right not to accept these reservations, being necessary to confirm the price and availability of these rooms expressly by the hotel and after the quotation of availability and prices through the group department.<br/>Tourist City taxes and Resort Fees to be paid on the spot, if any / Tasse di soggiorno da pagarsi in loco, se previste.<br/>Note that some hotels may require cash or credit card deposit as guarantee. This will be returned on departure minus any deduction incurred during the stay.<br/>C.I.N. IT058091A1BKURIB8A<br/>Half Board details: no lunch, only dinner. 3 courses, coffee and water included.<br/>5 rooms or more for the same dates will be considered as a group, and the hotel will have the right to reject it or to confirm them at different rates and conditions.Group reservations are considered to be those reservations or blocks made by the agency for 5 rooms or more, having the same or several locations/origin, with identical creation date or made on different dates and the dates of stay of the reservations coincide on several or all days. Therefore, in these situations, the hotel reserves the right not to accept these reservations, being necessary to confirm the price and availability of these rooms expressly by the hotel and after the quotation of availability and prices through the group department.<br/>Tourist City taxes and Resort Fees to be paid on the spot, if any / Tasse di soggiorno da pagarsi in loco, se previste.<br/>Note that some hotels may require cash or credit card deposit as guarantee. This will be returned on departure minus any deduction incurred during the stay.<br/>",
+       "priceType": "commission",
+       "commission": [
+        {
+         "amount": 0,
+         "currency": "USD"
+        }
+       ],
+       "retailRate": {
+        "total": [
+         {
+          "amount": 463.09,
+          "currency": "USD"
+         }
+        ],
+        "suggestedSellingPrice": [
+         {
+          "amount": 532.5539301172143,
+          "currency": "USD",
+          "source": ""
+         }
+        ],
+        "initialPrice": [
+         {
+          "amount": 463.09,
+          "currency": "USD"
+         }
+        ],
+        "taxesAndFees": [
+         {
+          "included": false,
+          "description": "city tax",
+          "amount": 30.93,
+          "currency": "USD"
+         }
+        ]
+       },
+       "cancellationPolicies": {
+        "cancelPolicyInfos": [
+         {
+          "cancelTime": "2026-08-19 10:00:00",
+          "amount": 358.88,
+          "currency": "USD",
+          "type": "amount",
+          "timezone": "GMT"
+         },
+         {
+          "cancelTime": "2026-08-22 10:00:00",
+          "amount": 463.09,
+          "currency": "USD",
+          "type": "amount",
+          "timezone": "GMT"
+         }
+        ],
+        "hotelRemarks": [],
+        "refundableTag": "RFN"
+       },
+       "paymentTypes": [
+        "NUITEE_PAY"
+       ],
+       "providerCommission": {
+        "amount": 0,
+        "currency": ""
+       },
+       "perks": [],
+       "promotions": null
+      }
+     ],
+     "offerRetailRate": {
+      "amount": 1076.66,
+      "currency": "USD"
+     },
+     "suggestedSellingPrice": {
+      "amount": 1238.16,
+      "currency": "USD",
+      "source": ""
+     },
+     "offerInitialPrice": {
+      "amount": 1076.66,
+      "currency": "USD"
+     },
+     "priceType": "commission",
+     "rateType": "standard",
+     "paymentTypes": [
+      "NUITEE_PAY"
+     ]
+    },
+    {
+     "roomTypeId": "GEZDENBNGI3TSOJZGF6FERSOPQZDAMRWGA4DEMBRGAYDA7BRPRJDCMJVGB6DCMBYHAYTE",
+     "offerId": "3gAWonJzko-kc3JpZNoBGkc0MkRPTVJXSEUzVEFOVERHWTJURU1CV0dNM0dNTlRFR1kzRE1aUlhHSTNUSTdCUkVNWkRBTVJXR0E0REVNMzRHSVlERU5SUUhBWkRNN0RGTlpQVktVMzRLVkpYWVZLVElSNkRHUUpRSU1YVEVRSlFJTjZESU5KU0hGNkdTVURIS1ZFSFlNSlhIQVpUS05aUkdZM1RPTUJXR1pTSElSU1hFTVpET09KWkhFWVNHTUpTR0kyQzJNUlhIRTRUU01MNEtKREU0N0JTR0FaRE1NQllHSVlEQ01CUUdCNkRDN0NTR0VZVEtNRDRHRVlEUU9CUkdJUlZFVFpES0pERTRJWlNHQVpETUxKUUhBV1RFTUJBR0VZRFVNQlFFTaNwcmPLQIEAZmZmZmalb3JfcHLLAAAAAAAAAAClb3JfY23Lv4R64UeuFHuiY23Lv4R64UeuFHujcGNkszIwMjYtMDgtMjAgMTA6MDA6MDCjYnJkolJPpG1yaWTAo21ybsCjaGRwwKNmcm6go3Nybq5UUklQTEUgQ09NRk9SVKNvY24BpHBya3PAo2RldMsAAAAAAAAAAI-kc3JpZNoBOkdZMkRNWlJYR1UzREVOVERHWTJURVpSWEdRM1RPTlJaR1pTVEVNQldHTTNHTU5URUdZM0RNWlJYR0kzVElNUlFHNFpETVpSV01ZM0dJN0JTRU1aREFNUldHQTRERU0zNEdJWURFTlJRSEFaRE03REZOWlBWS1UzNEtWSlhZVktUSVI2REdRSlFJTVhURVFKUUlONkRJTkpTSEY2R1NVREhLVkVIWU1KWEhBWlRLTlpSR1kzVE9NQldHWlNISVJTWEVNWkRPT0paSEVZU0dNSlNHSTJDMk1SWEhFNFRTTUw0S0pERTQ3QlNHQVpETU1CWUdJWURDTUJRR0I2REM3Q1NHRVlUS01ENEdFWURRT0JSR0lSVkVUWkRLSkRFNElaU0dBWkRNTEpRSEFXVEVNQkFHRVlEVU1CUUVNo3ByY8tAgQBmZmZmZqVvcl9wcssAAAAAAAAAAKVvcl9jbcu_hHrhR64Ue6Jjbcu_hHrhR64Ue6NwY2SzMjAyNi0wOC0yMCAxMDowMDowMKNicmSiUk-kbXJpZMCjbXJuwKNoZHDAo2ZybqCjc3JuuERPVUJMRS9UV0lOIENPTUZPUlQgUk9PTaNvY24CpHBya3PAo2RldMsAAAAAAAAAAKRzaGlkpjI3OTk5MaNzaWQCo2hpZKdscDQ0NWI3o29jY5KBoWEDgaFhAqNjdXKjVVNEomduolVTomNpqjIwMjYtMDgtMjOiY2-qMjAyNi0wOC0yNqNnaWSgomNyywAAAAAAAAAApHNzaWTZMHNlc3Npb25fMDE5ZjQ1MjdmZjdjTlJZRVh6QzVPWDd6VXVqZ3FzdGJ6ZW5ZaWdueaNpc2jCo3NzcKCjaWZtwqVpZmNocsKjaWZywqVzZWFpZKdscDQ0NWI3om5rsWxpdGVhcGlvbmJvYXJkaW5nonR4kYShacKhZKhjaXR5IHRheKFhy0BCK4UeuFHsoWOjVVNEomxwwKNia3QD",
+     "supplier": "nuitee",
+     "supplierId": 2,
+     "rates": [
+      {
+       "rateId": "I42DERCPJVJFOSCFGNKECTSUIRDVSMSUIVGUEV2HJUZUOTKOKRCUOWJTIRGVUUSYI5ETGVCJG5BFERKNLJCECTKSK5DUCNCEIVGTGNCHJFMUIRKOKJIUQQK2IRGTORCGJZNFAVSLKUZTIS2WJJMFSVSLKREVENSEI5IUUUKJJVMFIRKRJJIUSTRWIREU4SSTJBDDMR2TKVCEQS2WIVEFSTKKLBEECWSUJNHFUUSHLEZVIT2NIJLUOWSTJBEVEU2YIVGVURCPJ5FFUSCFLFJUOTKKKNDUSMSDGJGVEWCIIU2FIU2NJQ2EWSSEIU2DOQSTI5AVURCNJVBFSR2JLFCEGTKCKFDUENSEIM3UGU2HIVMVIS2NIQ2EORKZIRIU6QSSI5EVEVSFKRNEIS2KIRCTISK2KNDUCWSEJVGEUUKIIFLVIRKNIJAUORKZIRKU2QSRIVGXYNJUGQXDANL4GIYDENRNGA4C2MRQEAYTAORQGA5DAMD4KJHXY7D4PRKFESKQJRCSAQ2PJVDE6USUPQYC4MBQPQWTALRQGF6HYLJQFYYDC7BQFYYDA",
+       "occupancyNumber": 1,
+       "name": "TRIPLE COMFORT",
+       "maxOccupancy": 3,
+       "adultCount": 3,
+       "childCount": 0,
+       "childrenAges": [],
+       "boardType": "RO",
+       "boardName": "Room Only",
+       "remarks": "",
+       "priceType": "commission",
+       "commission": [
+        {
+         "amount": -0.01,
+         "currency": "USD"
+        }
+       ],
+       "retailRate": {
+        "total": [
+         {
+          "amount": 544.05,
+          "currency": "USD"
+         }
+        ],
+        "suggestedSellingPrice": [
+         {
+          "amount": 625.67,
+          "currency": "USD",
+          "source": ""
+         }
+        ],
+        "initialPrice": [
+         {
+          "amount": 544.05,
+          "currency": "USD"
+         }
+        ],
+        "taxesAndFees": [
+         {
+          "included": false,
+          "description": "city tax",
+          "amount": 36.34,
+          "currency": "USD"
+         }
+        ]
+       },
+       "cancellationPolicies": {
+        "cancelPolicyInfos": [
+         {
+          "cancelTime": "2026-08-20 10:00:00",
+          "amount": 362.71,
+          "currency": "USD",
+          "type": "amount",
+          "timezone": "GMT"
+         }
+        ],
+        "hotelRemarks": [],
+        "refundableTag": "RFN"
+       },
+       "paymentTypes": [
+        "NUITEE_PAY"
+       ],
+       "providerCommission": {
+        "amount": 0,
+        "currency": ""
+       },
+       "perks": [],
+       "promotions": null
+      },
+      {
+       "rateId": "I5MTERCNLJJFQR2VGNCEKTSUIRDVSMSUIVNFEWCHKEZVIT2OKJNEOWSTKRCU2QSXI5GTGR2NJZKEKR2ZGNCE2WSSLBDUSM2UJFGVEUKHGRNEITK2KJLU2WJTI5ETOQSTIVGVURCBJVJFOR2BGRCEKTJTGRDUSWKEIVHFEUKIIFNEITJXIRDE4WSQKZFVKMZUJNLEUWCZKZFVISKSGZCEOUKKKFEU2WCUIVIUUUKJJY3EISKOJJJUQRRWI5JVKRCIJNLEKSCZJVFFQSCBLJKEWTS2KJDVSM2UJ5GUEV2HLJJUQSKSKNMEKTK2IRHU6SS2JBCVSU2HJVFFGR2JGJBTETKSLBEEKNCUKNGUYNCLJJCEKNBXIJJUOQK2IRGU2QSZI5EVSRCDJVBFCR2CGZCEGN2DKNDUKWKUJNGUINCHIVMUIUKPIJJEOSKSKZCVIWSEJNFEIRJUJFNFGR2BLJCE2TCKKFEECV2UIVGUEQKHIVMUIVKNIJIUKTL4GU2DILRQGV6DEMBSGYWTAOBNGIYCAMJQHIYDAORQGB6FET34PR6HYRCPKVBEYRJPKRLUSTRAINHU2RSPKJKCAUSPJ5GXYMBOGAYHYLJQFYYDC7D4FUYC4MBRPQYC4MBQ",
+       "occupancyNumber": 2,
+       "name": "DOUBLE/TWIN COMFORT ROOM",
+       "maxOccupancy": 2,
+       "adultCount": 2,
+       "childCount": 0,
+       "childrenAges": [],
+       "boardType": "RO",
+       "boardName": "Room Only",
+       "remarks": "",
+       "priceType": "commission",
+       "commission": [
+        {
+         "amount": -0.01,
+         "currency": "USD"
+        }
+       ],
+       "retailRate": {
+        "total": [
+         {
+          "amount": 544.05,
+          "currency": "USD"
+         }
+        ],
+        "suggestedSellingPrice": [
+         {
+          "amount": 625.67,
+          "currency": "USD",
+          "source": ""
+         }
+        ],
+        "initialPrice": [
+         {
+          "amount": 544.05,
+          "currency": "USD"
+         }
+        ],
+        "taxesAndFees": [
+         {
+          "included": false,
+          "description": "city tax",
+          "amount": 36.34,
+          "currency": "USD"
+         }
+        ]
+       },
+       "cancellationPolicies": {
+        "cancelPolicyInfos": [
+         {
+          "cancelTime": "2026-08-20 10:00:00",
+          "amount": 362.71,
+          "currency": "USD",
+          "type": "amount",
+          "timezone": "GMT"
+         }
+        ],
+        "hotelRemarks": [],
+        "refundableTag": "RFN"
+       },
+       "paymentTypes": [
+        "NUITEE_PAY"
+       ],
+       "providerCommission": {
+        "amount": 0,
+        "currency": ""
+       },
+       "perks": [],
+       "promotions": null
+      }
+     ],
+     "offerRetailRate": {
+      "amount": 1088.09,
+      "currency": "USD"
+     },
+     "suggestedSellingPrice": {
+      "amount": 1251.33,
+      "currency": "USD",
+      "source": ""
+     },
+     "offerInitialPrice": {
+      "amount": 1088.09,
+      "currency": "USD"
+     },
+     "priceType": "commission",
+     "rateType": "package",
+     "paymentTypes": [
+      "NUITEE_PAY"
+     ]
+    }
+   ],
+   "et": 10800
+  }
+ ],
+ "guestLevel": 0
+}
