@@ -34,15 +34,21 @@ lacks the `Disc`/`PALETTE_CYCLE` exports this board needs).
 
 ## Phase 1 — Foundation: pure and safe
 
-- [ ] **Task 2 — The pure solver** (M) · `backend/services/rooming_service.py`, `tests/test_rooming.py`
-  - [ ] `stay_key`, `expand_mix`, `mutual_pairs`, `enumerate_mixes`, `propose_assignments`
-  - [ ] N=10 over `[2,3,4]` yields `5×double` and `2×triple + 2×double`, correctly ranked
-  - [ ] 100 runs of identical input ⇒ byte-identical output
-  - [ ] A mutual pair is co-located in every scenario
-  - [ ] One-way prefs honored when a bed is free, dropped when not
-  - [ ] An oversized mutual component lands in `conflicts`, never split
-  - [ ] ⛳ **Freezes the `plan.rooming` JSON shape**
-  - Verify: `.venv/bin/python tests/test_rooming.py`
+- [x] **Task 2 — The pure solver** (M) · `backend/services/rooming_service.py`, `tests/test_rooming.py`
+  - [x] `stay_key`, `expand_mix`, `mutual_pairs`, `enumerate_mixes`, `propose_assignments`
+  - [x] N=10 over `[2,3,4]` yields `5×double` and `2×triple + 2×double`, correctly ranked
+  - [x] 100 runs of identical input ⇒ byte-identical output
+  - [x] A mutual pair is co-located in every scenario
+  - [x] One-way prefs honored when a bed is free, dropped when not
+  - [x] An oversized mutual component lands in `conflicts`, never split
+  - [x] ⛳ **Freezes the `plan.rooming` JSON shape** — `assignments` is `propose_assignments()["rooms"]`
+  - Verify: `.venv/bin/python tests/test_rooming.py` → **63 checks green**
+
+  **Found while building:** a mutual group can also fail to seat when it *fits a room in
+  principle* but earlier groups took the space — two trios cannot both sit in a quad + a double.
+  Best-fit placement handles the solvable version (quad + triple); the unsolvable one now raises
+  a third conflict kind, `group_unplaceable`, instead of crashing on `min()` of an empty list.
+  Enumeration timing, worst realistic case: 53 ms at N=40 over 10 distinct capacities.
 
 - [ ] **Task 3 — Harden the LLM revision path** (S) · `backend/services/ai_service.py`, `tests/test_plan_revision.py`
   - [ ] `_detach_heavy` pops `plan["rooming"]` wholesale — the model never sees roommate user-ids
