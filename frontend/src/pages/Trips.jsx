@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Check, CheckCircle2, Compass, LogOut, MapPin, Plus, Ticket, Trash2, Crown, Users } from 'lucide-react';
+import { ArrowRight, Check, CheckCircle2, Compass, LogOut, MapPin, Plus, Search, Ticket, Trash2, Crown, Users, X } from 'lucide-react';
 import { api } from '../api/index.js';
 import { Page, Field, Loading, ErrorText, CityInput, Disc, Pill, PALETTE, PALETTE_CYCLE } from '../ui.jsx';
 
@@ -114,6 +114,15 @@ export default function Trips() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirmId, setConfirmId] = useState(null);
+  const [query, setQuery] = useState('');
+
+  // One search across every trip, whatever its stage — sections keep their
+  // labels and each shows its share of the matches.
+  const q = query.trim().toLowerCase();
+  const matchesQuery = t =>
+    !q ||
+    t.name.toLowerCase().includes(q) ||
+    (t.selected_destination || '').toLowerCase().includes(q);
 
   useEffect(() => {
     api.myTrips()
@@ -181,15 +190,38 @@ export default function Trips() {
 
       {trips.length > 0 && (
         <div style={{ marginBottom: 56 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 34, maxWidth: 420 }}>
+            <Search size={16} strokeWidth={2} color="var(--muted)" style={{ flexShrink: 0 }} />
+            <input
+              placeholder="Search your trips…"
+              aria-label="Search your trips"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+            />
+            {query && (
+              <button type="button" aria-label="Clear search" title="Clear search"
+                      onClick={() => setQuery('')}
+                      style={{ color: 'var(--muted)', padding: 4, flexShrink: 0, display: 'inline-flex' }}>
+                <X size={15} strokeWidth={2.2} />
+              </button>
+            )}
+          </div>
           {[
             { key: 'planning', label: 'Organization in progress', Icon: Compass, list: trips.filter(t => t.status !== 'booked') },
             { key: 'confirmed', label: 'Confirmed', Icon: CheckCircle2, list: trips.filter(t => t.status === 'booked') },
-          ].filter(section => section.list.length > 0).map(section => (
+          ].filter(section => section.list.length > 0).map(section => {
+            const shown = section.list.filter(matchesQuery);
+            return (
             <div key={section.key} style={{ marginBottom: 40 }}>
               <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <section.Icon size={13} strokeWidth={2.5} /> {section.label} · {section.list.length}
+                <section.Icon size={13} strokeWidth={2.5} /> {section.label} · {shown.length}
               </p>
-              {section.list.map((t, i) => (
+              {shown.length === 0 && (
+                <p className="muted" style={{ fontSize: 13.5, marginTop: 10 }}>
+                  No trips here match “{query.trim()}”.
+                </p>
+              )}
+              {shown.map((t, i) => (
                 <motion.div
                   key={t.id}
                   initial={{ opacity: 0, y: 10 }}
@@ -257,7 +289,8 @@ export default function Trips() {
                 </motion.div>
               ))}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

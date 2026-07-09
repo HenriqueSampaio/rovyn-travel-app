@@ -1026,6 +1026,18 @@ def toggle_star(trip_id: str, req: StarRequest, user: dict = Depends(get_current
         options = json.loads(trip["options"])
         if req.option_id not in _valid_option_ids(options, req.category):
             raise HTTPException(status_code=400, detail="That option doesn't exist in this category.")
+        # "Lock in my picks" means locked: no starring OR unstarring until the
+        # traveler explicitly changes their mind (which resets the status).
+        locked = conn.execute(
+            """SELECT 1 FROM category_progress
+               WHERE trip_id = ? AND user_id = ? AND category = ? AND status = 'done'""",
+            (trip_id, user["id"], req.category),
+        ).fetchone()
+        if locked:
+            raise HTTPException(
+                status_code=409,
+                detail="You've locked in your picks for this section — tap “Change my mind” first.",
+            )
         if req.starred:
             conn.execute(
                 "INSERT INTO stars (trip_id, user_id, category, option_id) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",

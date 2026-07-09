@@ -365,14 +365,18 @@ def stay_media_for_options(stays: list[dict], destination: str) -> dict:
         photos, reviews, rating10, count = [], [], None, None
         hotel_id = opt.get("liteapi_hotel_id")
         if hotel_id and liteapi_available():
-            try:
-                photos, rating10, count = _liteapi_gallery(hotel_id)
-            except Exception:
-                pass
-            try:
-                reviews = _liteapi_reviews(hotel_id)
-            except Exception:
-                pass
+            # Gallery and reviews are independent LiteAPI calls — overlap them
+            with ThreadPoolExecutor(max_workers=2) as inner:
+                gallery_f = inner.submit(_liteapi_gallery, hotel_id)
+                reviews_f = inner.submit(_liteapi_reviews, hotel_id)
+                try:
+                    photos, rating10, count = gallery_f.result()
+                except Exception:
+                    pass
+                try:
+                    reviews = reviews_f.result()
+                except Exception:
+                    pass
         if not reviews:
             # Multi-city stays carry their own city — search reviews there
             google = _google_place_reviews(opt.get("name", ""), opt.get("city") or destination)
