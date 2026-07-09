@@ -3,29 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight, Check, CheckCircle2, Compass, LogOut, MapPin, Plus, Search, Ticket, Trash2, Crown, Users, X } from 'lucide-react';
 import { api } from '../api/index.js';
-import { Page, Field, Loading, ErrorText, CityInput } from '../ui.jsx';
-
-/* The three accents trip rows and status pills draw from — solid for text,
-   tint for fills. `sun` is defined in index.css alongside pine and clay. */
-const PALETTE = {
-  pine: { solid: 'var(--pine)', tint: 'rgba(46, 93, 79, 0.11)' },
-  clay: { solid: 'var(--clay)', tint: 'rgba(190, 107, 63, 0.13)' },
-  sun: { solid: 'var(--sun)', tint: 'rgba(169, 128, 43, 0.15)' },
-};
-const DISC_CYCLE = ['pine', 'clay', 'sun'];
-
-function Pill({ color, children }) {
-  const c = PALETTE[color] || PALETTE.pine;
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 5,
-      padding: '3px 11px', borderRadius: 999, whiteSpace: 'nowrap',
-      fontSize: 12, fontWeight: 700, background: c.tint, color: c.solid,
-    }}>
-      {children}
-    </span>
-  );
-}
+import { Page, Field, Loading, ErrorText, CityInput, Disc, Pill, PALETTE, PALETTE_CYCLE } from '../ui.jsx';
 
 function Countdown({ dates }) {
   if (!dates?.start) return null;
@@ -243,9 +221,7 @@ export default function Trips() {
                   No trips here match “{query.trim()}”.
                 </p>
               )}
-              {shown.map((t, i) => {
-                const disc = PALETTE[DISC_CYCLE[i % DISC_CYCLE.length]];
-                return (
+              {shown.map((t, i) => (
                 <motion.div
                   key={t.id}
                   initial={{ opacity: 0, y: 10 }}
@@ -261,13 +237,7 @@ export default function Trips() {
                       style={{ width: 44, height: 44, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
                     />
                   ) : (
-                    <span className="serif" aria-hidden="true" style={{
-                      width: 44, height: 44, borderRadius: '50%', flexShrink: 0,
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      background: disc.tint, color: disc.solid, fontSize: 20,
-                    }}>
-                      {(t.name.trim()[0] || '·').toUpperCase()}
-                    </span>
+                    <Disc label={t.name} color={PALETTE_CYCLE[i % PALETTE_CYCLE.length]} size={44} />
                   )}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: '0 12px', flexWrap: 'wrap' }}>
@@ -317,8 +287,7 @@ export default function Trips() {
                   )}
                   <ArrowRight size={18} color="var(--pine)" />
                 </motion.div>
-                );
-              })}
+              ))}
             </div>
             );
           })}

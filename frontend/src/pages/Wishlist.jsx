@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowRight, Bookmark, CalendarDays, MapPin, Trash2 } from 'lucide-react';
 import { api } from '../api/index.js';
-import { Page, Loading, ErrorText } from '../ui.jsx';
+import { Page, Loading, ErrorText, Disc, PALETTE_CYCLE } from '../ui.jsx';
 import { timeAgo } from './Feed.jsx';
 
 /* At-a-glance itinerary: one dot per day on a connected line, with the
@@ -74,7 +74,9 @@ export default function Wishlist() {
   return (
     <Page width={560}>
       <p className="eyebrow">Your wishlist</p>
-      <h1 style={{ fontSize: 38, margin: '10px 0 8px' }}>Trips for someday</h1>
+      <h1 style={{ fontSize: 38, margin: '10px 0 8px' }}>
+        Trips for <em style={{ color: 'var(--clay)' }}>someday</em>
+      </h1>
       <p className="muted" style={{ fontSize: 14.5, marginBottom: 48 }}>
         Itineraries you saved from the feed. When the time is right, open one and
         copy it onto your own dates.
@@ -110,6 +112,8 @@ export default function Wishlist() {
               style={{ cursor: 'pointer' }}
               onClick={() => navigate(`/wishlist/${item.id}/trip`)}
             >
+              <Disc label={item.destination || item.author_name} color={PALETTE_CYCLE[i % PALETTE_CYCLE.length]} size={44}
+                    style={{ alignSelf: 'flex-start', marginTop: 4 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="opt-title serif" style={{ fontSize: 22 }}>
                   {item.destination || 'A trip worth keeping'}

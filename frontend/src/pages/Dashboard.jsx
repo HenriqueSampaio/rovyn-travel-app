@@ -5,7 +5,7 @@ import {
   ArrowRight, Check, ClipboardList, Copy, Crown, Link2, MapPin, Sparkles, Users,
 } from 'lucide-react';
 import { api } from '../api/index.js';
-import { Page, Loading, ErrorText, JourneyTracker, ThinkingLoader, TripAvatar } from '../ui.jsx';
+import { Page, Loading, ErrorText, JourneyTracker, ThinkingLoader, TripAvatar, Disc, Pill, PALETTE_CYCLE } from '../ui.jsx';
 
 /* Sends each trip status to the page that owns that phase. */
 export function phaseRoute(trip, tripId) {
@@ -115,16 +115,15 @@ export default function Dashboard() {
         <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <Users size={13} strokeWidth={2.5} /> Travelers
         </p>
-        {trip.members.map(m => (
+        {trip.members.map((m, i) => (
           <div key={m.user_id} className="opt-row" style={{ cursor: 'default' }}>
+            <Disc label={m.name} color={PALETTE_CYCLE[i % PALETTE_CYCLE.length]} size={38} />
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10 }}>
               <span className="opt-title">{m.name}</span>
-              {m.is_leader && <Crown size={14} color="var(--clay)" />}
+              {m.is_leader && <Crown size={14} color="var(--sun)" />}
             </div>
             {m.submitted ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--pine)', fontSize: 14, fontWeight: 600 }}>
-                <Check size={15} strokeWidth={2.5} /> Preferences in
-              </span>
+              <Pill color="pine"><Check size={13} strokeWidth={2.8} /> Preferences in</Pill>
             ) : (
               <span className="muted" style={{ fontSize: 14, fontStyle: 'italic' }}>waiting…</span>
             )}

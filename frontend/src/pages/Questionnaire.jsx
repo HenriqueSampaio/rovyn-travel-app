@@ -575,7 +575,7 @@ export default function Questionnaire() {
     <Page>
       {/* progress */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginBottom: 56 }}>
-        <span className="serif" style={{ fontSize: 15, fontStyle: 'italic', color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+        <span className="serif" style={{ fontSize: 15, fontStyle: 'italic', color: 'var(--clay)', whiteSpace: 'nowrap' }}>
           {step} of {TOTAL}
         </span>
         <div style={{ flex: 1, height: 1, background: 'var(--line-soft)' }}>

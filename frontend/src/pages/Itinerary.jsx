@@ -5,7 +5,7 @@ import {
   BedDouble, Lightbulb, MoonStar, PlaneTakeoff, Star, Sun, Sunset, Ticket, Wallet,
 } from 'lucide-react';
 import { api } from '../api/index.js';
-import { Page, Loading, HorizonArt } from '../ui.jsx';
+import { Page, Loading, HorizonArt, Pill } from '../ui.jsx';
 
 const PERIODS = [
   { key: 'morning', label: 'Morning', Icon: Sun },
@@ -39,9 +39,9 @@ function Day({ day, index }) {
                 <p style={{ fontWeight: 600, fontSize: 15.5 }}>
                   {act.activity}
                   {act.bookable && (
-                    <span style={{ marginLeft: 10, fontSize: 12, color: 'var(--clay)', fontWeight: 700, letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
+                    <Pill color="sun" style={{ marginLeft: 10, fontSize: 10.5, letterSpacing: '0.06em', verticalAlign: 2 }}>
                       BOOK AHEAD
-                    </span>
+                    </Pill>
                   )}
                 </p>
                 {act.description && <p className="muted" style={{ fontSize: 14 }}>{act.description}</p>}

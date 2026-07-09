@@ -5,7 +5,11 @@ import {
   Bookmark, ChevronLeft, ChevronRight, Heart, Map, MessageCircle, Plus, Send, Sparkles, Trash2,
 } from 'lucide-react';
 import { api } from '../api/index.js';
-import { Page, Loading, ErrorText } from '../ui.jsx';
+import { Page, Loading, ErrorText, Disc, Pill, PALETTE_CYCLE } from '../ui.jsx';
+
+/* Stable accent per author — the same person gets the same disc color everywhere */
+const authorColor = name =>
+  PALETTE_CYCLE[((name || '').charCodeAt(0) || 0) % PALETTE_CYCLE.length];
 
 const VIBE_LABEL = {
   culture: 'Culture & history', nightlife: 'Nightlife & parties', nature: 'Nature',
@@ -203,7 +207,8 @@ function PostCard({ post, onDelete }) {
       transition={{ duration: 0.4 }}
       style={{ marginBottom: 56 }}
     >
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+        <Disc label={post.author_name} color={authorColor(post.author_name)} size={34} />
         <span className="serif" style={{ fontSize: 18, fontWeight: 600 }}>{post.author_name}</span>
         {post.destination && (
           <span className="muted" style={{ fontSize: 13.5 }}>· {post.destination}</span>
@@ -287,16 +292,23 @@ export default function Feed() {
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 8 }}>
         <div>
           <p className="eyebrow">The feed</p>
-          <h1 style={{ fontSize: 38, margin: '10px 0 0' }}>Trips worth stealing</h1>
+          <h1 style={{ fontSize: 38, margin: '10px 0 0' }}>
+            Trips worth <em style={{ color: 'var(--clay)' }}>stealing</em>
+          </h1>
         </div>
         <button className="btn" onClick={() => navigate('/feed/new')}>
           <Plus size={16} /> Share
         </button>
       </div>
       {meta.personalized && meta.top_vibes.length > 0 && (
-        <p className="muted" style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 7, marginBottom: 40 }}>
+        <p className="muted" style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 40 }}>
           <Sparkles size={14} color="var(--clay)" />
-          Tuned to your taste: {meta.top_vibes.map(v => VIBE_LABEL[v] || v).join(', ').toLowerCase()}
+          Tuned to your taste:
+          {meta.top_vibes.map((v, i) => (
+            <Pill key={v} color={PALETTE_CYCLE[i % PALETTE_CYCLE.length]}>
+              {(VIBE_LABEL[v] || v).toLowerCase()}
+            </Pill>
+          ))}
         </p>
       )}
       {!meta.personalized && <div style={{ marginBottom: 40 }} />}

@@ -123,7 +123,7 @@ export default function Auth() {
             <Wordmark size={30} />
             <h1 style={{ fontSize: 44, margin: '36px 0 12px' }}>
               One trip,<br />
-              <em style={{ color: 'var(--pine)' }}>planned together.</em>
+              <em style={{ color: 'var(--clay)' }}>planned together.</em>
             </h1>
             <p className="muted" style={{ fontSize: 16.5, maxWidth: 380, marginBottom: 44 }}>
               Gather your people, share what you each want, and let Rovyn turn it

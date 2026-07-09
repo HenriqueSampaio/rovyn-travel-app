@@ -5,7 +5,7 @@ import {
   ArrowRight, BedDouble, Check, MapPin, PlaneTakeoff, Plus, Route, Sparkles, Ticket, Trophy, Vote as VoteIcon, X,
 } from 'lucide-react';
 import { api } from '../api/index.js';
-import { Page, Loading, ErrorText, Hero, ThinkingLoader, CityInput, TripAvatar } from '../ui.jsx';
+import { Page, Loading, ErrorText, Hero, ThinkingLoader, CityInput, TripAvatar, Pill } from '../ui.jsx';
 
 export default function Vote() {
   const navigate = useNavigate();
@@ -180,7 +180,7 @@ export default function Vote() {
             }}
           >
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 18, flexWrap: 'wrap' }}>
-              <span className="serif" style={{ fontSize: 15, fontStyle: 'italic', color: 'var(--muted)' }}>
+              <span className="serif" style={{ fontSize: 15, fontStyle: 'italic', color: 'var(--clay)' }}>
                 {String(i + 1).padStart(2, '0')}
               </span>
               <h2 style={{ fontSize: 34 }}>{dest.name}</h2>
@@ -294,9 +294,11 @@ export default function Vote() {
                 </button>
               ) : null}
               {!solo && (
-                <span className="muted" style={{ fontSize: 13, fontStyle: 'italic' }}>
-                  {votes} vote{votes === 1 ? '' : 's'}
-                </span>
+                votes > 0 ? (
+                  <Pill color="sun">{votes} vote{votes === 1 ? '' : 's'}</Pill>
+                ) : (
+                  <span className="muted" style={{ fontSize: 13, fontStyle: 'italic' }}>no votes yet</span>
+                )
               )}
             </div>
           </motion.article>

@@ -37,8 +37,8 @@ function FlightCard({ opt, starred, count, onStar, disabled, disabledTitle, budd
           {opt.live_price && (
             <span title="Real bookable flights with a live fare for your dates" style={{
               marginLeft: 10, fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em',
-              color: 'var(--pine)', border: '1px solid var(--pine)', borderRadius: 999,
-              padding: '2px 8px', verticalAlign: 2, whiteSpace: 'nowrap', display: 'inline-block',
+              color: 'var(--pine)', background: 'rgba(46, 93, 79, 0.11)', borderRadius: 999,
+              padding: '3px 9px', verticalAlign: 2, whiteSpace: 'nowrap', display: 'inline-block',
             }}>
               LIVE PRICE
             </span>
@@ -564,8 +564,8 @@ export default function Plan() {
             {route && opt.city && (
               <span style={{
                 marginLeft: 10, fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
-                color: 'var(--pine)', border: '1px solid var(--line)', borderRadius: 999,
-                padding: '2px 9px', verticalAlign: 2, whiteSpace: 'nowrap', display: 'inline-block',
+                color: 'var(--sun)', background: 'rgba(169, 128, 43, 0.15)', borderRadius: 999,
+                padding: '3px 10px', verticalAlign: 2, whiteSpace: 'nowrap', display: 'inline-block',
               }}>
                 {opt.city.split(',')[0].trim().toUpperCase()}
               </span>
