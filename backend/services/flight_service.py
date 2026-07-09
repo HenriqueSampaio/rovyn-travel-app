@@ -31,6 +31,13 @@ def flights_available() -> bool:
     return bool(os.environ.get("LITEAPI_API_KEY"))
 
 
+def flights_sandbox() -> bool:
+    """Sandbox keys serve TEST inventory — placeholder carriers ("Nuitee Air"
+    is LiteAPI's own house brand), not real airlines. Surfaced on the board so
+    the UI can say so instead of letting a made-up airline pass as real."""
+    return os.environ.get("LITEAPI_API_KEY", "").startswith("sand_")
+
+
 # ---------------------------------------------------------------------------
 # Airport resolution — free text ("New York", "Split, Croatia") -> IATA
 # ---------------------------------------------------------------------------
@@ -276,7 +283,9 @@ def _option_from(role: str, out_cand: dict, back_cand: dict | None = None,
         "route": _route_str(out_segs),
         "return_route": _route_str(back_segs),
         "depart": _fmt_when(out_segs[0].get("departureTime")),
+        "arrive": _fmt_when(out_segs[-1].get("arrivalTime")),
         "return": _fmt_when(back_segs[0].get("departureTime")) if back_segs else "",
+        "return_arrive": _fmt_when(back_segs[-1].get("arrivalTime")) if back_segs else "",
         "stops": stops,
         "duration": _fmt_minutes(out_cand["out_minutes"]),
         "return_duration": _fmt_minutes(back_minutes),

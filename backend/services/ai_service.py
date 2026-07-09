@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime as dt, timedelta
 
 from backend.services import links, llm
-from backend.services.flight_service import flights_available, real_flight_options
+from backend.services.flight_service import flights_available, flights_sandbox, real_flight_options
 from backend.services.hotel_service import official_website, real_stay_options
 from backend.services.image_service import first_image, image_for, nth_image
 from backend.services.maps_service import leg_travel_facts
@@ -728,6 +728,7 @@ def generate_trip_options(destination: str, responses: list[dict], trip_name: st
             options["flights_source"] = "liteapi"
             options["flights_all_live"] = all(
                 o.get("live_price") for opts in options["flights"].values() for o in opts)
+            options["flights_sandbox"] = flights_sandbox()
         if transport_future:
             options["transport"] = transport_future.result()
         if legs_future:
@@ -920,17 +921,27 @@ def _ai_flights(destination: str, cities: list[str], dates: dict, group_size: in
 Departure cities: {', '.join(cities)}
 
 The three options per city should cover different trade-offs: fastest, cheapest, best times.
+"arrive" / "return_arrive" are the LANDING date-times at each leg's destination, in ITS local time — account for time zones and overnight legs.
 
 Respond with ONLY valid JSON — an object whose keys are EXACTLY these strings: {keys}
 {{
   "{cities[0]}": [
     {{"airline": "string", "route": "JFK → SPU (via VIE)", "return_route": "SPU → JFK (via FCO)",
-      "depart": "{dates['start']} 09:40", "return": "{dates['end']} 17:10", "stops": 1,
+      "depart": "{dates['start']} 09:40", "arrive": "{dates['start']} 23:55",
+      "return": "{dates['end']} 17:10", "return_arrive": "{dates['end']} 21:05", "stops": 1,
       "duration": "11h 20m", "est_price_per_person": 640, "why": "one line on the trade-off"}}
   ]
 }}"""
     result = _ask(prompt, max_tokens=4096, tier="fast")
     return result if isinstance(result, dict) else {}
+
+
+def _next_day(iso_date: str, time_str: str) -> str:
+    """'2026-08-14', '09:10' -> '2026-08-15 09:10' — overnight sample arrivals."""
+    try:
+        return f"{(dt.fromisoformat(iso_date) + timedelta(days=1)).date()} {time_str}"
+    except (TypeError, ValueError):
+        return f"{iso_date} {time_str}"
 
 
 def _sample_flights_for_city(city: str, destination: str, dates: dict,
@@ -941,17 +952,20 @@ def _sample_flights_for_city(city: str, destination: str, dates: dict,
     return [
         {"airline": "Lufthansa", "route": f"{city} → {arrive} (1 stop)",
          "return_route": f"{leave_from} → {home} (1 stop)",
-         "depart": f"{dates['start']} 08:30", "return": f"{dates['end']} 18:45",
+         "depart": f"{dates['start']} 08:30", "arrive": f"{dates['start']} 17:40",
+         "return": f"{dates['end']} 18:45", "return_arrive": f"{dates['end']} 23:55",
          "stops": 1, "duration": "9h 10m", "est_price_per_person": 620,
          "why": "Best balance of price and schedule"},
         {"airline": "Budget carrier combo", "route": f"{city} → {arrive} (2 stops)",
          "return_route": f"{leave_from} → {home} (2 stops)",
-         "depart": f"{dates['start']} 06:05", "return": f"{dates['end']} 22:30",
+         "depart": f"{dates['start']} 06:05", "arrive": f"{dates['start']} 19:45",
+         "return": f"{dates['end']} 22:30", "return_arrive": _next_day(dates['end'], "09:10"),
          "stops": 2, "duration": "13h 40m", "est_price_per_person": 380,
          "why": "Cheapest — early start, long day"},
         {"airline": "Turkish Airlines", "route": f"{city} → {arrive} (1 stop)",
          "return_route": f"{leave_from} → {home} (1 stop)",
-         "depart": f"{dates['start']} 11:20", "return": f"{dates['end']} 15:10",
+         "depart": f"{dates['start']} 11:20", "arrive": f"{dates['start']} 19:25",
+         "return": f"{dates['end']} 15:10", "return_arrive": f"{dates['end']} 23:15",
          "stops": 1, "duration": "8h 05m", "est_price_per_person": 760,
          "why": "Most comfortable times, checked bag included"},
     ]
