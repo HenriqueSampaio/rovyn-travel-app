@@ -162,6 +162,8 @@ def _adopt_legacy_user(conn, legacy_id: str, new_id: str) -> None:
         ("posts", "user_id"),
         ("post_likes", "user_id"),
         ("post_comments", "user_id"),
+        ("wishlist_items", "user_id"),
+        ("media_uploads", "owner_id"),
     ]:
         conn.execute(f"UPDATE {table} SET {col} = ? WHERE {col} = ?", (new_id, legacy_id))
     conn.execute("DELETE FROM users WHERE id = ?", (legacy_id,))

@@ -530,7 +530,13 @@ def create_recommendations(trip_id: str, user: dict = Depends(get_current_user))
         responses = _questionnaire_rows(conn, trip_id)
         if total == 0 or len(responses) < total:
             raise HTTPException(status_code=400, detail="Not everyone has submitted their questionnaire yet.")
-        conn.execute("UPDATE trips SET recommendations_generating = 1 WHERE id = ?", (trip_id,))
+        claimed = conn.execute(
+            """UPDATE trips SET recommendations_generating = 1
+               WHERE id = ? AND recommendations_generating = 0 AND recommendations IS NULL""",
+            (trip_id,),
+        )
+        if claimed.rowcount != 1:
+            raise HTTPException(status_code=409, detail="Recommendations are already being generated.")
 
     try:
         recommendations = get_destination_recommendations(responses, trip_name=trip["name"])
@@ -572,7 +578,14 @@ def more_recommendations(trip_id: str, user: dict = Depends(get_current_user)):
                        "or add a stop to the route that comes closest.",
             )
         responses = _questionnaire_rows(conn, trip_id)
-        conn.execute("UPDATE trips SET recommendations_generating = 1 WHERE id = ?", (trip_id,))
+        claimed = conn.execute(
+            """UPDATE trips SET recommendations_generating = 1
+               WHERE id = ? AND recommendations_generating = 0
+                 AND recommendations IS NOT NULL AND selected_destination IS NULL""",
+            (trip_id,),
+        )
+        if claimed.rowcount != 1:
+            raise HTTPException(status_code=409, detail="Rovyn is already out looking for more ideas.")
 
     try:
         extra = get_destination_recommendations(
@@ -716,7 +729,13 @@ def create_options(trip_id: str, user: dict = Depends(get_current_user)):
         responses = _questionnaire_rows(conn, trip_id)
         if total == 0 or len(responses) < total:
             raise HTTPException(status_code=400, detail="Not everyone has submitted their questionnaire yet.")
-        conn.execute("UPDATE trips SET options_generating = 1 WHERE id = ?", (trip_id,))
+        claimed = conn.execute(
+            """UPDATE trips SET options_generating = 1
+               WHERE id = ? AND options_generating = 0 AND options IS NULL""",
+            (trip_id,),
+        )
+        if claimed.rowcount != 1:
+            raise HTTPException(status_code=409, detail="The planning board is already being prepared.")
 
     # The route the group voted for seeds the board — the winning card's
     # promise, not a re-derivation (None when the winner was single-base).
@@ -1234,7 +1253,13 @@ def finalize_plan(trip_id: str, user: dict = Depends(get_current_user)):
         responses = _questionnaire_rows(conn, trip_id)
         tallies = _build_tallies(conn, trip_id, options)
         destination = _decided_destination(trip)
-        conn.execute("UPDATE trips SET final_plan_generating = 1 WHERE id = ?", (trip_id,))
+        claimed = conn.execute(
+            """UPDATE trips SET final_plan_generating = 1
+               WHERE id = ? AND final_plan_generating = 0 AND final_plan IS NULL""",
+            (trip_id,),
+        )
+        if claimed.rowcount != 1:
+            raise HTTPException(status_code=409, detail="The final plan is already being drafted.")
 
     try:
         plan = generate_final_plan(destination, responses, options, tallies)

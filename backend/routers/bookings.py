@@ -41,6 +41,23 @@ def _require_bookable(trip):
         raise HTTPException(status_code=400, detail="The booking checklist opens once everyone approves the plan.")
 
 
+def _require_booking_write(conn, trip, row, user: dict, *, allow_unclaimed: bool) -> None:
+    """Authorize a booking mutation without trusting the client-side `mine` flag."""
+    is_leader = trip["leader_id"] == user["id"]
+    if row["scope"].startswith("city:") and not is_leader:
+        q = conn.execute(
+            "SELECT data FROM questionnaires WHERE trip_id = ? AND user_id = ?",
+            (trip["id"], user["id"]),
+        ).fetchone()
+        city = json.loads(q["data"]).get("departure_city", "").strip() if q else ""
+        if row["scope"].casefold() != f"city:{city}".casefold():
+            raise HTTPException(status_code=403, detail="That flight belongs to travelers from another departure city.")
+    if row["booked_by"] is not None and row["booked_by"] != user["id"] and not is_leader:
+        raise HTTPException(status_code=403, detail="Only the traveler who recorded this booking or the trip leader can change it.")
+    if not allow_unclaimed and row["booked_by"] is None and not is_leader:
+        raise HTTPException(status_code=403, detail="Only the trip leader can clear an unclaimed booking.")
+
+
 def _checklist_from_plan(trip, group_size: int, city_counts: Counter) -> list[dict]:
     """Deterministic checklist items derived from the CURRENT final plan."""
     plan = json.loads(trip["final_plan"])
@@ -221,6 +238,7 @@ def confirm_booking(trip_id: str, item_key: str, req: BookingConfirmRequest,
         ).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="That checklist item doesn't exist.")
+        _require_booking_write(conn, trip, row, user, allow_unclaimed=True)
         conn.execute(
             """UPDATE bookings SET status = 'booked', confirmation = ?, note = ?,
                booked_by = ?, booked_at = ? WHERE trip_id = ? AND item_key = ?""",
@@ -250,10 +268,11 @@ def unbook(trip_id: str, item_key: str, user: dict = Depends(get_current_user)):
         trip = _member_trip(conn, trip_id, user["id"])
         _require_bookable(trip)
         row = conn.execute(
-            "SELECT stale FROM bookings WHERE trip_id = ? AND item_key = ?", (trip_id, item_key)
+            "SELECT * FROM bookings WHERE trip_id = ? AND item_key = ?", (trip_id, item_key)
         ).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="That checklist item doesn't exist.")
+        _require_booking_write(conn, trip, row, user, allow_unclaimed=False)
         if row["stale"]:
             # A stale row only exists because it was booked; unbooking resolves it
             conn.execute("DELETE FROM bookings WHERE trip_id = ? AND item_key = ?", (trip_id, item_key))

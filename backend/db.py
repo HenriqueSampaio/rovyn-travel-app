@@ -165,6 +165,14 @@ CREATE TABLE IF NOT EXISTS post_media (
     url        TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS media_uploads (
+    url        TEXT PRIMARY KEY,
+    owner_id   TEXT NOT NULL REFERENCES users(id),
+    post_id    TEXT REFERENCES posts(id),
+    media_type TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS post_likes (
     post_id  TEXT NOT NULL REFERENCES posts(id),
     user_id  TEXT NOT NULL REFERENCES users(id),
@@ -209,6 +217,7 @@ _COLUMN_MIGRATIONS = [
     ("trips", "photo_url", "TEXT"),  # /media/... URL of the group picture; NULL = initial disc
     ("bookings", "stale", "INTEGER NOT NULL DEFAULT 0"),
     ("payments", "mode", "TEXT NOT NULL DEFAULT 'full'"),
+    ("media_uploads", "media_type", "TEXT NOT NULL DEFAULT 'image'"),
 ]
 
 # Every table the code touches, derived from the SQLite schema so the two
@@ -222,6 +231,7 @@ _EXPECTED_TABLES = re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", _SCHEMA)
 _SCHEMA_CANARIES = [
     ("trips", "solo"),  # supabase/migrations/20260706150000_add_trips_solo.sql
     ("trips", "photo_url"),  # supabase/migrations/20260708150000_add_trips_photo_url.sql
+    ("media_uploads", "media_type"),  # 20260714160000_add_media_upload_ownership.sql
 ]
 
 if IS_POSTGRES:

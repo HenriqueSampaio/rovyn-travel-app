@@ -52,8 +52,18 @@ def upload_media(file: UploadFile, user: dict = Depends(get_current_user)):
 
     MEDIA_DIR.mkdir(parents=True, exist_ok=True)
     name = f"{uuid.uuid4().hex}{ext}"
+    url = f"/media/{name}"
     (MEDIA_DIR / name).write_bytes(data)
-    return {"url": f"/media/{name}", "media_type": media_type}
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                "INSERT INTO media_uploads (url, owner_id, media_type, created_at) VALUES (?, ?, ?, ?)",
+                (url, user["id"], media_type, _now()),
+            )
+    except Exception:
+        (MEDIA_DIR / name).unlink(missing_ok=True)
+        raise
+    return {"url": url, "media_type": media_type}
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +180,19 @@ def create_post(req: CreatePostRequest, user: dict = Depends(get_current_user)):
 
     post_id = str(uuid.uuid4())
     with get_conn() as conn:
+        # An upload may be claimed exactly once, and only by its uploader.
+        # Keeping this ownership in the database prevents guessed URLs from
+        # being attached to another account's post.
+        for m in req.media:
+            upload = conn.execute(
+                "SELECT owner_id, post_id, media_type FROM media_uploads WHERE url = ?", (m.url,)
+            ).fetchone()
+            if upload is None or upload["owner_id"] != user["id"]:
+                raise HTTPException(status_code=403, detail="You can only post media you uploaded.")
+            if upload["post_id"] is not None:
+                raise HTTPException(status_code=409, detail="That media is already attached to a post.")
+            if upload["media_type"] != m.media_type:
+                raise HTTPException(status_code=400, detail="The media type doesn't match the uploaded file.")
         snapshot, destination = (None, None)
         vibes = [v.strip() for v in req.vibes if v.strip()]
         if req.trip_id.strip():
@@ -188,6 +211,13 @@ def create_post(req: CreatePostRequest, user: dict = Depends(get_current_user)):
                 "INSERT INTO post_media (id, post_id, position, media_type, url) VALUES (?, ?, ?, ?, ?)",
                 (str(uuid.uuid4()), post_id, i, m.media_type, m.url),
             )
+            claimed = conn.execute(
+                """UPDATE media_uploads SET post_id = ?
+                   WHERE url = ? AND owner_id = ? AND post_id IS NULL""",
+                (post_id, m.url, user["id"]),
+            )
+            if claimed.rowcount != 1:
+                raise HTTPException(status_code=409, detail="That media was attached to another post.")
         post = conn.execute("SELECT * FROM posts WHERE id = ?", (post_id,)).fetchone()
         return {"post": _post_payload(conn, post, user["id"])}
 
@@ -213,6 +243,7 @@ def delete_post(post_id: str, user: dict = Depends(get_current_user)):
         conn.execute("DELETE FROM post_comments WHERE post_id = ?", (post_id,))
         conn.execute("DELETE FROM post_likes WHERE post_id = ?", (post_id,))
         conn.execute("DELETE FROM post_media WHERE post_id = ?", (post_id,))
+        conn.execute("DELETE FROM media_uploads WHERE post_id = ? AND owner_id = ?", (post_id, user["id"]))
         conn.execute("DELETE FROM posts WHERE id = ?", (post_id,))
     for m in media:
         try:
