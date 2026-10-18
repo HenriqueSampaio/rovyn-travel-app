@@ -623,8 +623,12 @@ def flight_reasons(role: str | None, f: dict, floor_price: float, cheapest_minut
         saved = max(0, int(cheapest_minutes or 0) - int(f.get("minutes") or 0))
         hours = round(saved / 60)
         gap = int(round(price - floor_price))
-        text = (f"Within ${gap} of the cheapest and {hours}h faster" if hours >= 1
-                else f"Within ${gap} of the cheapest fare")
+        if gap < 1:
+            text = (f"Same price as the cheapest, {hours}h faster" if hours >= 1
+                    else "Same price as the cheapest fare")
+        else:
+            text = (f"Within ${gap} of the cheapest and {hours}h faster" if hours >= 1
+                    else f"Within ${gap} of the cheapest fare")
         short = "Balanced"
     elif role == "bags":
         text, short = "Checked bag included — no surprise fees", "Bag included"
