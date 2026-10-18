@@ -32,6 +32,8 @@ from backend.services.flight_service import (
     live_flight_details,
 )
 from backend.routers.social import MEDIA_DIR
+from backend.services import booking_service
+from backend.services.checklist import trip_is_locked
 
 router = APIRouter()
 
@@ -104,14 +106,19 @@ def _status_payload(conn, trip, user_id: str) -> dict:
                   EXISTS(SELECT 1 FROM questionnaires q WHERE q.trip_id = t.trip_id AND q.user_id = u.id) AS submitted,
                   EXISTS(SELECT 1 FROM votes v WHERE v.trip_id = t.trip_id AND v.user_id = u.id) AS voted,
                   EXISTS(SELECT 1 FROM approvals a WHERE a.trip_id = t.trip_id AND a.user_id = u.id) AS approved,
-                  EXISTS(SELECT 1 FROM payments p WHERE p.trip_id = t.trip_id AND p.user_id = u.id) AS paid
+                  EXISTS(SELECT 1 FROM payments p WHERE p.trip_id = t.trip_id AND p.user_id = u.id
+                         AND p.status IN ('paid', 'captured')) AS paid
            FROM trip_members t JOIN users u ON u.id = t.user_id
            WHERE t.trip_id = ? ORDER BY t.joined_at""", (trip["id"],)),
         ("SELECT user_id, destination_name FROM votes WHERE trip_id = ?", (trip["id"],)),
         ("SELECT user_id, category, status FROM category_progress WHERE trip_id = ?", (trip["id"],)),
-        ("SELECT user_id, mode FROM payments WHERE trip_id = ?", (trip["id"],)),
+        ("SELECT user_id, mode, status FROM payments WHERE trip_id = ?", (trip["id"],)),
     ])
     pay_modes = {r["user_id"]: r["mode"] for r in pay_rows}
+    # 'paid' means money captured (or a self-book commitment); an authorized
+    # card hold is 'authorized' and must not read as paid anywhere.
+    pay_status = {r["user_id"]: r["status"] for r in pay_rows}
+    authorized_count = sum(1 for r in pay_rows if r["status"] == "authorized")
     tallies = Counter(v["destination_name"] for v in votes)
     my_vote = next((v["destination_name"] for v in votes if v["user_id"] == user_id), None)
 
@@ -152,6 +159,7 @@ def _status_payload(conn, trip, user_id: str) -> dict:
                 "curated_count": curated_count(m["id"]),
                 "approved": bool(m["approved"]),
                 "paid": bool(m["paid"]),
+                "payment_status": pay_status.get(m["id"]),
                 "booking_mode": pay_modes.get(m["id"]),
             }
             for m in members
@@ -166,6 +174,7 @@ def _status_payload(conn, trip, user_id: str) -> dict:
             "curated_count": curated_count(user_id),
             "approved": bool(me and me["approved"]),
             "paid": bool(me and me["paid"]),
+            "payment_status": pay_status.get(user_id),
             "booking_mode": pay_modes.get(user_id),
         },
         "has_recommendations": bool(trip["recommendations"]),
@@ -186,6 +195,7 @@ def _status_payload(conn, trip, user_id: str) -> dict:
         "approved_count": approved_count,
         "all_approved": total > 0 and approved_count == total,
         "paid_count": paid_count,
+        "authorized_count": authorized_count,
         "all_paid": total > 0 and paid_count == total,
     }
 
@@ -329,12 +339,20 @@ def leave_trip(trip_id: str, user: dict = Depends(get_current_user)):
         if user["id"] == trip["leader_id"]:
             raise HTTPException(status_code=400, detail="The leader can't leave — delete the trip instead.")
         paid = conn.execute(
-            "SELECT 1 FROM payments WHERE trip_id = ? AND user_id = ?", (trip_id, user["id"])
+            "SELECT status FROM payments WHERE trip_id = ? AND user_id = ?", (trip_id, user["id"])
         ).fetchone()
-        if paid:
+        if paid and paid["status"] == "authorized":
+            raise HTTPException(status_code=400, detail="Release your payment authorization first, then you can leave.")
+        if paid and paid["status"] != "pending":
             raise HTTPException(status_code=400, detail="You've already paid your share — the trip is locked in.")
+        # A pending checkout link is not a payment: expire it on the way out.
+        conn.execute("UPDATE payment_attempts SET status = 'expired', updated_at = ? WHERE trip_id = ? AND user_id = ? AND status = 'pending'",
+                     (_now(), trip_id, user["id"]))
         for table in _TRIP_CHILD_TABLES:
             conn.execute(f"DELETE FROM {table} WHERE trip_id = ? AND user_id = ?", (trip_id, user["id"]))
+    # The group changed while money was being collected: everyone's share
+    # changes, so the round restarts with a fresh lock.
+    booking_service.on_members_changed(trip_id, reason=f"{user['name']} left the trip")
     return {"success": True}
 
 
@@ -1263,7 +1281,7 @@ def _member_checks(conn, trip) -> list[dict]:
         ("""SELECT u.id, u.name, u.email FROM trip_members t JOIN users u ON u.id = t.user_id
            WHERE t.trip_id = ? ORDER BY t.joined_at""", (trip["id"],)),
         ("SELECT user_id, data FROM questionnaires WHERE trip_id = ?", (trip["id"],)),
-        ("SELECT user_id, amount_cents, paid_at FROM payments WHERE trip_id = ?", (trip["id"],)),
+        ("SELECT user_id, amount_cents, paid_at, status FROM payments WHERE trip_id = ?", (trip["id"],)),
     ])
     city_by_user = {r["user_id"]: json.loads(r["data"]).get("departure_city", "").strip() for r in q_rows}
     payments = {r["user_id"]: r for r in pay_rows}
@@ -1306,7 +1324,8 @@ def _member_checks(conn, trip) -> list[dict]:
             "email": m["email"],
             "items": items,
             "total": total,
-            "paid": bool(paid),
+            "paid": bool(paid) and paid["status"] in ("paid", "captured"),
+            "payment_status": paid["status"] if paid else None,
             "paid_at": paid["paid_at"] if paid else None,
         })
     return checks
@@ -1319,6 +1338,7 @@ def read_plan(trip_id: str, user: dict = Depends(get_current_user)):
         plan = json.loads(trip["final_plan"]) if trip["final_plan"] else None
         checks = _member_checks(conn, trip) if plan else []
         payload = _status_payload(conn, trip, user["id"])
+        checkout = booking_service.checkout_summary(conn, trip, user["id"]) if plan else None
         # Plans drafted before budget tracking landed don't carry the group's
         # agreed range — derive it from the questionnaires on the way out.
         if plan and not plan.get("budget_per_person"):
@@ -1345,6 +1365,7 @@ def read_plan(trip_id: str, user: dict = Depends(get_current_user)):
         "trip": payload,
         "replacement_pool": _replacement_pool(trip, plan) if plan else [],
         "slot_locks": slot_locks,
+        "checkout": checkout,
     }
 
 
@@ -1400,8 +1421,7 @@ def edit_plan(trip_id: str, req: EditRequest, user: dict = Depends(get_current_u
         trip = _member_trip(conn, trip_id, user["id"])
         if not trip["final_plan"]:
             raise HTTPException(status_code=400, detail="There is no final plan to edit yet.")
-        payments = conn.execute("SELECT COUNT(*) c FROM payments WHERE trip_id = ?", (trip_id,)).fetchone()["c"]
-        if payments > 0:
+        if trip_is_locked(conn, trip_id):
             raise HTTPException(status_code=400, detail="Payments have started — the plan is locked.")
         if trip["final_plan_generating"]:
             raise HTTPException(status_code=409, detail="Another revision is in progress.")
@@ -1435,8 +1455,7 @@ def reorder_days(trip_id: str, req: ReorderRequest, user: dict = Depends(get_cur
         trip = _member_trip(conn, trip_id, user["id"])
         if not trip["final_plan"]:
             raise HTTPException(status_code=400, detail="There is no final plan to edit yet.")
-        payments = conn.execute("SELECT COUNT(*) c FROM payments WHERE trip_id = ?", (trip_id,)).fetchone()["c"]
-        if payments > 0:
+        if trip_is_locked(conn, trip_id):
             raise HTTPException(status_code=400, detail="Payments have started — the plan is locked.")
 
         plan = json.loads(trip["final_plan"])
@@ -1521,8 +1540,7 @@ def edit_slot(trip_id: str, req: SlotEditRequest, user: dict = Depends(get_curre
         trip = _member_trip(conn, trip_id, user["id"])
         if not trip["final_plan"]:
             raise HTTPException(status_code=400, detail="There is no final plan to edit yet.")
-        payments = conn.execute("SELECT COUNT(*) c FROM payments WHERE trip_id = ?", (trip_id,)).fetchone()["c"]
-        if payments > 0:
+        if trip_is_locked(conn, trip_id):
             raise HTTPException(status_code=400, detail="Payments have started — the plan is locked.")
 
         plan = json.loads(trip["final_plan"])
@@ -1589,8 +1607,7 @@ def arrange_day_slots(trip_id: str, req: ArrangeSlotsRequest, user: dict = Depen
         trip = _member_trip(conn, trip_id, user["id"])
         if not trip["final_plan"]:
             raise HTTPException(status_code=400, detail="There is no final plan to edit yet.")
-        payments = conn.execute("SELECT COUNT(*) c FROM payments WHERE trip_id = ?", (trip_id,)).fetchone()["c"]
-        if payments > 0:
+        if trip_is_locked(conn, trip_id):
             raise HTTPException(status_code=400, detail="Payments have started — the plan is locked.")
 
         plan = json.loads(trip["final_plan"])
@@ -1650,8 +1667,8 @@ def pay_share(trip_id: str, req: PayRequest | None = None, user: dict = Depends(
     mode = (req.mode if req else "full").strip()
     if mode == "full":
         raise HTTPException(
-            status_code=400,
-            detail="Paying in full through Rovyn arrives with Phase B — choose “I'll book it myself” for now.",
+            status_code=409,
+            detail="Paying through Rovyn runs through the group checkout — POST /trips/{id}/checkout/session.",
         )
     if mode != "self_book":
         raise HTTPException(status_code=400, detail="Unknown booking mode.")
@@ -1660,6 +1677,8 @@ def pay_share(trip_id: str, req: PayRequest | None = None, user: dict = Depends(
         trip = _member_trip(conn, trip_id, user["id"])
         if trip["status"] not in ("approved", "booked"):
             raise HTTPException(status_code=400, detail="Everyone must approve the final plan before booking opens.")
+        if booking_service.active_settlement(conn, trip_id) is not None:
+            raise HTTPException(status_code=409, detail="The group is paying through Rovyn — self-booking is off unless the leader abandons the checkout.")
         existing = conn.execute(
             "SELECT 1 FROM payments WHERE trip_id = ? AND user_id = ?", (trip_id, user["id"])
         ).fetchone()

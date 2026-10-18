@@ -8,8 +8,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from backend.routers import auth_routes, bookings, places, social, trips
+from backend.routers import auth_routes, bookings, payments, places, social, trips
 from backend.routers.social import MEDIA_DIR
+from backend.services import reconciler
+from backend.services.payment_service import refuse_live_keys
+
+# Only provably-test credentials (sk_test_ / sand_ / duffel_test_ / empty) are
+# accepted unless ROVYN_LIVE_MONEY=1 — see docs/MOR-RUNBOOK.md.
+refuse_live_keys()
 
 app = FastAPI(title="Rovyn Travel Planner API")
 
@@ -36,11 +42,19 @@ app.add_middleware(
 app.include_router(auth_routes.router, prefix="/auth", tags=["auth"])
 app.include_router(trips.router, prefix="/trips", tags=["trips"])
 app.include_router(bookings.router, prefix="/trips", tags=["bookings"])
+app.include_router(payments.router, prefix="/trips", tags=["payments"])
+app.include_router(payments.webhooks_router, prefix="/webhooks", tags=["webhooks"])
 app.include_router(places.router, prefix="/places", tags=["places"])
 app.include_router(social.router, prefix="/social", tags=["social"])
 
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
+
+
+@app.on_event("startup")
+def _start_reconciler() -> None:
+    # Resumes settlements a dead process left half-done; ROVYN_RECONCILER=0 disables it.
+    reconciler.start()
 
 
 @app.get("/health")
