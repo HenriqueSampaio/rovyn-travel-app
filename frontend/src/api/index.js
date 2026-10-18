@@ -192,6 +192,23 @@ export const api = {
     req(`/trips/${tripId}/pay`, { method: 'POST', body: JSON.stringify({ mode }) }),
   getReceipt: (tripId) => req(`/trips/${tripId}/receipt`),
 
+  // Group checkout — Rovyn as merchant of record (authorize all, then book, then capture)
+  getCheckout: (tripId) => req(`/trips/${tripId}/checkout`),
+  saveTravelerProfile: (tripId, profile) =>
+    req(`/trips/${tripId}/checkout/profile`, { method: 'POST', body: JSON.stringify(profile) }),
+  lockCheckout: (tripId) => req(`/trips/${tripId}/checkout/lock`, { method: 'POST' }),
+  startCheckoutSession: (tripId, acknowledgeNonRefundable = false) =>
+    req(`/trips/${tripId}/checkout/session`, {
+      method: 'POST', body: JSON.stringify({ acknowledge_non_refundable: acknowledgeNonRefundable }),
+    }),
+  confirmCheckout: (tripId, sessionId) =>
+    req(`/trips/${tripId}/checkout/confirm`, { method: 'POST', body: JSON.stringify({ session_id: sessionId }) }),
+  releaseAuthorization: (tripId) => req(`/trips/${tripId}/checkout/release`, { method: 'POST' }),
+  abandonCheckout: (tripId) => req(`/trips/${tripId}/checkout/abandon`, { method: 'POST' }),
+  retryCheckout: (tripId) => req(`/trips/${tripId}/checkout/retry`, { method: 'POST' }),
+  cancelRovynBooking: (tripId, itemKey) =>
+    req(`/trips/${tripId}/bookings/${encodeURIComponent(itemKey)}/cancel`, { method: 'POST' }),
+
   suggestCities: (q) => req(`/places/suggest?q=${encodeURIComponent(q)}`),
   mapsEmbedKey: () => req('/places/maps-embed-key'),
 
