@@ -1,4 +1,5 @@
-"""Live flight data via LiteAPI's flights product — the air half of Phase A.
+"""Live flight data via LiteAPI's flights product — the air half of Phase A —
+widened with Duffel as a second supplier and explained per itinerary.
 
 With LITEAPI_API_KEY set, the planning board's per-city flight menus become
 REAL bookable itineraries with live fares instead of AI estimates:
@@ -7,6 +8,12 @@ REAL bookable itineraries with live fares instead of AI estimates:
   GET  /data/flights/airports    free-text place -> IATA (metro codes included)
   POST /flights/verify           re-quote a stored offer while it's still valid
 
+With DUFFEL_ACCESS_TOKEN set as well, Duffel's offers for the same legs are
+searched in parallel and merged in before the diversity pass (duplicates of
+the same itinerary collapse to the cheaper copy). Every option then carries a
+lane (Cheapest, Nonstop, Early arrival…) and data-backed reasons from
+option_ranking — the "why" is computed, never written by a model.
+
 Open-jaw routes (land in the route's first city, fly home from its last) are
 requested as true open-jaw legs; if the provider answers with plain round
 trips instead — the sandbox does — the trip is re-priced as two one-way
@@ -14,7 +21,8 @@ fares, and failing that the round-trip quote is kept with an honest "why".
 
 Everything here is best-effort: any failure returns []/None and callers fall
 back to the AI flight menu, so live fares never break trip planning.
-Booking (prebook -> book) is Phase B/C and intentionally not wired.
+Booking (prebook -> book, hold orders) is the payments work and intentionally
+not wired.
 """
 import os
 import re
@@ -22,6 +30,14 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from functools import lru_cache
 
+from backend.services import option_ranking as ranking
+from backend.services.duffel_service import (
+    FLIGHT_HTTP_TIMEOUT as _DUFFEL_TIMEOUT,
+    duffel_available,
+    get_offer as duffel_get_offer,
+    itinerary_signature,
+    search_flights as duffel_search_flights,
+)
 from backend.services.hotel_service import _country_code, _lite_request, _split_place
 
 _RATES_TIMEOUT = 45  # rate searches routinely take 10s+ on a cold route
@@ -36,6 +52,14 @@ def flights_sandbox() -> bool:
     is LiteAPI's own house brand), not real airlines. Surfaced on the board so
     the UI can say so instead of letting a made-up airline pass as real."""
     return os.environ.get("LITEAPI_API_KEY", "").startswith("sand_")
+
+
+def flight_target() -> int:
+    """How many itineraries each departure city shows."""
+    try:
+        return max(int(os.environ.get("FLIGHT_OPTIONS_PER_CITY") or 8), 1)
+    except ValueError:
+        return 8
 
 
 # ---------------------------------------------------------------------------
@@ -171,11 +195,14 @@ def _parse_journey(j: dict, travelers: int) -> dict | None:
         "carriers": list(dict.fromkeys(
             (s.get("carrier") or {}).get("marketingName") or "Airline" for s in segs)),
         "offer_id": offer.get("offerId") or "",
-        "journey_key": j.get("journeyKey") or "",
+        "journey_key": j.get("journeyKey") or ("liteapi:" + itinerary_signature(segs)),
         "expires_at": offer.get("expiration") or "",
         "fare_family": fare.get("family") or "",
         "carry_on": bool(baggage.get("hasCarryOnBag")),
         "checked_bag": bool(baggage.get("hasCheckedBag")),
+        "supplier": "liteapi",
+        "sandbox": flights_sandbox(),
+        "duffel_offer_id": "",
     }
 
 
@@ -196,66 +223,94 @@ def _search_journeys(legs: list[dict], travelers: int) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Diversity — cheapest / nonstop / fastest / balanced, not 4 near-clones
+# Merging two suppliers' candidates
 # ---------------------------------------------------------------------------
 
-_WHY = {
-    "cheapest": "Cheapest live fare for your dates",
-    "nonstop": "Nonstop — the quickest door to door",
-    "fastest": "Fastest routing on these dates",
-    "balanced": "Strong balance of price and travel time",
-}
+def _signature(cand: dict) -> str:
+    return itinerary_signature((cand.get("out") or []) + (cand.get("back") or []))
 
 
-def _pick_diverse(cands: list[dict], limit: int = 4) -> list[tuple[str, dict]]:
-    """[(role, candidate), ...] — up to `limit` genuinely different journeys.
+def _merge_candidates(primary: list[dict], secondary: list[dict]) -> list[dict]:
+    """LiteAPI + Duffel candidates as one list, cheapest first.
+
+    The same itinerary from both suppliers appears once — the cheaper copy,
+    but only when both are priced in USD (no silent FX: a GBP Duffel copy
+    yields to the LiteAPI one). Sandbox inventory is never mixed with
+    production inventory: production wins and the other supplier is dropped."""
+    if not secondary:
+        return list(primary)
+    if not primary:
+        return list(secondary)
+    live_primary = not all(c.get("sandbox") for c in primary)
+    live_secondary = not all(c.get("sandbox") for c in secondary)
+    if live_primary != live_secondary:
+        return list(primary) if live_primary else list(secondary)
+    merged: dict[str, dict] = {}
+    for cand in primary:
+        merged.setdefault(_signature(cand), cand)
+    board_currency = (primary[0].get("currency") or "USD")
+    for cand in secondary:
+        if (cand.get("currency") or "USD") != board_currency:
+            continue  # a GBP fare can't be ranked against USD ones — no silent FX
+        sig = _signature(cand)
+        existing = merged.get(sig)
+        if existing is None or cand["price"] < existing["price"]:
+            merged[sig] = cand
+    return sorted(merged.values(), key=lambda c: c["price"])
+
+
+# ---------------------------------------------------------------------------
+# Diversity — one itinerary per role (cheapest, nonstop, early arrival…)
+# ---------------------------------------------------------------------------
+
+def _facts(cand: dict, dest_city: str = "", as_return: bool = False) -> dict:
+    """The facts option_ranking judges an itinerary by. A one-way candidate
+    from the return search carries its leg under "out"; as_return=True
+    files it as the homeward leg."""
+    out = cand.get("out") or []
+    back = cand.get("back") or []
+    if as_return and not back:
+        out, back = [], out
+    carriers = [(s.get("carrier") or {}).get("marketingCode") or (s.get("carrier") or {}).get("marketingName")
+                for s in out + back]
+    return {
+        "key": cand.get("journey_key") or "",
+        "price": float(cand["price"]),
+        "minutes": int(cand.get("out_minutes") or 0) + int(cand.get("back_minutes") or 0),
+        "stops": cand.get("stops"),
+        "out_depart": ranking.parse_hhmm(out[0].get("departureTime")) if out else None,
+        "out_arrive": ranking.parse_hhmm(out[-1].get("arrivalTime")) if out else None,
+        "out_arrive_date": (out[-1].get("arrivalTime") or "")[:10] if out else "",
+        "back_depart": ranking.parse_hhmm(back[0].get("departureTime")) if back else None,
+        "checked_bag": bool(cand.get("checked_bag")),
+        "carry_on": bool(cand.get("carry_on")),
+        "single_carrier": len(set(c for c in carriers if c)) == 1,
+        "carrier": (cand.get("carriers") or ["Airline"])[0],
+        "dest_city": dest_city,
+        "live": True,
+    }
+
+
+def _pick_diverse(cands: list[dict], limit: int | None = None, pace: str | None = None,
+                  dest_city: str = "") -> list[tuple[str, dict, list, int]]:
+    """[(role, candidate, reasons, match_score), ...] — up to `limit`
+    genuinely different journeys, one per role, in the pace's claim order.
     A pick must EARN its slot: near-identical price and door-to-door time to
     an existing pick reads as a duplicate on the board, so it's skipped."""
-    def total_minutes(c):
-        return (c["out_minutes"] or 0) + (c["back_minutes"] or 0)
-
-    picks: list[tuple[str, dict]] = []
-
-    def claim(role: str, cand: dict | None):
-        if not cand:
-            return
-        for _, taken in picks:
-            same = taken["journey_key"] == cand["journey_key"]
-            similar = (abs(taken["price"] - cand["price"]) < max(10, 0.02 * taken["price"])
-                       and abs(total_minutes(taken) - total_minutes(cand)) <= 20)
-            if same or similar:
-                return
-        picks.append((role, cand))
-
     if not cands:
         return []
-    claim("cheapest", cands[0])
-    claim("nonstop", next((c for c in cands if c["stops"] == 0), None))
-    claim("fastest", min(cands, key=lambda c: (total_minutes(c), c["price"])))
-    floor_price = cands[0]["price"] or 1
-    floor_time = min(total_minutes(c) for c in cands) or 1
-    taken_keys = {c["journey_key"] for _, c in picks}
-    remaining = [c for c in cands if c["journey_key"] not in taken_keys]
-    if remaining:
-        claim("balanced", min(remaining, key=lambda c: c["price"] / floor_price
-                              + total_minutes(c) / floor_time))
-    return picks[:limit]
+    facts = [_facts(c, dest_city) for c in cands]
+    picks = ranking.pick_flight_roles(facts, limit or flight_target(), pace)
+    return [(p["role"], cands[p["index"]], p["reasons"], p["match_score"]) for p in picks]
 
 
 # ---------------------------------------------------------------------------
 # Mapping candidates into the board's flight-option schema
 # ---------------------------------------------------------------------------
 
-def _bags_note(cand: dict) -> str:
-    if cand["checked_bag"]:
-        return "checked bag included"
-    if cand["carry_on"]:
-        return "carry-on only"
-    return ""
-
-
 def _option_from(role: str, out_cand: dict, back_cand: dict | None = None,
-                 why_extra: str = "") -> dict:
+                 why_extra: str = "", reasons: list | None = None,
+                 match_score: int | None = None) -> dict:
     """A board flight option from one round-trip candidate, or from an
     out + back pair of one-way candidates (the open-jaw fallback)."""
     pair = back_cand is not None
@@ -270,14 +325,14 @@ def _option_from(role: str, out_cand: dict, back_cand: dict | None = None,
     carriers = list(dict.fromkeys(out_cand["carriers"] + (back_cand["carriers"] if pair else [])))
     stops = max(len(out_segs) - 1, (len(back_segs) - 1) if back_segs else 0)
     back_minutes = (back_cand["out_minutes"] or back_cand["back_minutes"]) if pair else out_cand["back_minutes"]
-    why = _WHY.get(role, _WHY["balanced"])
-    bags = _bags_note(out_cand)
-    if bags:
-        why += f" — {bags}"
-    if why_extra:
-        why += f". {why_extra}"
+    lane = ranking.ROLE_LANES.get(role, "Best balance")
+    reasons = list(reasons or [])
+    why = ranking.why_line(None, reasons, why_extra) if reasons else (why_extra or lane)
 
-    expiries = [e for e in (out_cand["expires_at"], back_cand["expires_at"] if pair else None) if e]
+    legs = (out_cand, back_cand) if pair else (out_cand,)
+    expiries = [c.get("expires_at") for c in legs if c.get("expires_at")]
+    suppliers = list(dict.fromkeys(c.get("supplier") or "liteapi" for c in legs))
+    duffel_ids = [c.get("duffel_offer_id") for c in legs if c.get("duffel_offer_id")]
     return {
         "airline": " + ".join(carriers[:2]) + (" and partners" if len(carriers) > 2 else ""),
         "route": _route_str(out_segs),
@@ -290,9 +345,10 @@ def _option_from(role: str, out_cand: dict, back_cand: dict | None = None,
         "duration": _fmt_minutes(out_cand["out_minutes"]),
         "return_duration": _fmt_minutes(back_minutes),
         "est_price_per_person": round(price),
+        "currency": out_cand.get("currency") or "USD",
         "why": why,
         "live_price": True,
-        "offer_ids": [c["offer_id"] for c in ((out_cand, back_cand) if pair else (out_cand,)) if c["offer_id"]],
+        "offer_ids": [c["offer_id"] for c in legs if c.get("offer_id")],
         "journey_key": "+".join(filter(None, [out_cand["journey_key"],
                                               back_cand["journey_key"] if pair else ""])),
         "fare_family": out_cand["fare_family"],
@@ -300,24 +356,38 @@ def _option_from(role: str, out_cand: dict, back_cand: dict | None = None,
         "segments": {"out": out_rows, "back": back_rows},
         "priced_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "expires_at": min(expiries) if expiries else "",
+        "lane": lane,
+        "role": role,
+        "reasons": reasons,
+        "match_score": match_score,
+        "supplier": suppliers[0] if len(suppliers) == 1 else "+".join(suppliers),
+        "sandbox": any(c.get("sandbox") for c in legs),
+        "duffel_offer_id": duffel_ids[0] if len(duffel_ids) == 1 and not pair else "",
+        "duffel_offer_ids": duffel_ids,
     }
 
 
 def real_flight_options(origin_city: str, dest_city: str, depart_date: str,
                         return_date: str, travelers: int = 1,
                         return_from_city: str | None = None,
-                        return_to_city: str | None = None) -> list[dict]:
-    """Up to ~4 live round-trip offers from one departure city, mapped to the
-    board's flight-option schema (cheapest / nonstop / fastest / balanced).
+                        return_to_city: str | None = None,
+                        pace: str | None = None) -> list[dict]:
+    """Up to FLIGHT_OPTIONS_PER_CITY live round-trip offers from one departure
+    city, mapped to the board's flight-option schema, one per role
+    (cheapest / nonstop / fastest / best balance / bags / early arrival /
+    no early start / late return / one airline), LiteAPI and Duffel merged.
 
     return_from_city: open-jaw trips fly home from the route's last city.
     return_to_city:   travelers who end the trip in a different home city.
+    pace:             the group's pace reorders which roles claim first.
     Returns [] on ANY failure — callers must fall back to the AI menu."""
-    if not (flights_available() and origin_city and dest_city and depart_date and return_date):
+    if not ((flights_available() or duffel_available()) and origin_city and dest_city
+            and depart_date and return_date):
         return []
     if origin_city.strip().casefold() in ("", "your city"):
         return []  # questionnaire placeholder, not a place
     try:
+        town = _split_place(dest_city)[0]
         origin = _resolve(origin_city)
         dest = _resolve(dest_city)
         if not (origin and dest):
@@ -327,47 +397,78 @@ def real_flight_options(origin_city: str, dest_city: str, depart_date: str,
             home_to = _resolve(return_to_city) or origin
 
         open_jaw = bool(return_from_city) and (
-            _split_place(return_from_city)[0].casefold() != _split_place(dest_city)[0].casefold())
+            _split_place(return_from_city)[0].casefold() != town.casefold())
         return_from = (_resolve(return_from_city) if open_jaw else None) or dest
 
         legs = [
             {"origin": origin[0], "destination": dest[0], "date": depart_date, "direction": "OUTBOUND"},
             {"origin": return_from[0], "destination": home_to[0], "date": return_date, "direction": "INBOUND"},
         ]
-        cands = _search_journeys(legs, travelers)
+        # Both suppliers at once; Duffel is bounded by its own short timeout
+        # so it can only ever add options, never delay the board
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            lite_f = pool.submit(_search_journeys, legs, travelers) if flights_available() else None
+            duffel_f = pool.submit(duffel_search_flights, origin[0], dest[0], depart_date, return_date,
+                                   travelers, return_from[0], home_to[0]) if duffel_available() else None
+            try:
+                lite = lite_f.result() if lite_f else []
+            except Exception:
+                lite = []
+            try:
+                duffel = duffel_f.result(timeout=_DUFFEL_TIMEOUT + 2) if duffel_f else []
+            except Exception:
+                duffel = []
+        cands = _merge_candidates(lite, duffel)
 
         if open_jaw:
             honored = [c for c in cands
                        if c["back"] and c["back"][0].get("originCode") in return_from[1]]
             if honored:
-                return [_option_from(role, c) for role, c in _pick_diverse(honored)]
+                return [_option_from(role, c, reasons=rs, match_score=ms)
+                        for role, c, rs, ms in _pick_diverse(honored, pace=pace, dest_city=town)]
             # The provider ignored the open-jaw return (sandbox inventory does)
             # — price the trip as two one-way fares instead, which honors both
             # cities and stays fully bookable.
             pair_options = _open_jaw_as_one_ways(
-                origin, dest, return_from, home_to, depart_date, return_date, travelers)
+                origin, dest, return_from, home_to, depart_date, return_date, travelers,
+                pace=pace, dest_city=town)
             if pair_options:
                 return pair_options
             if cands:  # last resort: keep the live quote, say what it really is
-                note = (f"Live price is a round trip via {_split_place(dest_city)[0]} — "
+                note = (f"Live price is a round trip via {town} — "
                         f"your actual return leaves from {_split_place(return_from_city)[0]}, so treat it as a floor")
-                return [_option_from(role, c, why_extra=note) for role, c in _pick_diverse(cands)]
+                return [_option_from(role, c, why_extra=note, reasons=rs, match_score=ms)
+                        for role, c, rs, ms in _pick_diverse(cands, pace=pace, dest_city=town)]
             return []
 
-        return [_option_from(role, c) for role, c in _pick_diverse(cands)]
+        return [_option_from(role, c, reasons=rs, match_score=ms)
+                for role, c, rs, ms in _pick_diverse(cands, pace=pace, dest_city=town)]
     except Exception:
         # Live fares are an enhancement — they must never break trip planning
         return []
 
 
 def _open_jaw_as_one_ways(origin, dest, return_from, home_to,
-                          depart_date: str, return_date: str, travelers: int) -> list[dict]:
+                          depart_date: str, return_date: str, travelers: int,
+                          pace: str | None = None, dest_city: str = "") -> list[dict]:
     """Two one-way searches (into the first city, home from the last), paired
-    role-for-role: cheapest out + cheapest home, and so on."""
+    per role: outbound-driven roles (early arrival, no early start) take their
+    outbound pick plus the cheapest return; late return takes the cheapest
+    outbound plus its return pick; one airline and bags need both legs to
+    qualify; nonstop must be nonstop both ways; price/time roles pair
+    role-for-role."""
     def one_way(frm, to, date):
-        return _search_journeys(
-            [{"origin": frm[0], "destination": to[0], "date": date, "direction": "OUTBOUND"}],
-            travelers)
+        lite, duffel = [], []
+        if flights_available():
+            try:
+                lite = _search_journeys(
+                    [{"origin": frm[0], "destination": to[0], "date": date, "direction": "OUTBOUND"}],
+                    travelers)
+            except Exception:
+                lite = []
+        if duffel_available():
+            duffel = []  # one-way Duffel legs are a follow-up; round trips merge above
+        return _merge_candidates(lite, duffel)
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         out_f = pool.submit(one_way, origin, dest, depart_date)
@@ -375,24 +476,78 @@ def _open_jaw_as_one_ways(origin, dest, return_from, home_to,
         out_cands, back_cands = out_f.result(), back_f.result()
     if not (out_cands and back_cands):
         return []
-    out_picks = dict(_pick_diverse(out_cands))
-    back_picks = dict(_pick_diverse(back_cands))
-    note = "Priced as two one-way fares (booked separately)"
-    options = []
-    for role in ("cheapest", "nonstop", "fastest", "balanced"):
-        o, b = out_picks.get(role), back_picks.get(role)
-        if role == "nonstop" and not (o and b):
-            continue  # a nonstop pairing must be nonstop BOTH ways
-        o = o or out_picks.get("cheapest")
-        b = b or back_picks.get("cheapest")
+
+    out_picks = {role: c for role, c, _, _ in _pick_diverse(out_cands, limit=9, pace=pace, dest_city=dest_city)}
+    back_facts = [_facts(c, dest_city, as_return=True) for c in back_cands]
+    back_picks = {p["role"]: back_cands[p["index"]]
+                  for p in ranking.pick_flight_roles(back_facts, 9, pace)}
+    cheapest_out = min(out_cands, key=lambda c: c["price"])
+    cheapest_back = min(back_cands, key=lambda c: c["price"])
+
+    def single_carrier(c):
+        codes = {(s.get("carrier") or {}).get("marketingCode") or (s.get("carrier") or {}).get("marketingName")
+                 for s in (c.get("out") or []) + (c.get("back") or [])}
+        return len({x for x in codes if x}) == 1
+
+    def cheapest_pair(pred):
+        pairs = [(o, b) for o in out_cands for b in back_cands if pred(o, b)]
+        return min(pairs, key=lambda p: p[0]["price"] + p[1]["price"]) if pairs else (None, None)
+
+    pairs = []
+    for role in ranking.flight_role_order(pace):
+        if role in ("early_arrival", "no_early_start"):
+            o, b = out_picks.get(role), cheapest_back
+        elif role == "late_return":
+            o, b = cheapest_out, back_picks.get(role)
+        elif role == "one_airline":
+            o, b = cheapest_pair(lambda o, b: single_carrier(o) and single_carrier(b)
+                                 and o["carriers"][:1] == b["carriers"][:1])
+        elif role == "bags":
+            o, b = cheapest_pair(lambda o, b: o["checked_bag"] and b["checked_bag"])
+        elif role == "nonstop":
+            o, b = cheapest_pair(lambda o, b: o["stops"] == 0 and b["stops"] == 0)
+        else:
+            o, b = out_picks.get(role), back_picks.get(role)
+            o = o or cheapest_out
+            b = b or cheapest_back
         if o and b:
-            options.append(_option_from(role, o, back_cand=b, why_extra=note))
-    seen, unique = set(), []
-    for opt in options:
-        if opt["journey_key"] not in seen:
-            seen.add(opt["journey_key"])
-            unique.append(opt)
-    return unique
+            pairs.append((role, o, b))
+
+    # Reasons are judged on the combined trip, against the other pairs
+    combined = []
+    for role, o, b in pairs:
+        f = _facts(o, dest_city)
+        fb = _facts(b, dest_city, as_return=True)
+        f.update({
+            "key": f"{o['journey_key']}+{b['journey_key']}",
+            "price": o["price"] + b["price"],
+            "minutes": int(o.get("out_minutes") or 0) + int(b.get("out_minutes") or b.get("back_minutes") or 0),
+            "stops": max(o["stops"], b["stops"]),
+            "back_depart": fb["back_depart"],
+            "checked_bag": o["checked_bag"] and b["checked_bag"],
+            "carry_on": o["carry_on"] and b["carry_on"],
+            "single_carrier": single_carrier(o) and single_carrier(b) and o["carriers"][:1] == b["carriers"][:1],
+        })
+        combined.append(f)
+    if not combined:
+        return []
+    prices = [f["price"] for f in combined]
+    minutes = [f["minutes"] for f in combined]
+    floor_price, floor_minutes = min(prices), min(minutes)
+    import statistics
+    median_price = statistics.median(prices)
+    cheapest_minutes = minutes[min(range(len(combined)), key=lambda i: (prices[i], minutes[i]))]
+    note = "Priced as two one-way fares (booked separately)"
+    options, seen = [], set()
+    for (role, o, b), f in zip(pairs, combined):
+        if f["key"] in seen or any(ranking._similar(f, g) for g in [combined[i] for i in range(len(combined))
+                                                                  if combined[i]["key"] in seen]):
+            continue
+        seen.add(f["key"])
+        reasons = ranking.flight_reasons(role, f, floor_price, cheapest_minutes, median_price)
+        options.append(_option_from(role, o, back_cand=b, why_extra=note, reasons=reasons,
+                                    match_score=ranking.flight_match_score(f, floor_price, floor_minutes)))
+    return options
 
 
 # ---------------------------------------------------------------------------
@@ -428,15 +583,18 @@ def _verified_price(offer_id: str) -> float | None:
 def live_flight_details(option: dict) -> dict:
     """The option-detail payload for a flight. Live options serve their stored
     segments instantly; the fare is re-verified only while the quoted offer
-    can still be alive. AI/sample flights stay source="board" so the screen
-    keeps rendering the board's own facts."""
+    can still be alive — through the supplier that quoted it (LiteAPI's
+    /flights/verify, or Duffel's GET /air/offers/{id}). AI/sample flights stay
+    source="board" so the screen keeps rendering the board's own facts."""
     segments = option.get("segments") or {}
     if not (option.get("live_price") and segments.get("out")):
         return {"kind": "live", "source": "board"}
 
+    supplier = option.get("supplier") or "liteapi"
     details = {
         "kind": "live",
-        "source": "liteapi",
+        "source": "duffel" if supplier == "duffel" else "liteapi",
+        "supplier": supplier,
         "segments": segments,
         "out_duration": option.get("duration") or "",
         "back_duration": option.get("return_duration") or "",
@@ -448,14 +606,25 @@ def live_flight_details(option: dict) -> dict:
     }
 
     expires = option.get("expires_at") or ""
-    offer_ids = option.get("offer_ids") or []
-    if offer_ids and flights_available() and expires:
-        try:
-            if datetime.now(timezone.utc) < datetime.fromisoformat(expires.replace("Z", "+00:00")):
+    try:
+        alive = bool(expires) and datetime.now(timezone.utc) < datetime.fromisoformat(expires.replace("Z", "+00:00"))
+    except ValueError:
+        alive = False
+    if not alive:
+        return details
+    try:
+        if supplier == "duffel":
+            fresh = duffel_get_offer(option.get("duffel_offer_id") or "")
+            if fresh and (fresh.get("currency") or "USD") == (option.get("currency") or "USD"):
+                details["price_per_person"] = round(fresh["price_per_person"])
+                details["price_fresh"] = True
+        elif supplier == "liteapi":
+            offer_ids = option.get("offer_ids") or []
+            if offer_ids and flights_available():
                 fresh = [_verified_price(oid) for oid in offer_ids]
                 if all(p is not None for p in fresh):
                     details["price_per_person"] = round(sum(fresh))
                     details["price_fresh"] = True
-        except Exception:
-            pass  # stored quote + its age is the honest fallback
+    except Exception:
+        pass  # stored quote + its age is the honest fallback
     return details
