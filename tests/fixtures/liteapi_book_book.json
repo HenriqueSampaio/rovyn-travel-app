@@ -1,0 +1,262 @@
+{
+ "data": {
+  "bookingId": "lXsYSvoLr",
+  "clientReference": "rovyn-spike-0200f71e5e40",
+  "supplierBookingId": "lXsYSvoLr",
+  "supplierBookingName": "nuitee",
+  "supplier": "nuitee",
+  "supplierId": 2,
+  "status": "CONFIRMED",
+  "hotelConfirmationCode": "test",
+  "checkin": "2026-11-29",
+  "checkout": "2026-12-02",
+  "hotel": {
+   "hotelId": "lp36d84",
+   "name": "c-hotels Club House Roma",
+   "phone": "",
+   "email": ""
+  },
+  "bookedRooms": [
+   {
+    "roomType": {
+     "roomTypeId": "",
+     "name": "Test rate 1"
+    },
+    "boardType": "RO",
+    "boardName": "Room Only",
+    "adults": 1,
+    "children": 0,
+    "rate": {
+     "rateId": "I42FUVCNLJBFOR2FGNKEKTS2KVDUSWKEJVHEEV2NLEZVIS2OKJJUOWSSKRGU4SSTI5ATGVCFJZKEOR22KRCE2WSCKNDUCWSUINGVEUKHLEZEITK2KJMEOVJT\u2026",
+     "retailRate": {
+      "total": {
+       "amount": 243.12,
+       "currency": "USD"
+      },
+      "suggestedSellingPrice": {
+       "source": ""
+      },
+      "taxesAndFees": [
+       {
+        "included": true,
+        "description": "VAT",
+        "amount": 24.31,
+        "currency": "USD"
+       },
+       {
+        "included": false,
+        "description": "City tax",
+        "amount": 50.64,
+        "currency": "USD"
+       }
+      ]
+     },
+     "cancellationPolicies": {
+      "cancelPolicyInfos": [
+       {
+        "cancelTime": "2026-11-29 23:59:59",
+        "amount": 60.78,
+        "type": "amount",
+        "timezone": "GMT",
+        "currency": "USD"
+       }
+      ],
+      "refundableTag": "RFN"
+     },
+     "maxOccupancy": 1,
+     "boardType": "Room Only",
+     "boardName": "RO",
+     "perks": []
+    },
+    "firstName": "Test",
+    "lastName": "Rovyn",
+    "childrenAges": null,
+    "board": "Room Only",
+    "boardCode": "RO",
+    "cancellationPolicies": {
+     "cancelPolicyInfos": [
+      {
+       "cancelTime": "2026-11-22 10:00:00",
+       "amount": 486.24,
+       "type": "amount",
+       "timezone": "GMT",
+       "currency": "USD"
+      }
+     ],
+     "refundableTag": "RFN"
+    },
+    "room_id": "I42FUVCNLJBFOR2FGNKEKTS2KVDUSWKEJVHEEV2NLEZVIS2OKJJUOWSSKRGU4SSTI5ATGVCFJZKEOR22KRCE2WSCKNDUCWSUINGVEUKHLEZEITK2KJMEOVJT\u2026",
+    "occupancy_number": 1,
+    "amount": 243.12,
+    "currency": "USD",
+    "children_count": 0,
+    "guests": [
+     {
+      "firstName": "Test",
+      "lastName": "Rovyn",
+      "email": "test@example.com",
+      "phone": "",
+      "occupancyNumber": 1
+     }
+    ]
+   },
+   {
+    "roomType": {
+     "roomTypeId": "",
+     "name": "Test rate 2"
+    },
+    "boardType": "RO",
+    "boardName": "Room Only",
+    "adults": 1,
+    "children": 0,
+    "rate": {
+     "rateId": "I42FUVCNLJBFOR2FGNKEKTS2KVDUSWKEJVHEEV2NLEZVIS2OKJJUOWSSKRGU4SSTI5ATGVCFJZKEOR22KRCE2WSCKNDUCWSUINGVEUKHLEZEITK2KJMEOVJT\u2026",
+     "retailRate": {
+      "total": {
+       "amount": 243.12,
+       "currency": "USD"
+      },
+      "suggestedSellingPrice": {
+       "source": ""
+      },
+      "taxesAndFees": [
+       {
+        "included": true,
+        "description": "VAT",
+        "amount": 24.31,
+        "currency": "USD"
+       },
+       {
+        "included": false,
+        "description": "City tax",
+        "amount": 50.64,
+        "currency": "USD"
+       }
+      ]
+     },
+     "cancellationPolicies": {
+      "cancelPolicyInfos": [
+       {
+        "cancelTime": "2026-11-29 23:59:59",
+        "amount": 60.78,
+        "type": "amount",
+        "timezone": "GMT",
+        "currency": "USD"
+       }
+      ],
+      "refundableTag": "RFN"
+     },
+     "maxOccupancy": 1,
+     "boardType": "Room Only",
+     "boardName": "RO",
+     "perks": []
+    },
+    "firstName": "Test",
+    "lastName": "Two",
+    "childrenAges": null,
+    "board": "Room Only",
+    "boardCode": "RO",
+    "cancellationPolicies": {
+     "cancelPolicyInfos": [
+      {
+       "cancelTime": "2026-11-22 10:00:00",
+       "amount": 486.24,
+       "type": "amount",
+       "timezone": "GMT",
+       "currency": "USD"
+      }
+     ],
+     "refundableTag": "RFN"
+    },
+    "room_id": "I42FUVCNLJBFOR2FGNKEKTS2KVDUSWKEJVHEEV2NLEZVIS2OKJJUOWSSKRGU4SSTI5ATGVCFJZKEOR22KRCE2WSCKNDUCWSUINGVEUKHLEZEITK2KJMEOVJT\u2026",
+    "occupancy_number": 1,
+    "amount": 243.12,
+    "currency": "USD",
+    "children_count": 0,
+    "guests": [
+     {
+      "firstName": "Test",
+      "lastName": "Rovyn",
+      "email": "test@example.com",
+      "phone": "",
+      "occupancyNumber": 1
+     }
+    ]
+   }
+  ],
+  "holder": {
+   "firstName": "Test",
+   "lastName": "Rovyn",
+   "email": "test@example.com",
+   "phone": "+10000000000"
+  },
+  "createdAt": "2026-10-18T20:15:36",
+  "updatedAt": "",
+  "cancellationPolicies": {
+   "cancelPolicyInfos": [
+    {
+     "cancelTime": "2026-11-22 10:00:00",
+     "amount": 486.24,
+     "type": "amount",
+     "timezone": "GMT",
+     "currency": "USD"
+    }
+   ],
+   "refundableTag": "RFN"
+  },
+  "optionalFees": "Optional fees",
+  "mandatoryFees": "Mandatory fees",
+  "price": 486.24,
+  "sellingPriceToUser": 486.24,
+  "commission": 0,
+  "addonsTotalAmount": 0,
+  "currency": "USD",
+  "voucherCode": "",
+  "voucherTotalAmount": 0,
+  "addons": null,
+  "guestId": 0,
+  "distributorCommission": 0,
+  "distributorPrice": 0,
+  "trackingId": "",
+  "firstName": "Test",
+  "lastName": "Rovyn",
+  "adults": 4,
+  "children": "",
+  "childrenCount": 0,
+  "prebookId": "2DZbIOvT7",
+  "paymentStatus": "succeeded",
+  "paymentTransactionId": "tr_cts_JMv_8ynWFJNzrEzrlKOas",
+  "sellingPrice": "486.24",
+  "exchangeRate": 0.8897555837478726,
+  "exchangeRateUsd": 1,
+  "email": "test@example.com",
+  "tag": "RFN",
+  "lastFreeCancellationDate": "2026-11-22T10:00:00Z",
+  "userId": 379872,
+  "nationality": "US",
+  "holderTitle": "",
+  "hotelId": "lp36d84",
+  "hotelName": "c-hotels Club House Roma",
+  "cancelledAt": null,
+  "refundedAt": null,
+  "loyaltyGuestId": null,
+  "sandbox": 1,
+  "clientCommission": 0,
+  "voucherId": null,
+  "voucherTransationId": null,
+  "processingFee": 19.44,
+  "amountRefunded": 0,
+  "refundType": "",
+  "addonsRedemptions": null,
+  "rebookFrom": "",
+  "agentId": null,
+  "cancelledBy": null,
+  "feed": "liteapionboarding",
+  "goodwillPayment": null,
+  "newCharges": 0,
+  "compensationAmount": 0,
+  "payLaterDeadline": null
+ },
+ "guestLevel": 0,
+ "sandbox": true
+}

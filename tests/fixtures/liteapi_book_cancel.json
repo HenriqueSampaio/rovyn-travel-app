@@ -1,0 +1,10 @@
+{
+ "data": {
+  "bookingId": "lXsYSvoLr",
+  "cancellation_fee": 0,
+  "currency": "USD",
+  "refund_amount": 486.24,
+  "status": "CANCELLED"
+ },
+ "sandbox": true
+}

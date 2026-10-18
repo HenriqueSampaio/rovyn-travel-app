@@ -1,0 +1,388 @@
+{
+ "data": [
+  {
+   "hotelId": "lp36d84",
+   "roomTypes": [
+    {
+     "roomTypeId": "GE4TMMJNGIZDINRUGR6FERSOPQZDAMRWGEYTEMRRGAYDA7BRPRJDCMJVGB6DIOBWGI2A",
+     "offerId": "3gAYonJzkt4AEaRzcmlk2gFMRzRaVE1aQldHRTNURU5aVUdJWURNTkJXTVkzVEtOUlNHWlJUTU5KU0dBM1RFTlRHR1pURE1aQlNHQVpUQ01SUUdZMkRNWlJY\u2026",
+     "supplier": "nuitee",
+     "supplierId": 2,
+     "rates": [
+      {
+       "rateId": "I42FUVCNLJBFOR2FGNKEKTS2KVDUSWKEJVHEEV2NLEZVIS2OKJJUOWSSKRGU4SSTI5ATGVCFJZKEOR22KRCE2WSCKNDUCWSUINGVEUKHLEZEITK2KJMEOVJT\u2026",
+       "occupancyNumber": 1,
+       "name": "Smart Double Room 1 Double Bed",
+       "maxOccupancy": 2,
+       "adultCount": 2,
+       "childCount": 0,
+       "childrenAges": [],
+       "boardType": "BI",
+       "boardName": "Breakfast Included",
+       "priceType": "commission",
+       "commission": [
+        {
+         "amount": 0,
+         "currency": "USD"
+        }
+       ],
+       "retailRate": {
+        "total": [
+         {
+          "amount": 243.12,
+          "currency": "USD"
+         }
+        ],
+        "suggestedSellingPrice": [
+         {
+          "amount": 279.585,
+          "currency": "USD",
+          "source": ""
+         }
+        ],
+        "initialPrice": [
+         {
+          "amount": 243.12,
+          "currency": "USD"
+         }
+        ],
+        "taxesAndFees": [
+         {
+          "included": true,
+          "description": "VAT",
+          "amount": 24.31,
+          "currency": "USD"
+         },
+         {
+          "included": false,
+          "description": "City tax",
+          "amount": 50.64,
+          "currency": "USD"
+         }
+        ]
+       },
+       "cancellationPolicies": {
+        "cancelPolicyInfos": [
+         {
+          "cancelTime": "2026-11-22 10:00:00",
+          "amount": 243.12,
+          "currency": "USD",
+          "type": "amount",
+          "timezone": "GMT"
+         }
+        ],
+        "refundableTag": "RFN"
+       },
+       "paymentTypes": [
+        "NUITEE_PAY"
+       ],
+       "providerCommission": {
+        "amount": 0,
+        "currency": ""
+       },
+       "perks": [],
+       "promotions": null
+      },
+      {
+       "rateId": "I42FUVCNLJBFOR2FGNKEKTS2KVDUSWKEJVHEEV2NLEZVIS2OKJJUOWSSKRGU4SSTI5ATGVCFJZKEOR22KRCE2WSCKNDUCWSUINGVEUKHLEZEITK2KJMEOVJT\u2026",
+       "occupancyNumber": 2,
+       "name": "Smart Double Room 1 Double Bed",
+       "maxOccupancy": 2,
+       "adultCount": 2,
+       "childCount": 0,
+       "childrenAges": [],
+       "boardType": "BI",
+       "boardName": "Breakfast Included",
+       "priceType": "commission",
+       "commission": [
+        {
+         "amount": 0,
+         "currency": "USD"
+        }
+       ],
+       "retailRate": {
+        "total": [
+         {
+          "amount": 243.12,
+          "currency": "USD"
+         }
+        ],
+        "suggestedSellingPrice": [
+         {
+          "amount": 279.585,
+          "currency": "USD",
+          "source": ""
+         }
+        ],
+        "initialPrice": [
+         {
+          "amount": 243.12,
+          "currency": "USD"
+         }
+        ],
+        "taxesAndFees": [
+         {
+          "included": true,
+          "description": "VAT",
+          "amount": 24.31,
+          "currency": "USD"
+         },
+         {
+          "included": false,
+          "description": "City tax",
+          "amount": 50.64,
+          "currency": "USD"
+         }
+        ]
+       },
+       "cancellationPolicies": {
+        "cancelPolicyInfos": [
+         {
+          "cancelTime": "2026-11-22 10:00:00",
+          "amount": 243.12,
+          "currency": "USD",
+          "type": "amount",
+          "timezone": "GMT"
+         }
+        ],
+        "refundableTag": "RFN"
+       },
+       "paymentTypes": [
+        "NUITEE_PAY"
+       ],
+       "providerCommission": {
+        "amount": 0,
+        "currency": ""
+       },
+       "perks": [],
+       "promotions": null
+      }
+     ],
+     "offerRetailRate": {
+      "amount": 486.24,
+      "currency": "USD"
+     },
+     "suggestedSellingPrice": {
+      "amount": 559.16,
+      "currency": "USD",
+      "source": ""
+     },
+     "offerInitialPrice": {
+      "amount": 486.24,
+      "currency": "USD"
+     },
+     "priceType": "commission",
+     "rateType": "standard",
+     "paymentTypes": [
+      "NUITEE_PAY"
+     ],
+     "paymentSchedule": "now"
+    }
+   ]
+  },
+  {
+   "hotelId": "lp88f00",
+   "roomTypes": [
+    {
+     "roomTypeId": "GIYDSMRNGU3DAOBZGZ6E4USGJZ6DEMBSGYYTAMJXGA3TKOL4GEZXYURSG42DI7BRGM2TKOBX",
+     "offerId": "3gAYonJzkt4AEaRzcmlk2gE8RzRaVE9OSlhHQTNES05aU0dZNFRNWlJYR0laREFOWlNHWlRETVpSV01RWkRBTlpYR1k0VE9OQldIQVpEQU5aV0dZNFRNTkpY\u2026",
+     "supplier": "nuitee",
+     "supplierId": 2,
+     "rates": [
+      {
+       "rateId": "I42FUVCPJZFFQR2BGNCEWTS2KNDVSNCUJVNFEWCHJFNEIQKOLJJUOWSUIRGVUUSXJVIVURCBJZNFQR2ZGRKE6TSCK5EECWSEIFHFUV2HLE2FITKOJJMEONJW\u2026",
+       "occupancyNumber": 2,
+       "name": "SUPERIOR ROOM WITH VIEW",
+       "maxOccupancy": 2,
+       "adultCount": 2,
+       "childCount": 0,
+       "childrenAges": [],
+       "boardType": "RO",
+       "boardName": "Room Only",
+       "priceType": "commission",
+       "commission": [
+        {
+         "amount": 0,
+         "currency": "USD"
+        }
+       ],
+       "retailRate": {
+        "total": [
+         {
+          "amount": 677.93,
+          "currency": "USD"
+         }
+        ],
+        "suggestedSellingPrice": [
+         {
+          "amount": 1860.2362800268465,
+          "currency": "USD",
+          "source": "providerDirect"
+         }
+        ],
+        "initialPrice": [
+         {
+          "amount": 677.93,
+          "currency": "USD"
+         }
+        ],
+        "taxesAndFees": [
+         {
+          "included": true,
+          "description": "VAT",
+          "amount": 67.79,
+          "currency": "USD"
+         },
+         {
+          "included": false,
+          "description": "City tax",
+          "amount": 67.56,
+          "currency": "USD"
+         }
+        ]
+       },
+       "cancellationPolicies": {
+        "cancelPolicyInfos": [],
+        "refundableTag": "NRFN"
+       },
+       "paymentTypes": [
+        "NUITEE_PAY"
+       ],
+       "providerCommission": {
+        "amount": 0,
+        "currency": ""
+       },
+       "perks": [],
+       "promotions": null
+      },
+      {
+       "rateId": "I42FUVCPJZFFQR2BGNCEWTS2KNDVSNCUJVNFEWCHJFNEIQKOLJJUOWSUIRGVUUSXJVIVURCBJZNFQR2ZGRKE6TSCK5EECWSEIFHFUV2HLE2FITKOJJMEONJW\u2026",
+       "occupancyNumber": 1,
+       "name": "SUPERIOR ROOM WITH VIEW",
+       "maxOccupancy": 2,
+       "adultCount": 2,
+       "childCount": 0,
+       "childrenAges": [],
+       "boardType": "RO",
+       "boardName": "Room Only",
+       "priceType": "commission",
+       "commission": [
+        {
+         "amount": 0,
+         "currency": "USD"
+        }
+       ],
+       "retailRate": {
+        "total": [
+         {
+          "amount": 677.93,
+          "currency": "USD"
+         }
+        ],
+        "suggestedSellingPrice": [
+         {
+          "amount": 1860.2362800268465,
+          "currency": "USD",
+          "source": "providerDirect"
+         }
+        ],
+        "initialPrice": [
+         {
+          "amount": 677.93,
+          "currency": "USD"
+         }
+        ],
+        "taxesAndFees": [
+         {
+          "included": true,
+          "description": "VAT",
+          "amount": 67.79,
+          "currency": "USD"
+         },
+         {
+          "included": false,
+          "description": "City tax",
+          "amount": 67.56,
+          "currency": "USD"
+         }
+        ]
+       },
+       "cancellationPolicies": {
+        "cancelPolicyInfos": [],
+        "refundableTag": "NRFN"
+       },
+       "paymentTypes": [
+        "NUITEE_PAY"
+       ],
+       "providerCommission": {
+        "amount": 0,
+        "currency": ""
+       },
+       "perks": [],
+       "promotions": null
+      }
+     ],
+     "offerRetailRate": {
+      "amount": 1355.86,
+      "currency": "USD"
+     },
+     "suggestedSellingPrice": {
+      "amount": 3720.47,
+      "currency": "USD",
+      "source": "providerDirect"
+     },
+     "offerInitialPrice": {
+      "amount": 1355.86,
+      "currency": "USD"
+     },
+     "priceType": "commission",
+     "rateType": "package",
+     "paymentTypes": [
+      "NUITEE_PAY"
+     ],
+     "paymentSchedule": "now"
+    }
+   ]
+  }
+ ],
+ "sandbox": true,
+ "guestLevel": 0,
+ "hotels": [
+  {
+   "id": "lp1c4b4",
+   "name": "Hotel Quirinale",
+   "address": "Via Nazionale 7",
+   "country_code": "IT",
+   "city_name": "Rome",
+   "latitude": 41.901662,
+   "longitude": 12.494848,
+   "rating": 8.2,
+   "stars": 4,
+   "review_count": 8003
+  },
+  {
+   "id": "lp1e1d5",
+   "name": "Hotel Nazionale",
+   "address": "Piazza Montecitorio 131",
+   "country_code": "IT",
+   "city_name": "Rome",
+   "latitude": 41.900932,
+   "longitude": 12.477996,
+   "rating": 9.2,
+   "stars": 4,
+   "review_count": 3702
+  },
+  {
+   "id": "lp234aa",
+   "name": "FH55 Grand Hotel Palatino",
+   "address": "Via Cavour 213",
+   "country_code": "IT",
+   "city_name": "Rome",
+   "latitude": 41.894463,
+   "longitude": 12.492281,
+   "rating": 8.9,
+   "stars": 4,
+   "review_count": 5487
+  }
+ ]
+}
