@@ -18,20 +18,61 @@ import json
 import os
 import re
 import ssl
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, wait
 
 import certifi
 import pycountry
 
+from backend.services import option_ranking as ranking
+from backend.services.duffel_service import duffel_stays_enabled, search_stays as duffel_search_stays
 from backend.services.links import safe_url
-from backend.services.maps_service import travel_from_center
+from backend.services.maps_service import geocode_place, maps_available, travel_from_center
 
 _SSL_CTX = ssl.create_default_context(cafile=certifi.where())
 _LITE_BASE = "https://api.liteapi.travel/v3.0"
+
+# One process-wide throttle for EVERY LiteAPI call — board searches, flight
+# searches, galleries, reviews and detail pages all share the key's rate
+# limit (5 req/s on sandbox keys, 250 on production). At most three calls in
+# flight at once, and a token bucket that smooths bursts to LITEAPI_RATE_PER_S
+# (default 8/s; 4/s on a sandbox key). Without it a wide hotel search plus a
+# few galleries would trip the 429 and silently degrade a whole city.
+_LITE_IN_FLIGHT = threading.Semaphore(3)
+_bucket_lock = threading.Lock()
+_bucket = {"tokens": 0.0, "at": 0.0, "rate": 0.0}
+
+
+def _lite_rate_per_s() -> float:
+    try:
+        configured = float(os.environ.get("LITEAPI_RATE_PER_S") or 0)
+    except ValueError:
+        configured = 0.0
+    if configured > 0:
+        return configured
+    return 4.0 if os.environ.get("LITEAPI_API_KEY", "").startswith("sand_") else 8.0
+
+
+def _take_token() -> None:
+    """Block until the bucket has a token — the pacing half of the throttle."""
+    while True:
+        with _bucket_lock:
+            rate = _lite_rate_per_s()
+            now = time.monotonic()
+            if _bucket["rate"] != rate:  # first call, or the key changed
+                _bucket.update(tokens=rate, at=now, rate=rate)
+            _bucket["tokens"] = min(rate, _bucket["tokens"] + (now - _bucket["at"]) * rate)
+            _bucket["at"] = now
+            if _bucket["tokens"] >= 1:
+                _bucket["tokens"] -= 1
+                return
+            wait_s = (1 - _bucket["tokens"]) / rate
+        time.sleep(min(wait_s, 1.0))
 
 
 def _country_code(country: str) -> str | None:
@@ -88,8 +129,13 @@ def _lite_request(path: str, payload: dict | None = None, params: dict | None = 
             method="POST" if payload is not None else "GET",
         )
         try:
-            with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as res:
-                return json.loads(res.read().decode())
+            _take_token()
+            with _LITE_IN_FLIGHT:
+                with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as res:
+                    raw = res.read().decode()
+                    # A 204 "no availability found" (error code 2001) is an
+                    # empty answer, not a transport failure
+                    return json.loads(raw) if raw.strip() else {}
         except urllib.error.HTTPError as exc:
             last_err = exc
             if exc.code not in (429, 500, 502, 503, 504):
@@ -97,6 +143,13 @@ def _lite_request(path: str, payload: dict | None = None, params: dict | None = 
         except (urllib.error.URLError, TimeoutError) as exc:
             last_err = exc
     raise last_err
+
+
+def _retry_after_seconds(exc: urllib.error.HTTPError, default: float = 1.5) -> float:
+    try:
+        return max(0.0, float((exc.headers or {}).get("Retry-After") or default))
+    except (TypeError, ValueError):
+        return default
 
 
 def _split_place(destination: str) -> tuple[str, str]:
@@ -118,15 +171,9 @@ _TYPE_NAMES = {
     230: "cottage", 231: "economy hotel", 232: "gite",
 }
 
-# Rovyn questionnaire accommodation vote -> (core typeIds, partial typeIds)
-_VOTE_TYPE_IDS = {
-    "hostel": ({203, 225}, {208, 216, 218, 222}),
-    "boutique hotel": ({208, 216, 218, 227}, {204}),
-    "4-star hotel": ({204, 219, 231}, {206}),
-    "luxury resort": ({206}, {204}),
-    "airbnb/vacation rental": (
-        {201, 207, 213, 219, 220, 222, 223, 228, 229, 230, 232}, {208, 216}),
-}
+# Rovyn questionnaire accommodation vote -> (core typeIds, partial typeIds);
+# the single definition lives with the ranking rules
+_VOTE_TYPE_IDS = ranking.VOTE_TYPE_IDS
 
 
 def _type_label(hotel: dict) -> str:
@@ -135,25 +182,6 @@ def _type_label(hotel: dict) -> str:
     if label in ("hotel", "resort") and stars:
         return f"{stars}-star {label}"
     return label
-
-
-def _affinity(hotel: dict, type_votes: dict | None) -> float:
-    """0..1 — how well this property matches the group's accommodation votes."""
-    if not type_votes:
-        return 0.0
-    tid = hotel.get("hotelTypeId")
-    stars = hotel.get("stars") or hotel.get("starRating") or 0
-    total = sum(type_votes.values()) or 1
-    score = 0.0
-    for vote, count in type_votes.items():
-        core, partial = _VOTE_TYPE_IDS.get(vote, (set(), set()))
-        match = 1.0 if tid in core else (0.5 if tid in partial else 0.0)
-        if match and vote == "4-star hotel" and stars and not (3.5 <= stars <= 4.5):
-            match *= 0.6
-        if match and vote == "luxury resort" and tid == 204:
-            match = 0.5 if stars >= 5 else 0.15
-        score += (count / total) * match
-    return score
 
 
 def _hotel_image(h: dict) -> dict | None:
@@ -167,13 +195,296 @@ def _hotel_image(h: dict) -> dict | None:
             "credit": h.get("name", ""), "credit_url": ""}
 
 
+# ---------------------------------------------------------------------------
+# The wide stay search — docs/OPTIONS-BREADTH-SPEC.md
+# ---------------------------------------------------------------------------
+
+# Provider ceilings, one named constant each (docs.liteapi.travel, 2026-10-18)
+_LITE_LIST_LIMIT = 5000        # GET /data/hotels `limit`: default 200, max 5000
+_LITE_RATES_LIMIT = 5000       # POST /hotels/rates `limit`: default 200, max 5000
+_LITE_RATES_BATCH = 50         # hotelIds per rates call on the id-batched fallback path (no documented max)
+_LITE_RATES_TIMEOUT = 10       # LiteAPI's own live-rate cutoff in seconds (docs recommend 6–12)
+_LITE_RATES_MAX_PER_HOTEL = 1  # the wide pass needs each hotel's cheapest offer, nothing more
+_LITE_LIST_HTTP_TIMEOUT = 8
+_LITE_RATES_HTTP_TIMEOUT = 20
+_TOP_UP_FLOOR = 8              # fewer core matches than this for a voted style -> one filtered top-up
+_TOP_UP_LIMIT = 40
+_MAX_TOP_UPS = 2
+_RERUN_BATCH = 50              # the one re-price of unpriced top-affinity hotels when pricing was thin
+_FACILITIES_TTL = 24 * 3600
+_FACILITIES_RETRY = 300
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name) or default)
+    except ValueError:
+        value = default
+    return max(value, 0)
+
+
+def stay_candidates(per_city: bool = False) -> int:
+    """How many properties to price before choosing — the net's width."""
+    default = 60 if per_city else 150
+    configured = _env_int("STAY_CANDIDATES", 150)
+    return min(configured if not per_city else min(configured, default), _LITE_LIST_LIMIT)
+
+
+def stay_options_target(per_city: bool = False) -> int:
+    """How many stays the board shows (a route city gets fewer)."""
+    if per_city:
+        return _env_int("STAY_OPTIONS_PER_CITY", 5)
+    return _env_int("STAY_OPTIONS_SINGLE", 12)
+
+
+def stay_search_deadline() -> float:
+    """One absolute wall-time budget for a city's whole stay search, seconds."""
+    try:
+        return max(float(os.environ.get("STAY_SEARCH_DEADLINE_S") or 25), 1.0)
+    except ValueError:
+        return 25.0
+
+
+def liteapi_sandbox() -> bool:
+    return os.environ.get("LITEAPI_API_KEY", "").startswith("sand_")
+
+
+_facilities_lock = threading.Lock()
+_facilities = {"at": 0.0, "failed_at": 0.0, "names": {}}
+
+
+def facility_names() -> dict[int, str]:
+    """facility_id -> English name from GET /data/facilities, cached per
+    process for a day. The hotel list carries facilityIds; joined with this
+    map they become the facts behind a "Pool & spa" reason — without a
+    per-hotel details call. {} when the catalog can't be fetched (then the
+    vibe dimension simply stays out of the score)."""
+    now = time.monotonic()
+    with _facilities_lock:
+        if _facilities["names"] and now - _facilities["at"] < _FACILITIES_TTL:
+            return _facilities["names"]
+        if _facilities["failed_at"] and now - _facilities["failed_at"] < _FACILITIES_RETRY:
+            return _facilities["names"]
+    names: dict[int, str] = {}
+    try:
+        data = _lite_request("/data/facilities", timeout=_LITE_LIST_HTTP_TIMEOUT, attempts=1)
+        for f in data.get("data") or []:
+            if f.get("facility_id") is not None and f.get("facility"):
+                names[int(f["facility_id"])] = str(f["facility"])
+    except Exception:
+        names = {}
+    with _facilities_lock:
+        if names:
+            _facilities.update(at=now, names=names, failed_at=0.0)
+        else:
+            _facilities["failed_at"] = now
+        return _facilities["names"]
+
+
+def _rates_payload(check_in: str, check_out: str, rooms_needed: int, **location) -> dict:
+    """The body every rates call in the wide search shares; `location` is one
+    of the documented main queries (countryCode+cityName, or hotelIds[]),
+    optionally narrowed by hotelTypeIds[]."""
+    return {
+        "checkin": check_in,
+        "checkout": check_out,
+        "currency": "USD",
+        "guestNationality": "US",
+        "occupancies": [{"adults": 2}] * rooms_needed,
+        "timeout": _LITE_RATES_TIMEOUT,
+        "maxRatesPerHotel": _LITE_RATES_MAX_PER_HOTEL,
+        **location,
+    }
+
+
+def _cheapest_offers(rates: dict) -> dict[str, float]:
+    """hotelId -> cheapest offerRetailRate. The offer rate is the WHOLE offer
+    (all requested rooms, the whole stay, per LiteAPI docs) — per-occupancy
+    rate totals must never be mixed in."""
+    priced: dict[str, float] = {}
+    for entry in (rates or {}).get("data") or []:
+        hid = entry.get("hotelId")
+        offers = []
+        for rt in entry.get("roomTypes") or []:
+            amount = (rt.get("offerRetailRate") or {}).get("amount")
+            if amount:
+                try:
+                    offers.append(float(amount))
+                except (TypeError, ValueError):
+                    continue
+        if hid and offers:
+            priced[hid] = min(priced.get(hid, float("inf")), min(offers))
+    return priced
+
+
+def _rates_call(payload: dict, deadline_at: float) -> tuple[dict[str, float], list[dict]]:
+    """(cheapest offer per hotel, hotels[] summary block). One attempt; a 429
+    is retried once after Retry-After when the deadline allows."""
+    for attempt in range(2):
+        try:
+            rates = _lite_request("/hotels/rates", payload=payload,
+                                  timeout=_LITE_RATES_HTTP_TIMEOUT, attempts=1)
+            return _cheapest_offers(rates), (rates or {}).get("hotels") or []
+        except urllib.error.HTTPError as exc:
+            if exc.code == 429 and attempt == 0:
+                pause = _retry_after_seconds(exc)
+                if time.monotonic() + pause < deadline_at:
+                    time.sleep(pause)
+                    continue
+            raise
+    return {}, []
+
+
+def _settle(future, deadline_at: float, stats: dict, kind: str):
+    """A future's result within what is left of the deadline, or None —
+    counting failures and truncation so the board can say what it saw."""
+    if future is None:
+        return None
+    try:
+        return future.result(timeout=max(0.0, deadline_at - time.monotonic()))
+    except TimeoutError:
+        stats["truncated"] = True
+        return None
+    except Exception:
+        if kind == "rates":
+            stats["batches_failed"] = stats.get("batches_failed", 0) + 1
+        return None
+
+
+def _hotel_from_rates_block(h: dict | None) -> dict | None:
+    """The hotels[] summary a rates search returns, in the list's shape — the
+    fallback identity for a priced hotel the content list didn't include."""
+    if not h or not h.get("id"):
+        return None
+    return {
+        "id": h["id"], "name": h.get("name") or "Hotel", "main_photo": h.get("main_photo"),
+        "thumbnail": h.get("thumbnail"), "address": h.get("address"), "city": h.get("city_name"),
+        "latitude": h.get("latitude"), "longitude": h.get("longitude"), "rating": h.get("rating"),
+        "stars": h.get("stars"), "reviewCount": h.get("review_count"), "hotelTypeId": None,
+        "facilityIds": [],
+    }
+
+
+def _stay_record(hotel: dict, total: float, group_size: int, nights: int,
+                 center, facilities: dict[int, str]) -> dict:
+    """A priced hotel as the provider-neutral record option_ranking scores."""
+    lat, lng = hotel.get("latitude"), hotel.get("longitude")
+    distance = ranking.distance_km(center[0], center[1], lat, lng) if center and lat is not None else None
+    rating10 = None
+    if hotel.get("rating"):
+        try:
+            rating10 = round(float(hotel["rating"]), 1)
+        except (TypeError, ValueError):
+            rating10 = None
+    names = [facilities[i] for i in (hotel.get("facilityIds") or []) if i in facilities]
+    return {
+        "key": hotel["id"],
+        "name": hotel.get("name") or "Hotel",
+        "type_id": hotel.get("hotelTypeId"),
+        "type_label": _type_label(hotel),
+        "stars": hotel.get("stars") or hotel.get("starRating"),
+        "rating10": rating10,
+        "review_count": hotel.get("reviewCount"),
+        "lat": lat,
+        "lng": lng,
+        "distance_km": distance,
+        "price_total": float(total),
+        "per_person_total": float(total) / max(int(group_size or 1), 1),
+        "nights": max(int(nights or 1), 1),
+        "facilities": names,
+        "description": _strip_html(hotel.get("hotelDescription") or "")[:600],
+        "group_size": group_size,
+        "image": _hotel_image(hotel),
+        "address": hotel.get("address") or hotel.get("city") or "",
+    }
+
+
+def _stay_option(rec: dict, band: dict | None) -> dict:
+    """The board's stay-option schema (every existing field kept) plus the
+    picked-for-you fields: lane, match_score, reasons, supplier, why."""
+    reasons = list(rec.get("reasons") or [])
+    lane = rec.get("lane")
+    if lane == "Splurge":
+        lead = ranking.splurge_reason(rec, band)
+        if lead:
+            reasons = [lead] + [r for r in reasons if r["kind"] != "budget"][:ranking.MAX_REASONS - 1]
+    nights = max(int(rec.get("nights") or 1), 1)
+    supplier = rec.get("supplier") or "liteapi"
+    option = {
+        "name": rec["name"],
+        "type": rec["type_label"],
+        "area": rec.get("address") or "",
+        "price_per_night": round(rec["price_total"] / nights),
+        "total_per_person": round(rec["per_person_total"]),
+        "rating": rec.get("rating10"),
+        "rating10": rec.get("rating10"),
+        "rating_scale": "10" if rec.get("rating10") is not None else None,
+        "review_count": rec.get("review_count"),
+        "amenities": list(rec.get("facilities") or [])[:6],
+        "why": ranking.why_line(lane, reasons),
+        "image": rec.get("image"),
+        "live_price": True,
+        # The official site is healed lazily on the option page (trips.py
+        # read_option_details) — a Places call per candidate at board time
+        # would cost more than the whole hotel search.
+        "official_website": None,
+        "lane": lane,
+        "match_score": rec.get("match_score"),
+        "reasons": reasons,
+        "supplier": supplier,
+        "sandbox": bool(rec.get("sandbox")) if supplier == "duffel" else liteapi_sandbox(),
+        "currency": rec.get("currency") or "USD",
+        "distance_km": rec.get("distance_km"),
+        "lat": rec.get("lat"),
+        "lng": rec.get("lng"),
+    }
+    if supplier == "duffel":
+        # Priced and described by Duffel's search alone: not on the LiteAPI
+        # rooming/booking paths (no liteapi_hotel_id), and its option page is
+        # the search payload
+        option.update({
+            "bookable": False,
+            "duffel_accommodation_id": rec.get("duffel_accommodation_id"),
+            "duffel_search_result_id": rec.get("duffel_search_result_id"),
+            "duffel_details": rec.get("details"),
+        })
+    else:
+        option["liteapi_hotel_id"] = rec["key"]
+    return option
+
+
+def _same_property(a: dict, b: dict) -> bool:
+    """The same hotel from two suppliers: matching distinctive name words
+    and, when both have coordinates, within 150 m of each other."""
+    if not _names_match(a.get("name") or "", b.get("name") or ""):
+        return False
+    if a.get("lat") is None or b.get("lat") is None:
+        return True
+    d = ranking.distance_km(a["lat"], a["lng"], b["lat"], b["lng"])
+    return d is not None and d <= 0.15
+
+
 def real_stay_options(destination: str, check_in: str, check_out: str,
                       group_size: int, nights: int, country_hint: str = "",
-                      type_votes: dict | None = None) -> list[dict]:
-    """Up to 6 real properties with live prices, mapped to Rovyn's stay-option
-    schema and biased toward the group's accommodation votes (a villa-loving
-    group sees villas first) while keeping price diversity.
-    Returns [] on any failure — callers must fall back to AI/sample options."""
+                      type_votes: dict | None = None, *, prefs: dict | None = None,
+                      target: int | None = None, per_city: bool = False,
+                      report: dict | None = None) -> list[dict]:
+    """Up to `target` real properties with live prices, each with a lane and
+    data-backed reasons it was picked for THIS group.
+
+    Under one wall-time deadline (STAY_SEARCH_DEADLINE_S) and the shared
+    LiteAPI throttle, concurrently: the content list (types, facilities,
+    guest scores, coordinates), one rates search by city (cheapest offer per
+    hotel, up to STAY_CANDIDATES hotels), up to two rates top-ups filtered to
+    voted styles the first page under-serves, the facilities catalog and the
+    city center. Thin pricing gets one re-price of the best unpriced hotels;
+    an empty by-city rates answer falls back to id batches. Whatever is not
+    back by the deadline is dropped and reported in `report`.
+
+    Returns [] on any failure — callers fall back to the AI/sample menu."""
+    stats = report if isinstance(report, dict) else {}
+    stats.update({"listed": 0, "priced": 0, "batches_failed": 0, "truncated": False,
+                  "top_ups": 0, "mode": "city"})
     if not liteapi_available():
         return []
     try:
@@ -183,76 +494,135 @@ def real_stay_options(destination: str, check_in: str, check_out: str,
             # LiteAPI city search requires an ISO-2 countryCode; without a
             # resolvable country we can't search reliably — use AI stays.
             return []
-        data = _lite_request("/data/hotels", params={
-            "cityName": city, "countryCode": code, "limit": 40,
-        })
-        hotels = data.get("data") or []
-        if not hotels:
+        prefs = dict(prefs or {})
+        prefs.setdefault("accommodation_votes", type_votes or {})
+        prefs.setdefault("group_size", group_size)
+        votes = {k: v for k, v in (prefs.get("accommodation_votes") or {}).items() if v}
+        want = int(target or stay_options_target(per_city))
+        candidates = stay_candidates(per_city)
+        rooms_needed = max(1, (group_size + 1) // 2)  # two per room, rounding up
+        deadline_at = time.monotonic() + stay_search_deadline()
+        payload = lambda **loc: _rates_payload(check_in, check_out, rooms_needed, **loc)  # noqa: E731
+
+        pool = ThreadPoolExecutor(max_workers=8)
+        try:
+            content_f = pool.submit(_lite_request, "/data/hotels", params={
+                "cityName": city, "countryCode": code, "limit": candidates,
+            }, timeout=_LITE_LIST_HTTP_TIMEOUT, attempts=1)
+            rates_f = pool.submit(_rates_call, payload(
+                countryCode=code, cityName=city, limit=min(candidates, _LITE_RATES_LIMIT)), deadline_at)
+            facilities_f = pool.submit(facility_names)
+            center_f = pool.submit(geocode_place, destination) if maps_available() else None
+
+            content = _settle(content_f, deadline_at, stats, "list") or {}
+            hotels = [h for h in (content.get("data") or []) if h.get("id")]
+            by_id = {h["id"]: h for h in hotels}
+            stats["listed"] = len(hotels)
+            center = _settle(center_f, deadline_at, stats, "geocode") if center_f else None
+            # Duffel accommodations join only on live Duffel Stays access
+            # (DUFFEL_STAYS=1): test mode serves synthetic test hotels only
+            duffel_f = None
+            if duffel_stays_enabled() and center:
+                duffel_f = pool.submit(duffel_search_stays, center[0], center[1], check_in, check_out,
+                                       rooms_needed, group_size)
+
+            # Styles the group voted for but the first page barely carries:
+            # one filtered top-up each (two at most), priced right away
+            present = Counter(h.get("hotelTypeId") for h in hotels)
+            under = []
+            for vote, _count in sorted(votes.items(), key=lambda kv: (-kv[1], kv[0])):
+                core = ranking.VOTE_TYPE_IDS.get(vote, (set(), set()))[0]
+                if core and sum(present[t] for t in core) < _TOP_UP_FLOOR:
+                    under.append(sorted(core))
+            top_up_fs = [pool.submit(_rates_call, payload(
+                countryCode=code, cityName=city, hotelTypeIds=core, limit=_TOP_UP_LIMIT), deadline_at)
+                for core in under[:_MAX_TOP_UPS]]
+            stats["top_ups"] = len(top_up_fs)
+
+            priced: dict[str, float] = {}
+            block: dict[str, dict] = {}
+
+            def absorb(result) -> None:
+                if not result:
+                    return
+                found, summary = result
+                for hid, total in found.items():
+                    priced[hid] = min(priced.get(hid, float("inf")), total)
+                for h in summary:
+                    if h.get("id"):
+                        block.setdefault(h["id"], h)
+
+            main = _settle(rates_f, deadline_at, stats, "rates")
+            absorb(main)
+            main_priced = bool(main and main[0])
+            for f in top_up_fs:
+                absorb(_settle(f, deadline_at, stats, "rates"))
+
+            if not main_priced and hotels:
+                # The by-city rates search answered nothing (a 204, a timeout,
+                # a sandbox quirk) — price the content list by id batches
+                # instead, the path every board used before. Top-ups may have
+                # priced a few styles already; the batches cover the rest.
+                stats["mode"] = "ids"
+                ids = [hid for hid in by_id if hid not in priced]
+                batches = [ids[i:i + _LITE_RATES_BATCH] for i in range(0, len(ids), _LITE_RATES_BATCH)]
+                for f in [pool.submit(_rates_call, payload(hotelIds=batch), deadline_at) for batch in batches]:
+                    absorb(_settle(f, deadline_at, stats, "rates"))
+
+            floor = max(4, want // 3)
+            if 0 < len(priced) < floor and hotels:
+                # Thin pricing: one re-price of the unpriced hotels the group
+                # would most want, before the board pads with estimates
+                def affinity(h):
+                    return ranking.style_affinity(votes, h.get("hotelTypeId"), "", h.get("stars"))["score"]
+                unpriced = sorted((h for h in hotels if h["id"] not in priced),
+                                  key=lambda h: (-affinity(h), -(h.get("rating") or 0)))[:_RERUN_BATCH]
+                if unpriced:
+                    absorb(_settle(pool.submit(_rates_call, payload(
+                        hotelIds=[h["id"] for h in unpriced]), deadline_at), deadline_at, stats, "rates"))
+
+            missing = [hid for hid in priced if hid not in by_id][:200]
+            if missing:
+                # Priced by the city search but absent from the content page —
+                # one direct content fetch so types and facilities are known
+                extra = _settle(pool.submit(_lite_request, "/data/hotels", params={
+                    "countryCode": code, "hotelIds": ",".join(missing), "limit": len(missing),
+                }, timeout=_LITE_LIST_HTTP_TIMEOUT, attempts=1), deadline_at, stats, "list") or {}
+                for h in extra.get("data") or []:
+                    if h.get("id"):
+                        by_id.setdefault(h["id"], h)
+
+            facilities = _settle(facilities_f, deadline_at, stats, "facilities") or {}
+            duffel_records = (_settle(duffel_f, deadline_at, stats, "duffel") or []) if duffel_f else []
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+
+        stats["priced"] = len(priced)
+        records = []
+        for hid, total in priced.items():
+            hotel = by_id.get(hid) or _hotel_from_rates_block(block.get(hid))
+            if hotel:
+                records.append(_stay_record(hotel, total, group_size, nights, center, facilities))
+        added = 0
+        for rec in duffel_records:
+            if any(_same_property(rec, known) for known in records):
+                continue  # LiteAPI already carries it — and can price and detail it
+            rec = dict(rec)
+            rec["per_person_total"] = rec["price_total"] / max(int(group_size or 1), 1)
+            rec["nights"] = max(int(nights or 1), 1)
+            rec["group_size"] = group_size
+            if center and rec.get("lat") is not None:
+                rec["distance_km"] = ranking.distance_km(center[0], center[1], rec["lat"], rec["lng"])
+            records.append(rec)
+            added += 1
+        stats["duffel"] = added
+        if not records:
             return []
-        by_id = {h.get("id"): h for h in hotels if h.get("id")}
-
-        # Two travelers per room, rounding UP so everyone has a bed
-        rooms_needed = max(1, (group_size + 1) // 2)
-        rates = _lite_request("/hotels/rates", payload={
-            "hotelIds": list(by_id.keys()),
-            "checkin": check_in,
-            "checkout": check_out,
-            "currency": "USD",
-            "guestNationality": "US",
-            "occupancies": [{"adults": 2}] * rooms_needed,
-        })
-        priced = []
-        for entry in rates.get("data") or []:
-            hotel = by_id.get(entry.get("hotelId"))
-            if not hotel:
-                continue
-            # offerRetailRate is the WHOLE offer (all requested rooms summed,
-            # per LiteAPI docs) — per-occupancy rate totals must not be mixed in
-            offers = [
-                float((rt.get("offerRetailRate") or {}).get("amount"))
-                for rt in entry.get("roomTypes") or []
-                if (rt.get("offerRetailRate") or {}).get("amount")
-            ]
-            if offers:
-                priced.append((hotel, min(offers)))
-        if not priced:
-            return []
-
-        # Rank by group-vote affinity (rating breaks ties), then guarantee
-        # price diversity by keeping the cheapest and priciest overall.
-        scored = [(hotel, total, _affinity(hotel, type_votes)) for hotel, total in priced]
-        scored.sort(key=lambda s: (-s[2], -(s[0].get("rating") or 0), s[1]))
-        chosen = scored[:4]
-        by_price = sorted(scored, key=lambda s: s[1])
-        for extreme in (by_price[0], by_price[-1]):
-            if not any(extreme[0].get("id") == c[0].get("id") for c in chosen) and len(chosen) < 6:
-                chosen.append(extreme)
-        chosen.sort(key=lambda s: s[1])
-
-        options = []
-        for hotel, total, affinity in chosen:
-            per_person = round(total / max(group_size, 1))
-            per_night = round(total / max(nights, 1))
-            label = _type_label(hotel)
-            why = f"Real availability for your dates — live total ${round(total)} for the group."
-            if affinity >= 0.5:
-                why = f"A {label} — matching the group's stay vote. Live total ${round(total)} for the group."
-            options.append({
-                "name": hotel.get("name", "Hotel"),
-                "type": label,
-                "area": hotel.get("address") or hotel.get("city") or "",
-                "price_per_night": per_night,
-                "total_per_person": per_person,
-                "rating": round(float(hotel.get("rating")), 1) if hotel.get("rating") else None,
-                "review_count": hotel.get("reviewCount"),
-                "amenities": [],
-                "why": why,
-                "image": _hotel_image(hotel),
-                "live_price": True,
-                "liteapi_hotel_id": hotel.get("id"),
-                "official_website": official_website(hotel.get("name", ""), destination),
-            })
-        return options
+        band = prefs.get("lodging_band")
+        scored = [dict(rec, **ranking.score_stay(rec, prefs, rec.get("supplier") or "liteapi"))
+                  for rec in records]
+        chosen = ranking.pick_stay_lanes(scored, want, votes, band)
+        return [_stay_option(rec, band) for rec in chosen]
     except Exception:
         # Live hotel data is an enhancement — it must never break trip planning
         return []
@@ -354,13 +724,18 @@ def _google_place_reviews(name: str, place: str) -> dict | None:
         return None
 
 
-def stay_media_for_options(stays: list[dict], destination: str) -> dict:
+def stay_media_for_options(stays: list[dict], destination: str) -> tuple[dict, bool]:
     """Photo galleries + guest reviews for every stay option, keyed by option id.
 
     LiteAPI properties get their real gallery and guest reviews; other stays
     fall back to Google Places reviews when that key is configured. Fetches run
-    concurrently and every one is best-effort — an option simply has no entry
-    when nothing could be found. Callers cache the result on the trip."""
+    concurrently (three stays at a time — a 12-stay board must not burst the
+    key's rate limit) and every one is best-effort — an option simply has no
+    entry when nothing could be found. Returns (media, complete): complete is
+    False when LiteAPI throttled a fetch, so callers must NOT cache that
+    partial answer on the trip and will try again on the next open."""
+    throttled = threading.Event()
+
     def fetch(opt: dict):
         photos, reviews, rating10, count = [], [], None, None
         hotel_id = opt.get("liteapi_hotel_id")
@@ -371,10 +746,16 @@ def stay_media_for_options(stays: list[dict], destination: str) -> dict:
                 reviews_f = inner.submit(_liteapi_reviews, hotel_id)
                 try:
                     photos, rating10, count = gallery_f.result()
+                except urllib.error.HTTPError as exc:
+                    if exc.code == 429:
+                        throttled.set()
                 except Exception:
                     pass
                 try:
                     reviews = reviews_f.result()
+                except urllib.error.HTTPError as exc:
+                    if exc.code == 429:
+                        throttled.set()
                 except Exception:
                     pass
         if not reviews:
@@ -395,9 +776,10 @@ def stay_media_for_options(stays: list[dict], destination: str) -> dict:
 
     stays = [s for s in stays if s.get("id")]
     if not stays:
-        return {}
-    with ThreadPoolExecutor(max_workers=min(6, len(stays))) as pool:
-        return {oid: media for oid, media in pool.map(fetch, stays) if media}
+        return {}, True
+    with ThreadPoolExecutor(max_workers=min(3, len(stays))) as pool:
+        media = {oid: m for oid, m in pool.map(fetch, stays) if m}
+    return media, not throttled.is_set()
 
 
 def official_website(name: str, place: str) -> str | None:
@@ -733,6 +1115,12 @@ def real_option_details(category: str, option: dict, context: dict) -> dict:
         return d
 
     if category == "stay":
+        if option.get("duffel_accommodation_id") and isinstance(option.get("duffel_details"), dict):
+            # A Duffel accommodation's page is the search payload itself —
+            # photos, amenities, description — nothing else to fetch
+            details.update(option["duffel_details"])
+            details["source"] = "duffel"
+            return with_center_chip(details)
         hotel_id = option.get("liteapi_hotel_id")
         if hotel_id and liteapi_available():
             # Page, room offers and Google links are independent — overlap them
