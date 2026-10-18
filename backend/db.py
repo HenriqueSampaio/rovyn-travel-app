@@ -146,6 +146,90 @@ CREATE TABLE IF NOT EXISTS bookings (
     PRIMARY KEY (trip_id, item_key)
 );
 
+-- Payments & auto-booking prototype (Rovyn as merchant of record). One ACTIVE
+-- settlement per trip (partial unique index); old rounds keep their records.
+CREATE TABLE IF NOT EXISTS settlements (
+    id            TEXT PRIMARY KEY,
+    trip_id       TEXT NOT NULL REFERENCES trips(id),
+    round         INTEGER NOT NULL DEFAULT 1,
+    status        TEXT NOT NULL DEFAULT 'collecting',  -- collecting | reconfirm | verifying | booking | capturing | paying | reconciling | booked | partially_booked | needs_attention | failed | cancelled | resolved
+    money_mode    TEXT NOT NULL DEFAULT 'simulated',   -- simulated | test | live, decided at lock time
+    currency      TEXT NOT NULL DEFAULT 'USD',
+    lock          TEXT NOT NULL,                        -- JSON: provider-verified items + per-member checks + progress
+    plan_hash     TEXT NOT NULL,                        -- sha256 of final_plan when locked
+    cursor        TEXT,                                 -- JSON: the provider call in flight {step, item_key, attempt_ref, started_at}
+    deadline      TEXT,                                 -- ISO: authorizations are released after this
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS settlements_active_idx ON settlements(trip_id)
+    WHERE status NOT IN ('cancelled', 'failed', 'resolved');
+
+CREATE TABLE IF NOT EXISTS settlement_events (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    settlement_id TEXT NOT NULL REFERENCES settlements(id),
+    at            TEXT NOT NULL,
+    step          TEXT NOT NULL,
+    item_key      TEXT,
+    level         TEXT NOT NULL DEFAULT 'info',   -- info | warn | error
+    message       TEXT NOT NULL DEFAULT '',
+    data_redacted TEXT                            -- JSON, PII stripped before it gets here
+);
+
+CREATE TABLE IF NOT EXISTS payment_attempts (
+    id                  TEXT PRIMARY KEY,
+    trip_id             TEXT NOT NULL REFERENCES trips(id),
+    user_id             TEXT NOT NULL REFERENCES users(id),
+    settlement_id       TEXT NOT NULL REFERENCES settlements(id),
+    round               INTEGER NOT NULL DEFAULT 1,
+    provider            TEXT NOT NULL DEFAULT 'simulated',  -- stripe | simulated
+    checkout_session_id TEXT UNIQUE,
+    payment_intent_id   TEXT UNIQUE,
+    status              TEXT NOT NULL DEFAULT 'pending',    -- pending | authorized | releasing | captured | released | refunded | failed | expired
+    amount_cents        INTEGER NOT NULL,
+    capture_before      TEXT,
+    captured_cents      INTEGER,
+    refunded_cents      INTEGER NOT NULL DEFAULT 0,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS payment_attempts_active_idx ON payment_attempts(trip_id, user_id)
+    WHERE status IN ('pending', 'authorized', 'releasing', 'captured', 'refunded');
+
+CREATE TABLE IF NOT EXISTS refunds (
+    id              TEXT PRIMARY KEY,               -- doubles as the Stripe Idempotency-Key
+    settlement_id   TEXT NOT NULL REFERENCES settlements(id),
+    item_key        TEXT,
+    user_id         TEXT NOT NULL REFERENCES users(id),
+    attempt_id      TEXT NOT NULL REFERENCES payment_attempts(id),
+    reason          TEXT NOT NULL,
+    amount_cents    INTEGER NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'pending',  -- pending | succeeded | failed
+    provider_ref    TEXT,
+    created_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS webhook_events (
+    id            TEXT PRIMARY KEY,   -- the provider's event id
+    provider      TEXT NOT NULL,      -- stripe | liteapi
+    type          TEXT NOT NULL,
+    received_at   TEXT NOT NULL,
+    processed_at  TEXT,               -- NULL = dead letter (could not be routed)
+    body_redacted TEXT
+);
+
+CREATE TABLE IF NOT EXISTS traveler_profiles (
+    user_id     TEXT PRIMARY KEY REFERENCES users(id),
+    given_name  TEXT NOT NULL,
+    family_name TEXT NOT NULL,
+    born_on     TEXT,          -- YYYY-MM-DD; airlines require it
+    gender      TEXT,          -- m | f (airline schema)
+    title       TEXT,          -- mr | ms | mrs | miss
+    phone       TEXT,          -- E.164
+    updated_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS posts (
     id            TEXT PRIMARY KEY,
     user_id       TEXT NOT NULL REFERENCES users(id),
@@ -209,6 +293,19 @@ _COLUMN_MIGRATIONS = [
     ("trips", "photo_url", "TEXT"),  # /media/... URL of the group picture; NULL = initial disc
     ("bookings", "stale", "INTEGER NOT NULL DEFAULT 0"),
     ("payments", "mode", "TEXT NOT NULL DEFAULT 'full'"),
+    # Payments & auto-booking prototype (supabase/migrations/20261018170000_payments_prototype.sql)
+    ("payments", "status", "TEXT NOT NULL DEFAULT 'paid'"),      # pending | authorized | captured | refunded | paid (legacy self_book rows)
+    ("payments", "provider", "TEXT NOT NULL DEFAULT 'none'"),    # stripe | simulated | none
+    ("payments", "current_attempt_id", "TEXT"),                  # the payment_attempts row this summary mirrors
+    ("payments", "captured_at", "TEXT"),
+    ("payments", "captured_cents", "INTEGER"),
+    ("payments", "refunded_cents", "INTEGER NOT NULL DEFAULT 0"),
+    ("bookings", "payer_id", "TEXT REFERENCES users(id)"),
+    ("bookings", "amount_cents", "INTEGER"),
+    ("bookings", "provider_booking_id", "TEXT"),                 # LiteAPI bookingId / Duffel ord_…
+    ("bookings", "documents", "TEXT"),                           # JSON: e-tickets, PNR, cancellation timeline, check-in notes
+    ("bookings", "raw", "TEXT"),                                 # provider payload snapshot (audit)
+    ("bookings", "cancelled_at", "TEXT"),
 ]
 
 # Every table the code touches, derived from the SQLite schema so the two
@@ -222,6 +319,7 @@ _EXPECTED_TABLES = re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", _SCHEMA)
 _SCHEMA_CANARIES = [
     ("trips", "solo"),  # supabase/migrations/20260706150000_add_trips_solo.sql
     ("trips", "photo_url"),  # supabase/migrations/20260708150000_add_trips_photo_url.sql
+    ("bookings", "cancelled_at"),  # supabase/migrations/20261018170000_payments_prototype.sql
 ]
 
 if IS_POSTGRES:
@@ -359,9 +457,13 @@ else:
 
     def _raw_sqlite_conn() -> sqlite3.Connection:
         _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(_DB_PATH)
+        # The settlement thread and request handlers write concurrently: WAL
+        # lets readers proceed during a write, and a 15 s busy timeout waits
+        # for a writer instead of failing with "database is locked".
+        conn = sqlite3.connect(_DB_PATH, timeout=15)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")
         return conn
 
     @contextmanager
