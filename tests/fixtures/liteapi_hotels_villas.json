@@ -1,0 +1,85 @@
+{
+ "data": [
+  {
+   "id": "lp-v01",
+   "name": "Villa Aurelia",
+   "hotelDescription": "<p>Villa Aurelia in Rome.</p>",
+   "currency": "USD",
+   "country": "it",
+   "city": "Rome",
+   "latitude": 41.899245,
+   "longitude": 12.437609,
+   "address": "Via Villa 1",
+   "zip": "00100",
+   "main_photo": "https://img.example/lp-v01.jpg",
+   "thumbnail": "https://img.example/lp-v01_t.jpg",
+   "stars": null,
+   "hotelTypeId": 213,
+   "chainId": null,
+   "chain": "Not Available",
+   "rating": 9.0,
+   "reviewCount": 85,
+   "facilityIds": [
+    1,
+    2,
+    6,
+    7
+   ]
+  },
+  {
+   "id": "lp-v02",
+   "name": "Villa Pamphili Garden House",
+   "hotelDescription": "<p>Villa Pamphili Garden House in Rome.</p>",
+   "currency": "USD",
+   "country": "it",
+   "city": "Rome",
+   "latitude": 41.8933,
+   "longitude": 12.429649,
+   "address": "Via Villa 1",
+   "zip": "00100",
+   "main_photo": "https://img.example/lp-v02.jpg",
+   "thumbnail": "https://img.example/lp-v02_t.jpg",
+   "stars": null,
+   "hotelTypeId": 220,
+   "chainId": null,
+   "chain": "Not Available",
+   "rating": 8.7,
+   "reviewCount": 40,
+   "facilityIds": [
+    1,
+    6,
+    7
+   ]
+  },
+  {
+   "id": "lp-v03",
+   "name": "Villa Borghese Residence",
+   "hotelDescription": "<p>Villa Borghese Residence in Rome.</p>",
+   "currency": "USD",
+   "country": "it",
+   "city": "Rome",
+   "latitude": 41.910464,
+   "longitude": 12.496213,
+   "address": "Via Villa 1",
+   "zip": "00100",
+   "main_photo": "https://img.example/lp-v03.jpg",
+   "thumbnail": "https://img.example/lp-v03_t.jpg",
+   "stars": null,
+   "hotelTypeId": 207,
+   "chainId": null,
+   "chain": "Not Available",
+   "rating": 8.1,
+   "reviewCount": 30,
+   "facilityIds": [
+    1,
+    7
+   ]
+  }
+ ],
+ "hotelIds": [
+  "lp-v01",
+  "lp-v02",
+  "lp-v03"
+ ],
+ "total": 3
+}
