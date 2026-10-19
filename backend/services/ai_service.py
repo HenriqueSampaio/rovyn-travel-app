@@ -2,17 +2,21 @@ import json
 import os
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime as dt, timedelta
+from datetime import datetime as dt, timedelta, timezone
 
-from backend.services import links, llm
-from backend.services.flight_service import flights_available, flights_sandbox, real_flight_options
-from backend.services.hotel_service import official_website, real_stay_options
+from backend.services import links, llm, option_ranking as ranking
+from backend.services.flight_service import flights_available, real_flight_options
+from backend.services.hotel_service import _names_match, official_website, real_stay_options, stay_options_target
 from backend.services.image_service import first_image, image_for, nth_image
 from backend.services.maps_service import leg_travel_facts
 
 # "itinerary" is no longer a starrable category — Rovyn builds the itinerary
 # from the group's starred visits & events at their preferred pace.
 CATEGORIES = ["flights", "stay", "visits", "events"]
+
+# Options JSON written by generate_trip_options carries this version; the
+# UI reads it to know lanes/reasons/suppliers exist on every option.
+OPTIONS_SCHEMA_VERSION = 2
 
 
 def categories_for(trip_mode: str | None) -> list[str]:
@@ -57,6 +61,7 @@ def _aggregate_preferences(responses: list[dict]) -> dict:
     return_by_city: dict[str, str] = {}
     travelers_by_city: dict[str, int] = {}
     budgets_min, budgets_max = [], []
+    budget_members: list[tuple] = []  # (min, max) per traveler, for the lodging band
     dates_start, dates_end = [], []
     requirements: list[str] = []
     paces: list[str] = []
@@ -95,6 +100,7 @@ def _aggregate_preferences(responses: list[dict]) -> dict:
             pick_counts[key] += 1
         budgets_min.append(r.get("budget_min", 0))
         budgets_max.append(r.get("budget_max", 0))
+        budget_members.append((r.get("budget_min", 0), r.get("budget_max", 0)))
         if r.get("travel_dates_start"):
             dates_start.append(r["travel_dates_start"])
         if r.get("travel_dates_end"):
@@ -142,10 +148,16 @@ def _aggregate_preferences(responses: list[dict]) -> dict:
     else:
         trip_mode = "single"
 
+    # The stay budget band the board explains prices against — travelers who
+    # left the ceiling blank don't drag it to zero
+    nights = _duration_days({"start": start, "end": end})
+
     return {
         "group_pace": group_pace,
         "group_size": len(responses),
         "budget_range": {"min": budget_min, "max": budget_max},
+        "budget_members": budget_members,
+        "lodging_band": ranking.lodging_band(budget_members, nights),
         "travel_dates": {"start": start, "end": end},
         "top_vibes": top_vibes,
         "preferred_accommodation": top_accommodation,
@@ -668,33 +680,83 @@ def _attach_option_links(options: dict, prefs: dict, destination: str) -> dict:
     return options
 
 
+def _estimate_supplier() -> str:
+    """Who wrote the non-live menus — the AI, or the deterministic samples."""
+    return "ai" if ai_available() else "sample"
+
+
+def _pad_with_estimates(live: list[dict], estimates: list[dict], prefs: dict, nights: int,
+                        floor: int) -> list[dict]:
+    """Thin live pricing (fewer than `floor` real stays) is topped up with the
+    AI/sample menu — clearly estimates (live_price False, lane "Also fits"),
+    never pretending to be live, and never the same property twice: an
+    estimate that names a hotel already priced live is dropped."""
+    if len(live) >= floor:
+        return live
+    fresh = [e for e in estimates if isinstance(e, dict)
+             and not any(_names_match(e.get("name") or "", l.get("name") or "") for l in live)]
+    if not fresh:
+        return live
+    extras = ranking.annotate_stays(fresh, prefs, nights, _estimate_supplier(),
+                                    target=floor - len(live), fill_lane=ranking.FILL_LANE)
+    for e in extras:
+        e["live_price"] = False
+    return live + extras
+
+
+def _live_source_label(options: list[dict]) -> str:
+    """The `*_source` provenance field the board UI reads: "liteapi" when any
+    LiteAPI live option is present, else the supplier that is."""
+    suppliers = ranking.summarize_suppliers([o for o in options if isinstance(o, dict) and o.get("live_price")])
+    if "liteapi" in suppliers or not suppliers:
+        return "liteapi"
+    return suppliers[0]
+
+
 def generate_trip_options(destination: str, responses: list[dict], trip_name: str = "",
                           suggested_route: list | None = None) -> dict:
     prefs = _aggregate_preferences(responses)
     dates = dict(prefs["travel_dates"])
     duration = _duration_days(dates)
+    votes = {k: v for k, v in prefs["accommodation_votes"].items() if v}
+    country_hint = destination.split(",")[-1].strip() if "," in destination else ""
+    anchor_town = destination.split(",")[0].strip()
+    stay_search: dict = {}  # {town: what the live hotel search saw} — shipped on the board
+    single_report: dict = {}  # the single-base search's report, filed under the anchor town
 
     # Multi-city groups get a route first (cities, order, nights) — everything
     # else (stays per city, transport legs, open-jaw flights) hangs off it.
     route = plan_route(destination, prefs, trip_name, seed_route=suggested_route)
 
-    def city_stays_in_sequence() -> dict[str, list]:
-        """Live hotels per route city, searched one city at a time — parallel
-        per-city calls brush LiteAPI's rate limit and whole cities silently
-        fall back to AI estimates. The anchor's country doubles as a hint for
-        wishlist cities typed without one."""
-        country_hint = destination.split(",")[-1].strip() if "," in destination else ""
-        found = {}
-        for c in route["cities"]:
+    def city_prefs(nights: int) -> dict:
+        """The group's prefs with the stay budget band scaled to one city's nights."""
+        return {**prefs, "lodging_band": ranking.band_for_nights(prefs.get("lodging_band"), nights)}
+
+    city_target = ranking.stay_target_for(stay_options_target(per_city=True), votes)
+
+    def live_city_stays() -> dict[str, list]:
+        """Live hotels per route city, searched concurrently — the LiteAPI
+        throttle in hotel_service keeps the combined call rate under the
+        key's limit, so parallel cities no longer trip it. The anchor's
+        country doubles as a hint for wishlist cities typed without one."""
+        def one(c: dict):
+            nights = max(c["nights"], 1)
+            report: dict = {}
             try:
-                found[c["town"]] = real_stay_options(
-                    c["city"], c.get("start", ""), c.get("end", ""),
-                    prefs["group_size"], max(c["nights"], 1),
-                    country_hint, prefs["accommodation_votes"],
+                found = real_stay_options(
+                    c["city"], c.get("start", ""), c.get("end", ""), prefs["group_size"], nights,
+                    country_hint, votes, prefs=city_prefs(nights), target=city_target,
+                    per_city=True, report=report,
                 )
             except Exception:
-                found[c["town"]] = []
-        return found
+                found = []
+            return c["town"], found, report
+
+        with ThreadPoolExecutor(max_workers=min(3, len(route["cities"]))) as city_pool:
+            results = list(city_pool.map(one, route["cities"]))
+        for town, _found, report in results:
+            stay_search[town] = report
+        return {town: found for town, found, _ in results}
 
     # The slow, independent fetches run concurrently: the visits/events menu,
     # the stay menu, the per-city flights prompt, transport legs, and the live
@@ -711,11 +773,12 @@ def generate_trip_options(destination: str, responses: list[dict], trip_name: st
         transport_future = pool.submit(_transport_options, route, prefs) if route else None
         legs_future = pool.submit(_annotate_leg_durations, route) if route else None
         if route:
-            city_stays_future = pool.submit(city_stays_in_sequence)
+            city_stays_future = pool.submit(live_city_stays)
         else:
             stays_future = pool.submit(
                 real_stay_options, destination, dates.get("start", ""), dates.get("end", ""),
-                prefs["group_size"], duration, "", prefs["accommodation_votes"],
+                prefs["group_size"], duration, "", votes,
+                prefs=prefs, target=stay_options_target(), report=single_report,
             )
         options = base_future.result()
         if ai_stay_future is not None:
@@ -725,10 +788,11 @@ def generate_trip_options(destination: str, responses: list[dict], trip_name: st
                 options["stay"] = []  # _ensure_categories backfills below
         options["flights"], flights_live = flights_future.result()
         if flights_live:
-            options["flights_source"] = "liteapi"
-            options["flights_all_live"] = all(
-                o.get("live_price") for opts in options["flights"].values() for o in opts)
-            options["flights_sandbox"] = flights_sandbox()
+            all_flights = [o for opts in options["flights"].values() for o in opts]
+            live_flights = [o for o in all_flights if o.get("live_price")]
+            options["flights_source"] = _live_source_label(all_flights)
+            options["flights_all_live"] = all(o.get("live_price") for o in all_flights)
+            options["flights_sandbox"] = any(o.get("sandbox") for o in live_flights)
         if transport_future:
             options["transport"] = transport_future.result()
         if legs_future:
@@ -742,17 +806,25 @@ def generate_trip_options(destination: str, responses: list[dict], trip_name: st
             options["trip_mode"] = "multi"
             _ensure_categories(options, destination, prefs, route)
             # Per city: live hotels for that segment's dates when available,
-            # otherwise the AI's suggestions for that city.
+            # otherwise the AI's suggestions for that city — scored, laned and
+            # explained by the same rules either way.
             try:
                 live_by_town = city_stays_future.result()
             except Exception:
                 live_by_town = {}
             ai_stays = options.get("stay") or []
+            floor = max(4, city_target // 3)
             merged, any_live = [], False
             for c in route["cities"]:
+                nights = max(c["nights"], 1)
                 live = live_by_town.get(c["town"]) or []
-                chosen = live[:3] if live else [o for o in ai_stays if _same_town(o.get("city", ""), c["city"])][:3]
-                any_live = any_live or bool(live)
+                ai_city = [o for o in ai_stays if _same_town(o.get("city", ""), c["city"])]
+                if live:
+                    chosen = _pad_with_estimates(live[:city_target], ai_city, city_prefs(nights), nights, floor)
+                    any_live = True
+                else:
+                    chosen = ranking.annotate_stays(ai_city, city_prefs(nights), nights,
+                                                    _estimate_supplier(), target=city_target)
                 for o in chosen:
                     o["city"] = c["city"]
                 merged.extend(chosen)
@@ -761,13 +833,15 @@ def generate_trip_options(destination: str, responses: list[dict], trip_name: st
             else:  # the AI ignored the per-city instruction — spread what it gave
                 for i, o in enumerate(ai_stays):
                     o["city"] = route["cities"][i % len(route["cities"])]["city"]
-                options["stay"] = ai_stays
+                options["stay"] = ranking.annotate_stays(ai_stays, prefs, duration, _estimate_supplier())
             # No city may end up without a stay to star
             for c in route["cities"]:
                 if not any(_same_town(s.get("city", ""), c["city"]) for s in options["stay"]):
-                    options["stay"].extend(_sample_city_stays(c, prefs))
+                    nights = max(c["nights"], 1)
+                    options["stay"].extend(ranking.annotate_stays(
+                        _sample_city_stays(c, prefs), city_prefs(nights), nights, "sample"))
             if any_live:
-                options["stay_source"] = "liteapi"
+                options["stay_source"] = _live_source_label(options["stay"])
                 options["stay_all_live"] = all(o.get("live_price") for o in options["stay"])
         else:
             options["trip_mode"] = "single"
@@ -784,11 +858,33 @@ def generate_trip_options(destination: str, responses: list[dict], trip_name: st
             live_stays = real_stay_options(
                 destination, dates.get("start", ""), dates.get("end", ""),
                 prefs["group_size"], duration, country_hint=options["country"],
-                type_votes=prefs["accommodation_votes"],
+                type_votes=votes, prefs=prefs, target=stay_options_target(), report=single_report,
             )
+        stay_search[anchor_town] = single_report
+        estimates = options.get("stay") or []
         if live_stays:
-            options["stay"] = live_stays
-            options["stay_source"] = "liteapi"
+            floor = max(4, stay_options_target() // 3)
+            options["stay"] = _pad_with_estimates(live_stays, estimates, prefs, duration, floor)
+            options["stay_source"] = _live_source_label(options["stay"])
+            options["stay_all_live"] = all(o.get("live_price") for o in options["stay"])
+        else:
+            options["stay"] = ranking.annotate_stays(estimates, prefs, duration, _estimate_supplier())
+
+    options["schema_version"] = OPTIONS_SCHEMA_VERSION
+    options["generated_at"] = dt.now(timezone.utc).isoformat(timespec="seconds")
+    # What the group asked for, so the UI can print it next to the reasons
+    options["group_prefs"] = {
+        "accommodation_votes": votes,
+        "budget_range": prefs["budget_range"],
+        "top_vibes": prefs["top_vibes"],
+        "group_size": prefs["group_size"],
+        "group_pace": prefs["group_pace"],
+    }
+    options["lodging_band"] = prefs.get("lodging_band")
+    options["stay_search"] = stay_search
+    options["stay_suppliers"] = ranking.summarize_suppliers(options.get("stay") or [])
+    options["flight_suppliers"] = ranking.summarize_suppliers(
+        [o for opts in (options.get("flights") or {}).values() for o in opts])
 
     options = _assign_option_ids(options)
     options = _attach_option_links(options, prefs, destination)
@@ -850,9 +946,12 @@ def _flight_options(destination: str, prefs: dict, route: dict | None = None) ->
     Returns (flights by city, whether any city got live fares)."""
     cities = prefs["departure_cities"] or ["Your city"]
     dates = prefs["travel_dates"]
+    pace = prefs.get("group_pace")
+    arrive_town = (route["cities"][0]["town"] if route else destination.split(",")[0].strip())
 
-    # Live fares from LiteAPI, one search per departure city, in parallel —
-    # _lite_request already retries the occasional 429 with backoff.
+    # Live fares (LiteAPI, plus Duffel when a token is set — airports resolve
+    # through LiteAPI, so a Duffel token alone searches nothing), one search
+    # per departure city, in parallel — the LiteAPI pacer spaces the calls.
     live: dict[str, list] = {}
     if flights_available() and dates.get("start") and dates.get("end"):
         arrive_city = route["cities"][0]["city"] if route else destination
@@ -866,6 +965,7 @@ def _flight_options(destination: str, prefs: dict, route: dict | None = None) ->
                 travelers=prefs.get("travelers_by_city", {}).get(city, 1),
                 return_from_city=return_from,
                 return_to_city=prefs.get("return_by_city", {}).get(city) or None,
+                pace=pace,
             )
 
         with ThreadPoolExecutor(max_workers=min(3, len(cities))) as pool:
@@ -894,8 +994,17 @@ def _flight_options(destination: str, prefs: dict, route: dict | None = None) ->
     raw_by_norm = {norm(k): v for k, v in raw.items() if isinstance(v, list) and v}
     flights = {}
     for city in cities:
-        flights[city] = live.get(city) or raw_by_norm.get(norm(city)) or _sample_flights_for_city(
-            city, destination, dates, route, prefs.get("return_by_city", {}).get(city, ""))
+        if live.get(city):
+            flights[city] = live[city]
+            continue
+        ai_menu = [o for o in (raw_by_norm.get(norm(city)) or []) if isinstance(o, dict)]
+        if ai_menu:
+            flights[city] = ranking.annotate_flights(ai_menu, pace, arrive_town, "ai")
+        else:
+            flights[city] = ranking.annotate_flights(
+                _sample_flights_for_city(city, destination, dates, route,
+                                         prefs.get("return_by_city", {}).get(city, "")),
+                pace, arrive_town, "sample")
     return flights, any(live.values())
 
 
@@ -916,11 +1025,11 @@ def _ai_flights(destination: str, cities: list[str], dates: dict, group_size: in
     return_note = f"\nDifferent return airports: {returns}. Everyone else returns to their departure city." if returns \
         else "\nEvery traveler returns to their own departure city."
 
-    prompt = f"""You are a flight-search expert. For EACH departure city below, produce exactly 3 realistic flight options for {shape}. Use plausible airlines, routes (with real airport codes), times and prices for each specific origin. Every option covers BOTH directions — price is the full round trip per person.{return_note}
+    prompt = f"""You are a flight-search expert. For EACH departure city below, produce exactly 6 realistic flight options for {shape}. Use plausible airlines, routes (with real airport codes), times and prices for each specific origin. Every option covers BOTH directions — price is the full round trip per person.{return_note}
 
 Departure cities: {', '.join(cities)}
 
-The three options per city should cover different trade-offs: fastest, cheapest, best times.
+The six options per city must cover different trade-offs, one each: the cheapest fare, a nonstop (if one exists), the fastest routing, the best balance of price and time, an early arrival (lands in the morning), and a late return (home flight in the afternoon or evening). Vary airlines and departure times.
 "arrive" / "return_arrive" are the LANDING date-times at each leg's destination, in ITS local time — account for time zones and overnight legs.
 
 Respond with ONLY valid JSON — an object whose keys are EXACTLY these strings: {keys}
@@ -966,8 +1075,23 @@ def _sample_flights_for_city(city: str, destination: str, dates: dict,
          "return_route": f"{leave_from} → {home} (1 stop)",
          "depart": f"{dates['start']} 11:20", "arrive": f"{dates['start']} 19:25",
          "return": f"{dates['end']} 15:10", "return_arrive": f"{dates['end']} 23:15",
-         "stops": 1, "duration": "8h 05m", "est_price_per_person": 760,
+         "stops": 1, "duration": "8h 05m", "return_duration": "8h 30m", "est_price_per_person": 760,
+         "bags": {"carry_on": True, "checked": True},
          "why": "Most comfortable times, checked bag included"},
+        {"airline": "Air France", "route": f"{city} → {arrive} (nonstop)",
+         "return_route": f"{leave_from} → {home} (nonstop)",
+         "depart": f"{dates['start']} 17:50", "arrive": _next_day(dates['start'], "07:35"),
+         "return": f"{dates['end']} 12:40", "return_arrive": f"{dates['end']} 16:05",
+         "stops": 0, "duration": "7h 45m", "return_duration": "8h 25m", "est_price_per_person": 890,
+         "bags": {"carry_on": True, "checked": False},
+         "why": "Nonstop both ways, lands first thing in the morning"},
+        {"airline": "KLM", "route": f"{city} → {arrive} (1 stop)",
+         "return_route": f"{leave_from} → {home} (1 stop)",
+         "depart": f"{dates['start']} 09:55", "arrive": f"{dates['start']} 20:10",
+         "return": f"{dates['end']} 19:30", "return_arrive": _next_day(dates['end'], "01:20"),
+         "stops": 1, "duration": "10h 15m", "return_duration": "11h 50m", "est_price_per_person": 540,
+         "bags": {"carry_on": True, "checked": False},
+         "why": "Civilised departure, a full last day before the late flight home"},
     ]
 
 
@@ -1145,10 +1269,12 @@ def _ai_stay_options(destination: str, prefs: dict, trip_name: str, route: dict 
     acc_votes = ", ".join(f"{k}: {v} vote(s)" for k, v in prefs["accommodation_votes"].items()) or "no data"
     route_block, city_field = _route_menu_block(route, "Every stay")
     if route:
-        stay_line = (f'2-3 options PER CITY (so {2 * len(route["cities"])}-{3 * len(route["cities"])} total), each '
-                     'priced for that city\'s night count only ("total_per_person" covers just those nights).')
+        stay_line = (f'3-4 options PER CITY (so {3 * len(route["cities"])}-{4 * len(route["cities"])} total), each '
+                     'priced for that city\'s night count only ("total_per_person" covers just those nights), '
+                     'spanning every style that got a vote plus a value pick and a top-rated pick per city.')
     else:
-        stay_line = "exactly 4 options covering different styles/price points that match the group's votes."
+        stay_line = ("exactly 8 options spanning every style that got a vote, several price points "
+                     "(a budget pick, mid-range, a splurge), the best-rated place in town and a central one.")
 
     prompt = f"""You are an expert travel planner listing accommodation options for a group trip to {destination}. The group will STAR the ones they like, so every option must be a real, distinct, bookable property (real hotel/hostel/apartment names).
 
@@ -1201,8 +1327,8 @@ Respond with ONLY valid JSON (no markdown):
 
 
 def _sample_city_stays(c: dict, prefs: dict) -> list[dict]:
-    """Two placeholder stays for one route city — the deterministic floor when
-    neither live hotels nor AI suggestions covered it."""
+    """Three placeholder stays for one route city — the deterministic floor
+    when neither live hotels nor AI suggestions covered it."""
     t, nights = c["town"], max(c["nights"], 1)
     group = max(prefs["group_size"], 1)
     return [
@@ -1216,6 +1342,11 @@ def _sample_city_stays(c: dict, prefs: dict) -> list[dict]:
          "price_per_night": 360, "total_per_person": 360 * nights // group,
          "rating": 4.8, "amenities": ["Full kitchen", "Washer"],
          "why": "The whole group under one roof."},
+        {"city": c["city"], "name": f"{t} Station Hostel — private rooms", "type": "hostel",
+         "area": "Near the station", "price_per_night": 60,
+         "total_per_person": 60 * nights, "rating": 4.3,
+         "amenities": ["Social bar", "Kitchen", "Lockers"],
+         "why": "The cheapest beds in town, a stroll from the trains."},
     ]
 
 
@@ -1295,6 +1426,22 @@ def _sample_trip_options(destination: str, prefs: dict, route: dict | None = Non
             {"name": "Old Town Hostel — private rooms", "type": "hostel", "area": "Old town",
              "price_per_night": 55, "total_per_person": 55 * duration, "rating": 4.2,
              "amenities": ["Social bar", "Kitchen"], "why": "Cheapest way to stay central."},
+            {"name": f"Grand Palace Resort & Spa {town}", "type": "luxury resort", "area": "Seafront",
+             "price_per_night": 640, "total_per_person": 640 * duration // 2, "rating": 4.8,
+             "amenities": ["Spa", "Infinity pool", "Beach club", "Breakfast included"],
+             "why": "The splurge — pool, spa and the sea at the door."},
+            {"name": f"Casa {town} Bed & Breakfast", "type": "bed & breakfast", "area": "Hillside",
+             "price_per_night": 120, "total_per_person": 120 * duration // 2, "rating": 4.6,
+             "amenities": ["Garden", "Breakfast included", "Terrace"],
+             "why": "Family-run, quiet, a ten-minute walk down into town."},
+            {"name": f"{town} Market Apartments", "type": "apartment", "area": "Market quarter",
+             "price_per_night": 230, "total_per_person": 230 * duration // max(prefs["group_size"], 1), "rating": 4.5,
+             "amenities": ["Kitchen", "Washer", "Balcony"],
+             "why": "Two apartments side by side — breakfast at home, dinner out."},
+            {"name": f"Harbour Inn {town}", "type": "3-star hotel", "area": "Harbour",
+             "price_per_night": 110, "total_per_person": 110 * duration // 2, "rating": 4.1,
+             "amenities": ["AC", "Breakfast included"],
+             "why": "Plain, clean and right on the water."},
         ],
         "visits": visit_pool[:n_visits],
         "events": event_pool[:n_events],
@@ -1506,8 +1653,9 @@ def compute_costs(selection: dict, prefs: dict, duration: int) -> tuple[dict, di
     intercity = round(sum(t.get("est_price_per_person") or 0 for t in selection.get("transport") or []))
     visits_cost = round(sum(v.get("cost_per_person") or 0 for v in selection.get("visits", [])))
     events_cost = round(sum(e.get("cost_per_person") or 0 for e in selection.get("events", [])))
-    meals = 50 * duration
-    transport = 80
+    # The same two flat estimates the board's lodging band is derived from
+    meals = ranking.MEALS_PER_DAY * duration
+    transport = ranking.LOCAL_TRANSPORT_FLAT
     shared_total = stay_cost + intercity + visits_cost + events_cost + meals + transport
     cost_per_person = {
         "stay": stay_cost,
@@ -1837,8 +1985,11 @@ def _detach_heavy(plan: dict) -> tuple[dict, list]:
 
     def take(obj: dict, cat: str, ident):
         # URLs must never round-trip through the model: token-heavy AND the
-        # model must not be able to rewrite where travelers click.
-        for key in ("image", "links", "link", "booking_links", "official_website"):
+        # model must not be able to rewrite where travelers click. The same
+        # goes for the board's computed reasons, a Duffel stay's detail
+        # sheet and a live flight's segments — facts, not prose to revise.
+        for key in ("image", "links", "link", "booking_links", "official_website",
+                    "reasons", "duffel_details", "segments"):
             if isinstance(obj, dict) and key in obj:
                 heavy.append((cat, ident, key, obj.pop(key)))
 

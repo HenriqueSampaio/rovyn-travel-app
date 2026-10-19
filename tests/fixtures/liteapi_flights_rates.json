@@ -1,0 +1,1660 @@
+{
+ "data": [
+  {
+   "journeys": [
+    {
+     "journeyKey": "j01",
+     "segments": [
+      {
+       "direction": "OUTBOUND",
+       "originCode": "JFK",
+       "destinationCode": "LIS",
+       "originName": "John F. Kennedy International Airport",
+       "destinationName": "Lisbon Humberto Delgado Airport",
+       "departureTime": "2026-11-20T20:30:00",
+       "arrivalTime": "2026-11-21T08:40:00",
+       "duration": {
+        "minutes": 430
+       },
+       "carrier": {
+        "marketingName": "TAP Air Portugal",
+        "marketingCode": "TP"
+       },
+       "flight": {
+        "marketingNumber": "204"
+       }
+      },
+      {
+       "direction": "OUTBOUND",
+       "originCode": "LIS",
+       "destinationCode": "MAD",
+       "originName": "Lisbon Humberto Delgado Airport",
+       "destinationName": "Madrid Barajas Airport",
+       "departureTime": "2026-11-21T10:30:00",
+       "arrivalTime": "2026-11-21T12:55:00",
+       "duration": {
+        "minutes": 85
+       },
+       "carrier": {
+        "marketingName": "TAP Air Portugal",
+        "marketingCode": "TP"
+       },
+       "flight": {
+        "marketingNumber": "1016"
+       }
+      },
+      {
+       "direction": "OUTBOUND",
+       "originCode": "MAD",
+       "destinationCode": "FCO",
+       "originName": "Madrid Barajas Airport",
+       "destinationName": "Rome Fiumicino Airport",
+       "departureTime": "2026-11-21T14:40:00",
+       "arrivalTime": "2026-11-21T16:55:00",
+       "duration": {
+        "minutes": 135
+       },
+       "carrier": {
+        "marketingName": "Iberia",
+        "marketingCode": "IB"
+       },
+       "flight": {
+        "marketingNumber": "3230"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "FCO",
+       "destinationCode": "MAD",
+       "originName": "Rome Fiumicino Airport",
+       "destinationName": "Madrid Barajas Airport",
+       "departureTime": "2026-11-25T18:30:00",
+       "arrivalTime": "2026-11-25T20:50:00",
+       "duration": {
+        "minutes": 140
+       },
+       "carrier": {
+        "marketingName": "Iberia",
+        "marketingCode": "IB"
+       },
+       "flight": {
+        "marketingNumber": "3233"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "MAD",
+       "destinationCode": "LIS",
+       "originName": "Madrid Barajas Airport",
+       "destinationName": "Lisbon Humberto Delgado Airport",
+       "departureTime": "2026-11-25T22:10:00",
+       "arrivalTime": "2026-11-25T22:30:00",
+       "duration": {
+        "minutes": 80
+       },
+       "carrier": {
+        "marketingName": "TAP Air Portugal",
+        "marketingCode": "TP"
+       },
+       "flight": {
+        "marketingNumber": "1021"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "LIS",
+       "destinationCode": "JFK",
+       "originName": "Lisbon Humberto Delgado Airport",
+       "destinationName": "John F. Kennedy International Airport",
+       "departureTime": "2026-11-26T09:00:00",
+       "arrivalTime": "2026-11-26T12:15:00",
+       "duration": {
+        "minutes": 495
+       },
+       "carrier": {
+        "marketingName": "TAP Air Portugal",
+        "marketingCode": "TP"
+       },
+       "flight": {
+        "marketingNumber": "203"
+       }
+      }
+     ],
+     "legDurations": [
+      {
+       "direction": "OUTBOUND",
+       "duration": {
+        "minutes": 1225
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "duration": {
+        "minutes": 1300
+       }
+      }
+     ],
+     "cheapestOffer": {
+      "offerId": "offer-j01",
+      "pricing": {
+       "display": {
+        "currency": "USD",
+        "total": 1520,
+        "perPassenger": {
+         "adult": {
+          "total": 380
+         }
+        }
+       }
+      },
+      "fare": {
+       "seatsRemaining": 9,
+       "family": "Economy"
+      },
+      "baggage": {
+       "hasCarryOnBag": true,
+       "hasCheckedBag": false
+      },
+      "expiration": "2099-01-01T00:00:00Z"
+     }
+    },
+    {
+     "journeyKey": "j02",
+     "segments": [
+      {
+       "direction": "OUTBOUND",
+       "originCode": "JFK",
+       "destinationCode": "LIS",
+       "originName": "John F. Kennedy International Airport",
+       "destinationName": "Lisbon Humberto Delgado Airport",
+       "departureTime": "2026-11-20T20:15:00",
+       "arrivalTime": "2026-11-21T08:25:00",
+       "duration": {
+        "minutes": 430
+       },
+       "carrier": {
+        "marketingName": "TAP Air Portugal",
+        "marketingCode": "TP"
+       },
+       "flight": {
+        "marketingNumber": "206"
+       }
+      },
+      {
+       "direction": "OUTBOUND",
+       "originCode": "LIS",
+       "destinationCode": "MAD",
+       "originName": "Lisbon Humberto Delgado Airport",
+       "destinationName": "Madrid Barajas Airport",
+       "departureTime": "2026-11-21T10:20:00",
+       "arrivalTime": "2026-11-21T12:45:00",
+       "duration": {
+        "minutes": 85
+       },
+       "carrier": {
+        "marketingName": "TAP Air Portugal",
+        "marketingCode": "TP"
+       },
+       "flight": {
+        "marketingNumber": "1018"
+       }
+      },
+      {
+       "direction": "OUTBOUND",
+       "originCode": "MAD",
+       "destinationCode": "FCO",
+       "originName": "Madrid Barajas Airport",
+       "destinationName": "Rome Fiumicino Airport",
+       "departureTime": "2026-11-21T14:25:00",
+       "arrivalTime": "2026-11-21T16:40:00",
+       "duration": {
+        "minutes": 135
+       },
+       "carrier": {
+        "marketingName": "Iberia",
+        "marketingCode": "IB"
+       },
+       "flight": {
+        "marketingNumber": "3232"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "FCO",
+       "destinationCode": "MAD",
+       "originName": "Rome Fiumicino Airport",
+       "destinationName": "Madrid Barajas Airport",
+       "departureTime": "2026-11-25T18:45:00",
+       "arrivalTime": "2026-11-25T21:05:00",
+       "duration": {
+        "minutes": 140
+       },
+       "carrier": {
+        "marketingName": "Iberia",
+        "marketingCode": "IB"
+       },
+       "flight": {
+        "marketingNumber": "3235"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "MAD",
+       "destinationCode": "LIS",
+       "originName": "Madrid Barajas Airport",
+       "destinationName": "Lisbon Humberto Delgado Airport",
+       "departureTime": "2026-11-25T22:25:00",
+       "arrivalTime": "2026-11-25T22:45:00",
+       "duration": {
+        "minutes": 80
+       },
+       "carrier": {
+        "marketingName": "TAP Air Portugal",
+        "marketingCode": "TP"
+       },
+       "flight": {
+        "marketingNumber": "1023"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "LIS",
+       "destinationCode": "JFK",
+       "originName": "Lisbon Humberto Delgado Airport",
+       "destinationName": "John F. Kennedy International Airport",
+       "departureTime": "2026-11-26T09:15:00",
+       "arrivalTime": "2026-11-26T12:30:00",
+       "duration": {
+        "minutes": 495
+       },
+       "carrier": {
+        "marketingName": "TAP Air Portugal",
+        "marketingCode": "TP"
+       },
+       "flight": {
+        "marketingNumber": "205"
+       }
+      }
+     ],
+     "legDurations": [
+      {
+       "direction": "OUTBOUND",
+       "duration": {
+        "minutes": 1215
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "duration": {
+        "minutes": 1295
+       }
+      }
+     ],
+     "cheapestOffer": {
+      "offerId": "offer-j02",
+      "pricing": {
+       "display": {
+        "currency": "USD",
+        "total": 1544,
+        "perPassenger": {
+         "adult": {
+          "total": 386
+         }
+        }
+       }
+      },
+      "fare": {
+       "seatsRemaining": 9,
+       "family": "Economy"
+      },
+      "baggage": {
+       "hasCarryOnBag": true,
+       "hasCheckedBag": false
+      },
+      "expiration": "2099-01-01T00:00:00Z"
+     }
+    },
+    {
+     "journeyKey": "j03",
+     "segments": [
+      {
+       "direction": "OUTBOUND",
+       "originCode": "JFK",
+       "destinationCode": "FCO",
+       "originName": "John F. Kennedy International Airport",
+       "destinationName": "Rome Fiumicino Airport",
+       "departureTime": "2026-11-20T17:35:00",
+       "arrivalTime": "2026-11-21T07:50:00",
+       "duration": {
+        "minutes": 495
+       },
+       "carrier": {
+        "marketingName": "ITA Airways",
+        "marketingCode": "AZ"
+       },
+       "flight": {
+        "marketingNumber": "609"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "FCO",
+       "destinationCode": "JFK",
+       "originName": "Rome Fiumicino Airport",
+       "destinationName": "John F. Kennedy International Airport",
+       "departureTime": "2026-11-25T10:10:00",
+       "arrivalTime": "2026-11-25T14:00:00",
+       "duration": {
+        "minutes": 590
+       },
+       "carrier": {
+        "marketingName": "ITA Airways",
+        "marketingCode": "AZ"
+       },
+       "flight": {
+        "marketingNumber": "610"
+       }
+      }
+     ],
+     "legDurations": [
+      {
+       "direction": "OUTBOUND",
+       "duration": {
+        "minutes": 495
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "duration": {
+        "minutes": 590
+       }
+      }
+     ],
+     "cheapestOffer": {
+      "offerId": "offer-j03",
+      "pricing": {
+       "display": {
+        "currency": "USD",
+        "total": 3280,
+        "perPassenger": {
+         "adult": {
+          "total": 820
+         }
+        }
+       }
+      },
+      "fare": {
+       "seatsRemaining": 9,
+       "family": "Economy Classic"
+      },
+      "baggage": {
+       "hasCarryOnBag": true,
+       "hasCheckedBag": true
+      },
+      "expiration": "2099-01-01T00:00:00Z"
+     }
+    },
+    {
+     "journeyKey": "j04",
+     "segments": [
+      {
+       "direction": "OUTBOUND",
+       "originCode": "JFK",
+       "destinationCode": "FCO",
+       "originName": "John F. Kennedy International Airport",
+       "destinationName": "Rome Fiumicino Airport",
+       "departureTime": "2026-11-20T22:05:00",
+       "arrivalTime": "2026-11-21T12:15:00",
+       "duration": {
+        "minutes": 490
+       },
+       "carrier": {
+        "marketingName": "Delta Air Lines",
+        "marketingCode": "DL"
+       },
+       "flight": {
+        "marketingNumber": "246"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "FCO",
+       "destinationCode": "JFK",
+       "originName": "Rome Fiumicino Airport",
+       "destinationName": "John F. Kennedy International Airport",
+       "departureTime": "2026-11-25T11:50:00",
+       "arrivalTime": "2026-11-25T15:30:00",
+       "duration": {
+        "minutes": 580
+       },
+       "carrier": {
+        "marketingName": "Delta Air Lines",
+        "marketingCode": "DL"
+       },
+       "flight": {
+        "marketingNumber": "247"
+       }
+      }
+     ],
+     "legDurations": [
+      {
+       "direction": "OUTBOUND",
+       "duration": {
+        "minutes": 490
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "duration": {
+        "minutes": 580
+       }
+      }
+     ],
+     "cheapestOffer": {
+      "offerId": "offer-j04",
+      "pricing": {
+       "display": {
+        "currency": "USD",
+        "total": 3620,
+        "perPassenger": {
+         "adult": {
+          "total": 905
+         }
+        }
+       }
+      },
+      "fare": {
+       "seatsRemaining": 9,
+       "family": "Main Cabin"
+      },
+      "baggage": {
+       "hasCarryOnBag": true,
+       "hasCheckedBag": true
+      },
+      "expiration": "2099-01-01T00:00:00Z"
+     }
+    },
+    {
+     "journeyKey": "j05",
+     "segments": [
+      {
+       "direction": "OUTBOUND",
+       "originCode": "JFK",
+       "destinationCode": "LIS",
+       "originName": "John F. Kennedy International Airport",
+       "destinationName": "Lisbon Humberto Delgado Airport",
+       "departureTime": "2026-11-20T18:50:00",
+       "arrivalTime": "2026-11-21T06:55:00",
+       "duration": {
+        "minutes": 425
+       },
+       "carrier": {
+        "marketingName": "TAP Air Portugal",
+        "marketingCode": "TP"
+       },
+       "flight": {
+        "marketingNumber": "208"
+       }
+      },
+      {
+       "direction": "OUTBOUND",
+       "originCode": "LIS",
+       "destinationCode": "FCO",
+       "originName": "Lisbon Humberto Delgado Airport",
+       "destinationName": "Rome Fiumicino Airport",
+       "departureTime": "2026-11-21T08:15:00",
+       "arrivalTime": "2026-11-21T10:30:00",
+       "duration": {
+        "minutes": 135
+       },
+       "carrier": {
+        "marketingName": "TAP Air Portugal",
+        "marketingCode": "TP"
+       },
+       "flight": {
+        "marketingNumber": "838"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "FCO",
+       "destinationCode": "LIS",
+       "originName": "Rome Fiumicino Airport",
+       "destinationName": "Lisbon Humberto Delgado Airport",
+       "departureTime": "2026-11-25T13:20:00",
+       "arrivalTime": "2026-11-25T15:40:00",
+       "duration": {
+        "minutes": 140
+       },
+       "carrier": {
+        "marketingName": "TAP Air Portugal",
+        "marketingCode": "TP"
+       },
+       "flight": {
+        "marketingNumber": "839"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "LIS",
+       "destinationCode": "JFK",
+       "originName": "Lisbon Humberto Delgado Airport",
+       "destinationName": "John F. Kennedy International Airport",
+       "departureTime": "2026-11-25T17:30:00",
+       "arrivalTime": "2026-11-25T20:45:00",
+       "duration": {
+        "minutes": 495
+       },
+       "carrier": {
+        "marketingName": "TAP Air Portugal",
+        "marketingCode": "TP"
+       },
+       "flight": {
+        "marketingNumber": "209"
+       }
+      }
+     ],
+     "legDurations": [
+      {
+       "direction": "OUTBOUND",
+       "duration": {
+        "minutes": 640
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "duration": {
+        "minutes": 700
+       }
+      }
+     ],
+     "cheapestOffer": {
+      "offerId": "offer-j05",
+      "pricing": {
+       "display": {
+        "currency": "USD",
+        "total": 2080,
+        "perPassenger": {
+         "adult": {
+          "total": 520
+         }
+        }
+       }
+      },
+      "fare": {
+       "seatsRemaining": 9,
+       "family": "Economy"
+      },
+      "baggage": {
+       "hasCarryOnBag": true,
+       "hasCheckedBag": false
+      },
+      "expiration": "2099-01-01T00:00:00Z"
+     }
+    },
+    {
+     "journeyKey": "j06",
+     "segments": [
+      {
+       "direction": "OUTBOUND",
+       "originCode": "EWR",
+       "destinationCode": "FRA",
+       "originName": "Newark Liberty International Airport",
+       "destinationName": "Frankfurt Airport",
+       "departureTime": "2026-11-20T09:40:00",
+       "arrivalTime": "2026-11-20T23:10:00",
+       "duration": {
+        "minutes": 450
+       },
+       "carrier": {
+        "marketingName": "United Airlines",
+        "marketingCode": "UA"
+       },
+       "flight": {
+        "marketingNumber": "100"
+       }
+      },
+      {
+       "direction": "OUTBOUND",
+       "originCode": "FRA",
+       "destinationCode": "FCO",
+       "originName": "Frankfurt Airport",
+       "destinationName": "Rome Fiumicino Airport",
+       "departureTime": "2026-11-21T00:40:00",
+       "arrivalTime": "2026-11-21T02:30:00",
+       "duration": {
+        "minutes": 110
+       },
+       "carrier": {
+        "marketingName": "Lufthansa",
+        "marketingCode": "LH"
+       },
+       "flight": {
+        "marketingNumber": "232"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "FCO",
+       "destinationCode": "FRA",
+       "originName": "Rome Fiumicino Airport",
+       "destinationName": "Frankfurt Airport",
+       "departureTime": "2026-11-25T16:40:00",
+       "arrivalTime": "2026-11-25T18:40:00",
+       "duration": {
+        "minutes": 120
+       },
+       "carrier": {
+        "marketingName": "Lufthansa",
+        "marketingCode": "LH"
+       },
+       "flight": {
+        "marketingNumber": "233"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "FRA",
+       "destinationCode": "EWR",
+       "originName": "Frankfurt Airport",
+       "destinationName": "Newark Liberty International Airport",
+       "departureTime": "2026-11-25T20:30:00",
+       "arrivalTime": "2026-11-25T23:40:00",
+       "duration": {
+        "minutes": 550
+       },
+       "carrier": {
+        "marketingName": "United Airlines",
+        "marketingCode": "UA"
+       },
+       "flight": {
+        "marketingNumber": "101"
+       }
+      }
+     ],
+     "legDurations": [
+      {
+       "direction": "OUTBOUND",
+       "duration": {
+        "minutes": 660
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "duration": {
+        "minutes": 720
+       }
+      }
+     ],
+     "cheapestOffer": {
+      "offerId": "offer-j06",
+      "pricing": {
+       "display": {
+        "currency": "USD",
+        "total": 2440,
+        "perPassenger": {
+         "adult": {
+          "total": 610
+         }
+        }
+       }
+      },
+      "fare": {
+       "seatsRemaining": 9,
+       "family": "Economy"
+      },
+      "baggage": {
+       "hasCarryOnBag": true,
+       "hasCheckedBag": true
+      },
+      "expiration": "2099-01-01T00:00:00Z"
+     }
+    },
+    {
+     "journeyKey": "j07",
+     "segments": [
+      {
+       "direction": "OUTBOUND",
+       "originCode": "JFK",
+       "destinationCode": "FRA",
+       "originName": "John F. Kennedy International Airport",
+       "destinationName": "Frankfurt Airport",
+       "departureTime": "2026-11-20T19:00:00",
+       "arrivalTime": "2026-11-21T06:00:00",
+       "duration": {
+        "minutes": 420
+       },
+       "carrier": {
+        "marketingName": "Lufthansa",
+        "marketingCode": "LH"
+       },
+       "flight": {
+        "marketingNumber": "401"
+       }
+      },
+      {
+       "direction": "OUTBOUND",
+       "originCode": "FRA",
+       "destinationCode": "FCO",
+       "originName": "Frankfurt Airport",
+       "destinationName": "Rome Fiumicino Airport",
+       "departureTime": "2026-11-21T07:00:00",
+       "arrivalTime": "2026-11-21T08:20:00",
+       "duration": {
+        "minutes": 110
+       },
+       "carrier": {
+        "marketingName": "Lufthansa",
+        "marketingCode": "LH"
+       },
+       "flight": {
+        "marketingNumber": "230"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "FCO",
+       "destinationCode": "FRA",
+       "originName": "Rome Fiumicino Airport",
+       "destinationName": "Frankfurt Airport",
+       "departureTime": "2026-11-25T09:30:00",
+       "arrivalTime": "2026-11-25T11:30:00",
+       "duration": {
+        "minutes": 120
+       },
+       "carrier": {
+        "marketingName": "Lufthansa",
+        "marketingCode": "LH"
+       },
+       "flight": {
+        "marketingNumber": "231"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "FRA",
+       "destinationCode": "JFK",
+       "originName": "Frankfurt Airport",
+       "destinationName": "John F. Kennedy International Airport",
+       "departureTime": "2026-11-25T13:00:00",
+       "arrivalTime": "2026-11-25T16:10:00",
+       "duration": {
+        "minutes": 550
+       },
+       "carrier": {
+        "marketingName": "Lufthansa",
+        "marketingCode": "LH"
+       },
+       "flight": {
+        "marketingNumber": "400"
+       }
+      }
+     ],
+     "legDurations": [
+      {
+       "direction": "OUTBOUND",
+       "duration": {
+        "minutes": 600
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "duration": {
+        "minutes": 640
+       }
+      }
+     ],
+     "cheapestOffer": {
+      "offerId": "offer-j07",
+      "pricing": {
+       "display": {
+        "currency": "USD",
+        "total": 2600,
+        "perPassenger": {
+         "adult": {
+          "total": 650
+         }
+        }
+       }
+      },
+      "fare": {
+       "seatsRemaining": 9,
+       "family": "Economy"
+      },
+      "baggage": {
+       "hasCarryOnBag": true,
+       "hasCheckedBag": false
+      },
+      "expiration": "2099-01-01T00:00:00Z"
+     }
+    },
+    {
+     "journeyKey": "j08",
+     "segments": [
+      {
+       "direction": "OUTBOUND",
+       "originCode": "JFK",
+       "destinationCode": "AMS",
+       "originName": "John F. Kennedy International Airport",
+       "destinationName": "Amsterdam Schiphol Airport",
+       "departureTime": "2026-11-20T11:15:00",
+       "arrivalTime": "2026-11-21T00:50:00",
+       "duration": {
+        "minutes": 455
+       },
+       "carrier": {
+        "marketingName": "KLM",
+        "marketingCode": "KL"
+       },
+       "flight": {
+        "marketingNumber": "642"
+       }
+      },
+      {
+       "direction": "OUTBOUND",
+       "originCode": "AMS",
+       "destinationCode": "FCO",
+       "originName": "Amsterdam Schiphol Airport",
+       "destinationName": "Rome Fiumicino Airport",
+       "departureTime": "2026-11-21T04:10:00",
+       "arrivalTime": "2026-11-21T06:30:00",
+       "duration": {
+        "minutes": 140
+       },
+       "carrier": {
+        "marketingName": "KLM",
+        "marketingCode": "KL"
+       },
+       "flight": {
+        "marketingNumber": "1597"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "FCO",
+       "destinationCode": "AMS",
+       "originName": "Rome Fiumicino Airport",
+       "destinationName": "Amsterdam Schiphol Airport",
+       "departureTime": "2026-11-25T07:10:00",
+       "arrivalTime": "2026-11-25T09:40:00",
+       "duration": {
+        "minutes": 150
+       },
+       "carrier": {
+        "marketingName": "KLM",
+        "marketingCode": "KL"
+       },
+       "flight": {
+        "marketingNumber": "1598"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "AMS",
+       "destinationCode": "JFK",
+       "originName": "Amsterdam Schiphol Airport",
+       "destinationName": "John F. Kennedy International Airport",
+       "departureTime": "2026-11-25T11:00:00",
+       "arrivalTime": "2026-11-25T13:50:00",
+       "duration": {
+        "minutes": 530
+       },
+       "carrier": {
+        "marketingName": "KLM",
+        "marketingCode": "KL"
+       },
+       "flight": {
+        "marketingNumber": "641"
+       }
+      }
+     ],
+     "legDurations": [
+      {
+       "direction": "OUTBOUND",
+       "duration": {
+        "minutes": 700
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "duration": {
+        "minutes": 690
+       }
+      }
+     ],
+     "cheapestOffer": {
+      "offerId": "offer-j08",
+      "pricing": {
+       "display": {
+        "currency": "USD",
+        "total": 2240,
+        "perPassenger": {
+         "adult": {
+          "total": 560
+         }
+        }
+       }
+      },
+      "fare": {
+       "seatsRemaining": 9,
+       "family": "Economy"
+      },
+      "baggage": {
+       "hasCarryOnBag": true,
+       "hasCheckedBag": false
+      },
+      "expiration": "2099-01-01T00:00:00Z"
+     }
+    },
+    {
+     "journeyKey": "j09",
+     "segments": [
+      {
+       "direction": "OUTBOUND",
+       "originCode": "JFK",
+       "destinationCode": "CDG",
+       "originName": "John F. Kennedy International Airport",
+       "destinationName": "Paris Charles de Gaulle Airport",
+       "departureTime": "2026-11-20T21:40:00",
+       "arrivalTime": "2026-11-21T10:50:00",
+       "duration": {
+        "minutes": 430
+       },
+       "carrier": {
+        "marketingName": "Air France",
+        "marketingCode": "AF"
+       },
+       "flight": {
+        "marketingNumber": "7"
+       }
+      },
+      {
+       "direction": "OUTBOUND",
+       "originCode": "CDG",
+       "destinationCode": "FCO",
+       "originName": "Paris Charles de Gaulle Airport",
+       "destinationName": "Rome Fiumicino Airport",
+       "departureTime": "2026-11-21T12:00:00",
+       "arrivalTime": "2026-11-21T13:05:00",
+       "duration": {
+        "minutes": 125
+       },
+       "carrier": {
+        "marketingName": "Air France",
+        "marketingCode": "AF"
+       },
+       "flight": {
+        "marketingNumber": "1104"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "FCO",
+       "destinationCode": "AMS",
+       "originName": "Rome Fiumicino Airport",
+       "destinationName": "Amsterdam Schiphol Airport",
+       "departureTime": "2026-11-25T17:15:00",
+       "arrivalTime": "2026-11-25T19:45:00",
+       "duration": {
+        "minutes": 150
+       },
+       "carrier": {
+        "marketingName": "KLM",
+        "marketingCode": "KL"
+       },
+       "flight": {
+        "marketingNumber": "1601"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "AMS",
+       "destinationCode": "JFK",
+       "originName": "Amsterdam Schiphol Airport",
+       "destinationName": "John F. Kennedy International Airport",
+       "departureTime": "2026-11-25T21:00:00",
+       "arrivalTime": "2026-11-25T23:50:00",
+       "duration": {
+        "minutes": 530
+       },
+       "carrier": {
+        "marketingName": "KLM",
+        "marketingCode": "KL"
+       },
+       "flight": {
+        "marketingNumber": "643"
+       }
+      }
+     ],
+     "legDurations": [
+      {
+       "direction": "OUTBOUND",
+       "duration": {
+        "minutes": 690
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "duration": {
+        "minutes": 680
+       }
+      }
+     ],
+     "cheapestOffer": {
+      "offerId": "offer-j09",
+      "pricing": {
+       "display": {
+        "currency": "USD",
+        "total": 2360,
+        "perPassenger": {
+         "adult": {
+          "total": 590
+         }
+        }
+       }
+      },
+      "fare": {
+       "seatsRemaining": 9,
+       "family": "Economy"
+      },
+      "baggage": {
+       "hasCarryOnBag": true,
+       "hasCheckedBag": false
+      },
+      "expiration": "2099-01-01T00:00:00Z"
+     }
+    },
+    {
+     "journeyKey": "j10",
+     "segments": [
+      {
+       "direction": "OUTBOUND",
+       "originCode": "JFK",
+       "destinationCode": "FRA",
+       "originName": "John F. Kennedy International Airport",
+       "destinationName": "Frankfurt Airport",
+       "departureTime": "2026-11-20T16:20:00",
+       "arrivalTime": "2026-11-21T05:30:00",
+       "duration": {
+        "minutes": 430
+       },
+       "carrier": {
+        "marketingName": "Lufthansa",
+        "marketingCode": "LH"
+       },
+       "flight": {
+        "marketingNumber": "405"
+       }
+      },
+      {
+       "direction": "OUTBOUND",
+       "originCode": "FRA",
+       "destinationCode": "FCO",
+       "originName": "Frankfurt Airport",
+       "destinationName": "Rome Fiumicino Airport",
+       "departureTime": "2026-11-21T06:20:00",
+       "arrivalTime": "2026-11-21T07:10:00",
+       "duration": {
+        "minutes": 110
+       },
+       "carrier": {
+        "marketingName": "Lufthansa",
+        "marketingCode": "LH"
+       },
+       "flight": {
+        "marketingNumber": "226"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "FCO",
+       "destinationCode": "FRA",
+       "originName": "Rome Fiumicino Airport",
+       "destinationName": "Frankfurt Airport",
+       "departureTime": "2026-11-25T11:00:00",
+       "arrivalTime": "2026-11-25T13:00:00",
+       "duration": {
+        "minutes": 120
+       },
+       "carrier": {
+        "marketingName": "Lufthansa",
+        "marketingCode": "LH"
+       },
+       "flight": {
+        "marketingNumber": "229"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "FRA",
+       "destinationCode": "JFK",
+       "originName": "Frankfurt Airport",
+       "destinationName": "John F. Kennedy International Airport",
+       "departureTime": "2026-11-25T14:30:00",
+       "arrivalTime": "2026-11-25T17:40:00",
+       "duration": {
+        "minutes": 550
+       },
+       "carrier": {
+        "marketingName": "Lufthansa",
+        "marketingCode": "LH"
+       },
+       "flight": {
+        "marketingNumber": "404"
+       }
+      }
+     ],
+     "legDurations": [
+      {
+       "direction": "OUTBOUND",
+       "duration": {
+        "minutes": 650
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "duration": {
+        "minutes": 640
+       }
+      }
+     ],
+     "cheapestOffer": {
+      "offerId": "offer-j10",
+      "pricing": {
+       "display": {
+        "currency": "USD",
+        "total": 2560,
+        "perPassenger": {
+         "adult": {
+          "total": 640
+         }
+        }
+       }
+      },
+      "fare": {
+       "seatsRemaining": 9,
+       "family": "Economy"
+      },
+      "baggage": {
+       "hasCarryOnBag": true,
+       "hasCheckedBag": false
+      },
+      "expiration": "2099-01-01T00:00:00Z"
+     }
+    },
+    {
+     "journeyKey": "j11",
+     "segments": [
+      {
+       "direction": "OUTBOUND",
+       "originCode": "JFK",
+       "destinationCode": "ZRH",
+       "originName": "John F. Kennedy International Airport",
+       "destinationName": "Zurich Airport",
+       "departureTime": "2026-11-20T10:05:00",
+       "arrivalTime": "2026-11-21T00:10:00",
+       "duration": {
+        "minutes": 430
+       },
+       "carrier": {
+        "marketingName": "Swiss",
+        "marketingCode": "LX"
+       },
+       "flight": {
+        "marketingNumber": "17"
+       }
+      },
+      {
+       "direction": "OUTBOUND",
+       "originCode": "ZRH",
+       "destinationCode": "FCO",
+       "originName": "Zurich Airport",
+       "destinationName": "Rome Fiumicino Airport",
+       "departureTime": "2026-11-21T06:15:00",
+       "arrivalTime": "2026-11-21T07:45:00",
+       "duration": {
+        "minutes": 90
+       },
+       "carrier": {
+        "marketingName": "Swiss",
+        "marketingCode": "LX"
+       },
+       "flight": {
+        "marketingNumber": "1728"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "FCO",
+       "destinationCode": "ZRH",
+       "originName": "Rome Fiumicino Airport",
+       "destinationName": "Zurich Airport",
+       "departureTime": "2026-11-25T14:10:00",
+       "arrivalTime": "2026-11-25T15:50:00",
+       "duration": {
+        "minutes": 100
+       },
+       "carrier": {
+        "marketingName": "Swiss",
+        "marketingCode": "LX"
+       },
+       "flight": {
+        "marketingNumber": "1729"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "ZRH",
+       "destinationCode": "JFK",
+       "originName": "Zurich Airport",
+       "destinationName": "John F. Kennedy International Airport",
+       "departureTime": "2026-11-25T17:30:00",
+       "arrivalTime": "2026-11-25T20:40:00",
+       "duration": {
+        "minutes": 550
+       },
+       "carrier": {
+        "marketingName": "Swiss",
+        "marketingCode": "LX"
+       },
+       "flight": {
+        "marketingNumber": "16"
+       }
+      }
+     ],
+     "legDurations": [
+      {
+       "direction": "OUTBOUND",
+       "duration": {
+        "minutes": 720
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "duration": {
+        "minutes": 700
+       }
+      }
+     ],
+     "cheapestOffer": {
+      "offerId": "offer-j11",
+      "pricing": {
+       "display": {
+        "currency": "USD",
+        "total": 2800,
+        "perPassenger": {
+         "adult": {
+          "total": 700
+         }
+        }
+       }
+      },
+      "fare": {
+       "seatsRemaining": 9,
+       "family": "Economy"
+      },
+      "baggage": {
+       "hasCarryOnBag": true,
+       "hasCheckedBag": true
+      },
+      "expiration": "2099-01-01T00:00:00Z"
+     }
+    },
+    {
+     "journeyKey": "j12",
+     "segments": [
+      {
+       "direction": "OUTBOUND",
+       "originCode": "JFK",
+       "destinationCode": "LHR",
+       "originName": "John F. Kennedy International Airport",
+       "destinationName": "London Heathrow Airport",
+       "departureTime": "2026-11-20T15:30:00",
+       "arrivalTime": "2026-11-21T03:30:00",
+       "duration": {
+        "minutes": 420
+       },
+       "carrier": {
+        "marketingName": "British Airways",
+        "marketingCode": "BA"
+       },
+       "flight": {
+        "marketingNumber": "178"
+       }
+      },
+      {
+       "direction": "OUTBOUND",
+       "originCode": "LHR",
+       "destinationCode": "FCO",
+       "originName": "London Heathrow Airport",
+       "destinationName": "Rome Fiumicino Airport",
+       "departureTime": "2026-11-21T04:40:00",
+       "arrivalTime": "2026-11-21T06:55:00",
+       "duration": {
+        "minutes": 155
+       },
+       "carrier": {
+        "marketingName": "British Airways",
+        "marketingCode": "BA"
+       },
+       "flight": {
+        "marketingNumber": "548"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "FCO",
+       "destinationCode": "LHR",
+       "originName": "Rome Fiumicino Airport",
+       "destinationName": "London Heathrow Airport",
+       "departureTime": "2026-11-25T15:40:00",
+       "arrivalTime": "2026-11-25T17:35:00",
+       "duration": {
+        "minutes": 175
+       },
+       "carrier": {
+        "marketingName": "British Airways",
+        "marketingCode": "BA"
+       },
+       "flight": {
+        "marketingNumber": "549"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "LHR",
+       "destinationCode": "JFK",
+       "originName": "London Heathrow Airport",
+       "destinationName": "John F. Kennedy International Airport",
+       "departureTime": "2026-11-25T19:00:00",
+       "arrivalTime": "2026-11-25T22:10:00",
+       "duration": {
+        "minutes": 500
+       },
+       "carrier": {
+        "marketingName": "British Airways",
+        "marketingCode": "BA"
+       },
+       "flight": {
+        "marketingNumber": "179"
+       }
+      }
+     ],
+     "legDurations": [
+      {
+       "direction": "OUTBOUND",
+       "duration": {
+        "minutes": 560
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "duration": {
+        "minutes": 600
+       }
+      }
+     ],
+     "cheapestOffer": {
+      "offerId": "offer-j12",
+      "pricing": {
+       "display": {
+        "currency": "USD",
+        "total": 3040,
+        "perPassenger": {
+         "adult": {
+          "total": 760
+         }
+        }
+       }
+      },
+      "fare": {
+       "seatsRemaining": 9,
+       "family": "Economy"
+      },
+      "baggage": {
+       "hasCarryOnBag": true,
+       "hasCheckedBag": true
+      },
+      "expiration": "2099-01-01T00:00:00Z"
+     }
+    },
+    {
+     "journeyKey": "j13",
+     "segments": [
+      {
+       "direction": "OUTBOUND",
+       "originCode": "JFK",
+       "destinationCode": "FCO",
+       "originName": "John F. Kennedy International Airport",
+       "destinationName": "Rome Fiumicino Airport",
+       "departureTime": "2026-11-20T10:30:00",
+       "arrivalTime": "2026-11-21T00:40:00",
+       "duration": {
+        "minutes": 500
+       },
+       "carrier": {
+        "marketingName": "Delta Air Lines",
+        "marketingCode": "DL"
+       },
+       "flight": {
+        "marketingNumber": "444"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "FCO",
+       "destinationCode": "JFK",
+       "originName": "Rome Fiumicino Airport",
+       "destinationName": "John F. Kennedy International Airport",
+       "departureTime": "2026-11-25T09:00:00",
+       "arrivalTime": "2026-11-25T12:45:00",
+       "duration": {
+        "minutes": 585
+       },
+       "carrier": {
+        "marketingName": "Delta Air Lines",
+        "marketingCode": "DL"
+       },
+       "flight": {
+        "marketingNumber": "445"
+       }
+      }
+     ],
+     "legDurations": [
+      {
+       "direction": "OUTBOUND",
+       "duration": {
+        "minutes": 500
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "duration": {
+        "minutes": 585
+       }
+      }
+     ],
+     "cheapestOffer": {
+      "offerId": "offer-j13",
+      "pricing": {
+       "display": {
+        "currency": "USD",
+        "total": 4720,
+        "perPassenger": {
+         "adult": {
+          "total": 1180
+         }
+        }
+       }
+      },
+      "fare": {
+       "seatsRemaining": 9,
+       "family": "Comfort+"
+      },
+      "baggage": {
+       "hasCarryOnBag": true,
+       "hasCheckedBag": true
+      },
+      "expiration": "2099-01-01T00:00:00Z"
+     }
+    },
+    {
+     "journeyKey": "j14",
+     "segments": [
+      {
+       "direction": "OUTBOUND",
+       "originCode": "JFK",
+       "destinationCode": "OSL",
+       "originName": "John F. Kennedy International Airport",
+       "destinationName": "Oslo Airport",
+       "departureTime": "2026-11-20T06:00:00",
+       "arrivalTime": "2026-11-20T18:30:00",
+       "duration": {
+        "minutes": 450
+       },
+       "carrier": {
+        "marketingName": "Norse Atlantic",
+        "marketingCode": "N0"
+       },
+       "flight": {
+        "marketingNumber": "800"
+       }
+      },
+      {
+       "direction": "OUTBOUND",
+       "originCode": "OSL",
+       "destinationCode": "STN",
+       "originName": "Oslo Airport",
+       "destinationName": "London Stansted Airport",
+       "departureTime": "2026-11-20T20:00:00",
+       "arrivalTime": "2026-11-20T22:10:00",
+       "duration": {
+        "minutes": 130
+       },
+       "carrier": {
+        "marketingName": "Ryanair",
+        "marketingCode": "FR"
+       },
+       "flight": {
+        "marketingNumber": "1912"
+       }
+      },
+      {
+       "direction": "OUTBOUND",
+       "originCode": "STN",
+       "destinationCode": "FCO",
+       "originName": "London Stansted Airport",
+       "destinationName": "Rome Fiumicino Airport",
+       "departureTime": "2026-11-21T03:00:00",
+       "arrivalTime": "2026-11-21T05:50:00",
+       "duration": {
+        "minutes": 160
+       },
+       "carrier": {
+        "marketingName": "Ryanair",
+        "marketingCode": "FR"
+       },
+       "flight": {
+        "marketingNumber": "9906"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "FCO",
+       "destinationCode": "STN",
+       "originName": "Rome Fiumicino Airport",
+       "destinationName": "London Stansted Airport",
+       "departureTime": "2026-11-25T12:00:00",
+       "arrivalTime": "2026-11-25T14:40:00",
+       "duration": {
+        "minutes": 160
+       },
+       "carrier": {
+        "marketingName": "Ryanair",
+        "marketingCode": "FR"
+       },
+       "flight": {
+        "marketingNumber": "9907"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "STN",
+       "destinationCode": "OSL",
+       "originName": "London Stansted Airport",
+       "destinationName": "Oslo Airport",
+       "departureTime": "2026-11-25T16:00:00",
+       "arrivalTime": "2026-11-25T18:50:00",
+       "duration": {
+        "minutes": 130
+       },
+       "carrier": {
+        "marketingName": "Ryanair",
+        "marketingCode": "FR"
+       },
+       "flight": {
+        "marketingNumber": "1913"
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "originCode": "OSL",
+       "destinationCode": "JFK",
+       "originName": "Oslo Airport",
+       "destinationName": "John F. Kennedy International Airport",
+       "departureTime": "2026-11-25T20:30:00",
+       "arrivalTime": "2026-11-26T00:40:00",
+       "duration": {
+        "minutes": 490
+       },
+       "carrier": {
+        "marketingName": "Norse Atlantic",
+        "marketingCode": "N0"
+       },
+       "flight": {
+        "marketingNumber": "801"
+       }
+      }
+     ],
+     "legDurations": [
+      {
+       "direction": "OUTBOUND",
+       "duration": {
+        "minutes": 740
+       }
+      },
+      {
+       "direction": "INBOUND",
+       "duration": {
+        "minutes": 740
+       }
+      }
+     ],
+     "cheapestOffer": {
+      "offerId": "offer-j14",
+      "pricing": {
+       "display": {
+        "currency": "USD",
+        "total": 1580,
+        "perPassenger": {
+         "adult": {
+          "total": 395
+         }
+        }
+       }
+      },
+      "fare": {
+       "seatsRemaining": 9,
+       "family": "Economy"
+      },
+      "baggage": {
+       "hasCarryOnBag": true,
+       "hasCheckedBag": false
+      },
+      "expiration": "2099-01-01T00:00:00Z"
+     }
+    }
+   ]
+  }
+ ]
+}
