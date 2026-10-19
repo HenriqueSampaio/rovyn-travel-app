@@ -664,12 +664,17 @@ def _attach_option_links(options: dict, prefs: dict, destination: str) -> dict:
 
     # Flights are round trips: into the route's first city, home from its last
     # (same city when the trip is single-base), landing at each traveler's own
-    # return city when they gave one.
+    # return city when they gave one. Each departure city's link searches the
+    # seats flying from that city, as the live fare search does — the one
+    # traveler leaving from Boston gets a one-adult search, not the group's
+    # three (the whole group shares each stay, so stay links keep `adults`).
     arrive_place = route["cities"][0]["city"] if route else destination
     return_from = route["cities"][-1]["city"] if route else ""
+    flyers_by_city = prefs.get("travelers_by_city") or {}
     for city, flights in (options.get("flights") or {}).items():
         return_to = prefs.get("return_by_city", {}).get(city, "")
-        url = links.expedia_flights(city, arrive_place, check_in, check_out, adults,
+        flyers = max(flyers_by_city.get(city) or 1, 1)
+        url = links.expedia_flights(city, arrive_place, check_in, check_out, flyers,
                                     return_from=return_from, return_to=return_to)
         for opt in flights:
             opt["link"] = url

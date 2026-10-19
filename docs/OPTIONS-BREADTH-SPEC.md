@@ -318,8 +318,9 @@ tallies, chips never cut mid-word); flights (8 distinct lanes, both suppliers ca
 duplicate itinerary collapsed to the cheaper USD copy, the median formula, pace orders, GBP copy
 rejected, supplier-aware re-verify); open jaw (≥6 lanes, flies home from Florence); no keys → no
 calls; Duffel stays mapped, deduped and gated; the multi-city board end to end (6 per city, all
-three styles per city, city-night budget reasons, provenance); the API (detail stubs, throttled
-media not frozen). `tests/test_maps_and_links.py` stays green.
+three styles per city, city-night budget reasons, provenance, each departure city's flight link
+sized to its own travelers); the API (detail stubs, throttled media not frozen).
+`tests/test_maps_and_links.py` stays green.
 
 ## Boundaries
 

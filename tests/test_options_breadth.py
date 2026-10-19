@@ -1070,6 +1070,25 @@ ok("provenance: suppliers listed, sources named, sandbox flights flagged",
 ok("flights per departure city: eight, laned, with the pace order",
    len(board["flights"]["New York"]) == 8 and board["flights"]["New York"][1]["lane"] == "Early arrival")
 ok("option ids are assigned after ranking", all(o["id"].startswith("stay-") for o in board["stay"]))
+ok("three travelers from New York: the city's flight link searches three adults",
+   all("passengers=adults:3&" in f["link"] for f in board["flights"]["New York"]), board["flights"]["New York"][0]["link"])
+split = ai_service._aggregate_preferences([
+    {"departure_city": city, "budget_min": 300, "budget_max": 900, "travel_dates_start": "2026-11-20",
+     "travel_dates_end": "2026-11-23"} for city in ("New York", "new york", "Boston")])
+linked = ai_service._attach_option_links(
+    {"dates": {"start": "2026-11-20", "end": "2026-11-23"}, "stay": [{"name": "Hotel Artemide"}],
+     "flights": {"New York": [{"airline": "A"}, {"airline": "B"}], "Boston": [{"airline": "C"}],
+                 "Your city": [{"airline": "D"}]}},
+    split, "Rome, Italy")
+ok("each departure city's flight link searches its own travelers, not the whole group (unknown city: one)",
+   split["travelers_by_city"] == {"New York": 2, "Boston": 1}
+   and all("passengers=adults:2&" in f["link"] for f in linked["flights"]["New York"])
+   and "passengers=adults:1&" in linked["flights"]["Boston"][0]["link"]
+   and "passengers=adults:1&" in linked["flights"]["Your city"][0]["link"],
+   {city: [f["link"] for f in opts] for city, opts in linked["flights"].items()})
+ok("a stay link still searches for the whole group",
+   "adults=3" in linked["stay"][0]["links"]["airbnb"] and "group_adults=3" in linked["stay"][0]["links"]["booking"],
+   linked["stay"][0]["links"])
 
 # ---------------------------------------------------------------------------
 # 16. The API: lighter board payload, media not frozen when throttled, a page that never waits
