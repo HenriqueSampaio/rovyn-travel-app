@@ -118,7 +118,7 @@ def _status_payload(conn, trip, user_id: str) -> dict:
     # 'paid' means money captured (or a self-book commitment); an authorized
     # card hold is 'authorized' and must not read as paid anywhere.
     pay_status = {r["user_id"]: r["status"] for r in pay_rows}
-    authorized_count = sum(1 for r in pay_rows if r["status"] == "authorized")
+    authorized_count = sum(1 for r in pay_rows if r["status"] in ("authorized", "nothing_due"))
     tallies = Counter(v["destination_name"] for v in votes)
     my_vote = next((v["destination_name"] for v in votes if v["user_id"] == user_id), None)
 
@@ -317,10 +317,18 @@ _TRIP_CHILD_TABLES = (
 
 @router.delete("/{trip_id}")
 def delete_trip(trip_id: str, user: dict = Depends(get_current_user)):
+    with get_conn(readonly=True) as conn:
+        trip = _member_trip(conn, trip_id, user["id"])
+    if user["id"] != trip["leader_id"]:
+        raise HTTPException(status_code=403, detail="Only the trip leader can delete a trip — you can leave it instead.")
+    try:
+        # Refuses while money is in motion; closes an idle checkout and releases its airline holds.
+        booking_service.before_trip_delete(trip_id)
+    except booking_service.BookingError as exc:
+        raise HTTPException(status_code=exc.status or 400, detail=str(exc))
     with get_conn() as conn:
         trip = _member_trip(conn, trip_id, user["id"])
-        if user["id"] != trip["leader_id"]:
-            raise HTTPException(status_code=403, detail="Only the trip leader can delete a trip — you can leave it instead.")
+        booking_service.delete_trip_rows(conn, trip_id)
         # bookings is trip-scoped (no user_id), so it can't ride the per-user loop
         conn.execute("DELETE FROM bookings WHERE trip_id = ?", (trip_id,))
         for table in _TRIP_CHILD_TABLES:
@@ -341,15 +349,18 @@ def leave_trip(trip_id: str, user: dict = Depends(get_current_user)):
         paid = conn.execute(
             "SELECT status FROM payments WHERE trip_id = ? AND user_id = ?", (trip_id, user["id"])
         ).fetchone()
-        if paid and paid["status"] == "authorized":
+        if paid and paid["status"] in ("authorized", "nothing_due"):
             raise HTTPException(status_code=400, detail="Release your payment authorization first, then you can leave.")
+        if paid and paid["status"] == "releasing":
+            raise HTTPException(status_code=400, detail="Your authorization is still being released — try again in a few minutes.")
         if paid and paid["status"] != "pending":
             raise HTTPException(status_code=400, detail="You've already paid your share — the trip is locked in.")
-        # A pending checkout link is not a payment: expire it on the way out.
-        conn.execute("UPDATE payment_attempts SET status = 'expired', updated_at = ? WHERE trip_id = ? AND user_id = ? AND status = 'pending'",
-                     (_now(), trip_id, user["id"]))
+        # A pending checkout link is not a payment, but it is closed at Stripe on the way out (below).
+        pending_attempt = booking_service.pending_attempt_for(conn, trip_id, user["id"])
         for table in _TRIP_CHILD_TABLES:
             conn.execute(f"DELETE FROM {table} WHERE trip_id = ? AND user_id = ?", (trip_id, user["id"]))
+    if pending_attempt:
+        booking_service._release_attempt(pending_attempt["settlement_id"], pending_attempt, "left_trip")
     # The group changed while money was being collected: everyone's share
     # changes, so the round restarts with a fresh lock.
     booking_service.on_members_changed(trip_id, reason=f"{user['name']} left the trip")

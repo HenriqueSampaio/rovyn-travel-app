@@ -10,7 +10,7 @@ load_dotenv()
 
 from backend.routers import auth_routes, bookings, payments, places, social, trips
 from backend.routers.social import MEDIA_DIR
-from backend.services import reconciler
+from backend.services import booking_service, reconciler
 from backend.services.payment_service import refuse_live_keys
 
 # Only provably-test credentials (sk_test_ / sand_ / duffel_test_ / empty) are
@@ -55,6 +55,14 @@ app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
 def _start_reconciler() -> None:
     # Resumes settlements a dead process left half-done; ROVYN_RECONCILER=0 disables it.
     reconciler.start()
+
+
+@app.on_event("shutdown")
+def _finish_settlements() -> None:
+    # A settlement mid-flight gets to finish its current provider call (bounded);
+    # whatever is left resumes through the reconciler on the next boot.
+    reconciler.stop()
+    booking_service.join_live_settlements()
 
 
 @app.get("/health")

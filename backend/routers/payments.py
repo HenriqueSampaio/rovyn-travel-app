@@ -46,6 +46,8 @@ def read_checkout(trip_id: str, user: dict = Depends(get_current_user)):
 
 @router.post("/{trip_id}/checkout/profile")
 def save_profile(trip_id: str, req: TravelerProfileRequest, user: dict = Depends(get_current_user)):
+    if not req.given_name.strip() or not req.family_name.strip():
+        raise HTTPException(status_code=400, detail="First and last name are required.")
     with get_conn() as conn:
         _member_trip(conn, trip_id, user["id"])
         born = req.born_on.strip()
@@ -64,6 +66,14 @@ def save_profile(trip_id: str, req: TravelerProfileRequest, user: dict = Depends
         title = req.title.strip().lower()
         if title and title not in ("mr", "ms", "mrs", "miss"):
             raise HTTPException(status_code=400, detail="Title must be mr, ms, mrs or miss.")
+    # Once this traveler's share is in, the fields the booking needs cannot be blanked.
+    try:
+        booking_service.assert_profile_change_allowed(trip_id, user, {
+            "given_name": req.given_name.strip(), "family_name": req.family_name.strip(), "born_on": born,
+            "gender": gender, "title": title, "phone": phone})
+    except booking_service.BookingError as exc:
+        _raise(exc)
+    with get_conn() as conn:
         conn.execute(
             """INSERT INTO traveler_profiles (user_id, given_name, family_name, born_on, gender, title, phone, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
