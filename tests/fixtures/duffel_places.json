@@ -1,0 +1,471 @@
+{
+ "new york": {
+  "data": [
+   {
+    "id": "cit_nyc_us",
+    "type": "city",
+    "iata_code": "NYC",
+    "iata_city_code": "NYC",
+    "iata_country_code": "US",
+    "name": "New York",
+    "city_name": null,
+    "city": null,
+    "airports": [
+     {
+      "id": "arp_jfk_us",
+      "type": "airport",
+      "iata_code": "JFK",
+      "iata_city_code": null,
+      "iata_country_code": "US",
+      "name": "John F. Kennedy International Airport",
+      "city_name": "New York",
+      "city": null,
+      "airports": null,
+      "time_zone": "America/New_York",
+      "latitude": 40.639751,
+      "longitude": -73.778925,
+      "icao_code": "KJFK"
+     },
+     {
+      "id": "arp_ewr_us",
+      "type": "airport",
+      "iata_code": "EWR",
+      "iata_city_code": null,
+      "iata_country_code": "US",
+      "name": "Newark Liberty International Airport",
+      "city_name": "New York",
+      "city": null,
+      "airports": null,
+      "time_zone": "America/New_York",
+      "latitude": 40.6925,
+      "longitude": -74.168667,
+      "icao_code": "KEWR"
+     },
+     {
+      "id": "arp_lga_us",
+      "type": "airport",
+      "iata_code": "LGA",
+      "iata_city_code": null,
+      "iata_country_code": "US",
+      "name": "LaGuardia Airport",
+      "city_name": "New York",
+      "city": null,
+      "airports": null,
+      "time_zone": "America/New_York",
+      "latitude": 40.777245,
+      "longitude": -73.872608,
+      "icao_code": "KLGA"
+     }
+    ],
+    "time_zone": null,
+    "latitude": null,
+    "longitude": null,
+    "icao_code": null
+   },
+   {
+    "id": "arp_jfk_us",
+    "type": "airport",
+    "iata_code": "JFK",
+    "iata_city_code": "NYC",
+    "iata_country_code": "US",
+    "name": "John F. Kennedy International Airport",
+    "city_name": "New York",
+    "city": {
+     "id": "cit_nyc_us",
+     "name": "New York",
+     "iata_code": "NYC",
+     "iata_country_code": "US",
+     "airports": [
+      {
+       "id": "arp_jfk_us",
+       "type": "airport",
+       "iata_code": "JFK",
+       "iata_city_code": null,
+       "iata_country_code": "US",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "city": null,
+       "airports": null,
+       "time_zone": "America/New_York",
+       "latitude": 40.639751,
+       "longitude": -73.778925,
+       "icao_code": "KJFK"
+      },
+      {
+       "id": "arp_ewr_us",
+       "type": "airport",
+       "iata_code": "EWR",
+       "iata_city_code": null,
+       "iata_country_code": "US",
+       "name": "Newark Liberty International Airport",
+       "city_name": "New York",
+       "city": null,
+       "airports": null,
+       "time_zone": "America/New_York",
+       "latitude": 40.6925,
+       "longitude": -74.168667,
+       "icao_code": "KEWR"
+      },
+      {
+       "id": "arp_lga_us",
+       "type": "airport",
+       "iata_code": "LGA",
+       "iata_city_code": null,
+       "iata_country_code": "US",
+       "name": "LaGuardia Airport",
+       "city_name": "New York",
+       "city": null,
+       "airports": null,
+       "time_zone": "America/New_York",
+       "latitude": 40.777245,
+       "longitude": -73.872608,
+       "icao_code": "KLGA"
+      }
+     ]
+    },
+    "airports": null,
+    "time_zone": "America/New_York",
+    "latitude": 40.639751,
+    "longitude": -73.778925,
+    "icao_code": "KJFK"
+   },
+   {
+    "id": "arp_ewr_us",
+    "type": "airport",
+    "iata_code": "EWR",
+    "iata_city_code": "NYC",
+    "iata_country_code": "US",
+    "name": "Newark Liberty International Airport",
+    "city_name": "New York",
+    "city": {
+     "id": "cit_nyc_us",
+     "name": "New York",
+     "iata_code": "NYC",
+     "iata_country_code": "US",
+     "airports": [
+      {
+       "id": "arp_jfk_us",
+       "type": "airport",
+       "iata_code": "JFK",
+       "iata_city_code": null,
+       "iata_country_code": "US",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "city": null,
+       "airports": null,
+       "time_zone": "America/New_York",
+       "latitude": 40.639751,
+       "longitude": -73.778925,
+       "icao_code": "KJFK"
+      },
+      {
+       "id": "arp_ewr_us",
+       "type": "airport",
+       "iata_code": "EWR",
+       "iata_city_code": null,
+       "iata_country_code": "US",
+       "name": "Newark Liberty International Airport",
+       "city_name": "New York",
+       "city": null,
+       "airports": null,
+       "time_zone": "America/New_York",
+       "latitude": 40.6925,
+       "longitude": -74.168667,
+       "icao_code": "KEWR"
+      },
+      {
+       "id": "arp_lga_us",
+       "type": "airport",
+       "iata_code": "LGA",
+       "iata_city_code": null,
+       "iata_country_code": "US",
+       "name": "LaGuardia Airport",
+       "city_name": "New York",
+       "city": null,
+       "airports": null,
+       "time_zone": "America/New_York",
+       "latitude": 40.777245,
+       "longitude": -73.872608,
+       "icao_code": "KLGA"
+      }
+     ]
+    },
+    "airports": null,
+    "time_zone": "America/New_York",
+    "latitude": 40.6925,
+    "longitude": -74.168667,
+    "icao_code": "KEWR"
+   },
+   {
+    "id": "arp_lga_us",
+    "type": "airport",
+    "iata_code": "LGA",
+    "iata_city_code": "NYC",
+    "iata_country_code": "US",
+    "name": "LaGuardia Airport",
+    "city_name": "New York",
+    "city": {
+     "id": "cit_nyc_us",
+     "name": "New York",
+     "iata_code": "NYC",
+     "iata_country_code": "US",
+     "airports": [
+      {
+       "id": "arp_jfk_us",
+       "type": "airport",
+       "iata_code": "JFK",
+       "iata_city_code": null,
+       "iata_country_code": "US",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "city": null,
+       "airports": null,
+       "time_zone": "America/New_York",
+       "latitude": 40.639751,
+       "longitude": -73.778925,
+       "icao_code": "KJFK"
+      },
+      {
+       "id": "arp_ewr_us",
+       "type": "airport",
+       "iata_code": "EWR",
+       "iata_city_code": null,
+       "iata_country_code": "US",
+       "name": "Newark Liberty International Airport",
+       "city_name": "New York",
+       "city": null,
+       "airports": null,
+       "time_zone": "America/New_York",
+       "latitude": 40.6925,
+       "longitude": -74.168667,
+       "icao_code": "KEWR"
+      },
+      {
+       "id": "arp_lga_us",
+       "type": "airport",
+       "iata_code": "LGA",
+       "iata_city_code": null,
+       "iata_country_code": "US",
+       "name": "LaGuardia Airport",
+       "city_name": "New York",
+       "city": null,
+       "airports": null,
+       "time_zone": "America/New_York",
+       "latitude": 40.777245,
+       "longitude": -73.872608,
+       "icao_code": "KLGA"
+      }
+     ]
+    },
+    "airports": null,
+    "time_zone": "America/New_York",
+    "latitude": 40.777245,
+    "longitude": -73.872608,
+    "icao_code": "KLGA"
+   }
+  ]
+ },
+ "rome": {
+  "data": [
+   {
+    "id": "arp_rme_us",
+    "type": "airport",
+    "iata_code": "RME",
+    "iata_city_code": null,
+    "iata_country_code": "US",
+    "name": "Griffiss International Airport",
+    "city_name": "Rome",
+    "city": null,
+    "airports": null,
+    "time_zone": "America/New_York",
+    "latitude": 43.2338,
+    "longitude": -75.407033,
+    "icao_code": "KRME"
+   },
+   {
+    "id": "cit_rom_it",
+    "type": "city",
+    "iata_code": "ROM",
+    "iata_city_code": "ROM",
+    "iata_country_code": "IT",
+    "name": "Rome",
+    "city_name": null,
+    "city": null,
+    "airports": [
+     {
+      "id": "arp_fco_it",
+      "type": "airport",
+      "iata_code": "FCO",
+      "iata_city_code": null,
+      "iata_country_code": "IT",
+      "name": "Leonardo da Vinci–Fiumicino Airport",
+      "city_name": "Rome",
+      "city": null,
+      "airports": null,
+      "time_zone": "Europe/Rome",
+      "latitude": 41.800278,
+      "longitude": 12.238889,
+      "icao_code": "LIRF"
+     },
+     {
+      "id": "arp_cia_it",
+      "type": "airport",
+      "iata_code": "CIA",
+      "iata_city_code": null,
+      "iata_country_code": "IT",
+      "name": "Ciampino–G. B. Pastine International Airport",
+      "city_name": "Rome",
+      "city": null,
+      "airports": null,
+      "time_zone": "Europe/Rome",
+      "latitude": 41.799361,
+      "longitude": 12.594936,
+      "icao_code": "LIRA"
+     }
+    ],
+    "time_zone": null,
+    "latitude": null,
+    "longitude": null,
+    "icao_code": null
+   },
+   {
+    "id": "arp_fco_it",
+    "type": "airport",
+    "iata_code": "FCO",
+    "iata_city_code": "ROM",
+    "iata_country_code": "IT",
+    "name": "Leonardo da Vinci–Fiumicino Airport",
+    "city_name": "Rome",
+    "city": {
+     "id": "cit_rom_it",
+     "name": "Rome",
+     "iata_code": "ROM",
+     "iata_country_code": "IT",
+     "airports": [
+      {
+       "id": "arp_fco_it",
+       "type": "airport",
+       "iata_code": "FCO",
+       "iata_city_code": null,
+       "iata_country_code": "IT",
+       "name": "Leonardo da Vinci–Fiumicino Airport",
+       "city_name": "Rome",
+       "city": null,
+       "airports": null,
+       "time_zone": "Europe/Rome",
+       "latitude": 41.800278,
+       "longitude": 12.238889,
+       "icao_code": "LIRF"
+      },
+      {
+       "id": "arp_cia_it",
+       "type": "airport",
+       "iata_code": "CIA",
+       "iata_city_code": null,
+       "iata_country_code": "IT",
+       "name": "Ciampino–G. B. Pastine International Airport",
+       "city_name": "Rome",
+       "city": null,
+       "airports": null,
+       "time_zone": "Europe/Rome",
+       "latitude": 41.799361,
+       "longitude": 12.594936,
+       "icao_code": "LIRA"
+      }
+     ]
+    },
+    "airports": null,
+    "time_zone": "Europe/Rome",
+    "latitude": 41.800278,
+    "longitude": 12.238889,
+    "icao_code": "LIRF"
+   },
+   {
+    "id": "arp_cia_it",
+    "type": "airport",
+    "iata_code": "CIA",
+    "iata_city_code": "ROM",
+    "iata_country_code": "IT",
+    "name": "Ciampino–G. B. Pastine International Airport",
+    "city_name": "Rome",
+    "city": {
+     "id": "cit_rom_it",
+     "name": "Rome",
+     "iata_code": "ROM",
+     "iata_country_code": "IT",
+     "airports": [
+      {
+       "id": "arp_fco_it",
+       "type": "airport",
+       "iata_code": "FCO",
+       "iata_city_code": null,
+       "iata_country_code": "IT",
+       "name": "Leonardo da Vinci–Fiumicino Airport",
+       "city_name": "Rome",
+       "city": null,
+       "airports": null,
+       "time_zone": "Europe/Rome",
+       "latitude": 41.800278,
+       "longitude": 12.238889,
+       "icao_code": "LIRF"
+      },
+      {
+       "id": "arp_cia_it",
+       "type": "airport",
+       "iata_code": "CIA",
+       "iata_city_code": null,
+       "iata_country_code": "IT",
+       "name": "Ciampino–G. B. Pastine International Airport",
+       "city_name": "Rome",
+       "city": null,
+       "airports": null,
+       "time_zone": "Europe/Rome",
+       "latitude": 41.799361,
+       "longitude": 12.594936,
+       "icao_code": "LIRA"
+      }
+     ]
+    },
+    "airports": null,
+    "time_zone": "Europe/Rome",
+    "latitude": 41.799361,
+    "longitude": 12.594936,
+    "icao_code": "LIRA"
+   }
+  ]
+ },
+ "florence": {
+  "data": [
+   {
+    "id": "arp_flr_it",
+    "type": "airport",
+    "iata_code": "FLR",
+    "iata_city_code": null,
+    "iata_country_code": "IT",
+    "name": "Florence Airport",
+    "city_name": "Florence",
+    "city": null,
+    "airports": null,
+    "time_zone": "Europe/Rome",
+    "latitude": 43.809953,
+    "longitude": 11.2051,
+    "icao_code": "LIRQ"
+   },
+   {
+    "id": "arp_flo_us",
+    "type": "airport",
+    "iata_code": "FLO",
+    "iata_city_code": null,
+    "iata_country_code": "US",
+    "name": "Florence Regional Airport",
+    "city_name": "Florence",
+    "city": null,
+    "airports": null,
+    "time_zone": "America/New_York",
+    "latitude": 34.185361,
+    "longitude": -79.723889,
+    "icao_code": "KFLO"
+   }
+  ]
+ }
+}

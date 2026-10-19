@@ -8,6 +8,13 @@ flow). Ships on `feature/wider-options`, PR into `dev`. Backend plus one line of
 `feature/glanceable-ui` PR — this PR is already visible through the richer `why` line every
 card prints today.*
 
+> **Update 2026-10-19 — one supplier per category** (`feature/duffel-flights-liteapi-stays`).
+> The board now shows only what Rovyn can book: **flights come from Duffel alone** (every flight
+> is booked through Duffel and paid from the Duffel Balance) and **stays from LiteAPI alone**.
+> LiteAPI's flights product (`/flights/rates`, `/flights/verify`, `/data/flights/airports`), the
+> LiteAPI/Duffel merge and the Duffel Stays wiring (`DUFFEL_STAYS`) are removed. The sections
+> below describe the current design; the Objective keeps the history.
+
 ## Objective
 
 Travelers open the board and see **too few** stays and flights, and the ones they see are not
@@ -78,11 +85,11 @@ fallback. Occupancy stays the `⌈group/2⌉` doubles heuristic (the rooming wor
 
 ### Throttle — `hotel_service._lite_request`
 
-One process-wide pacer for **every** LiteAPI call (board searches, flight searches, galleries,
-reviews, details): a token bucket at `LITEAPI_RATE_PER_S` (default 8/s; 4/s on a sandbox key,
-whose limit is 5/s shared by hotels and flights) holding at most one token, so no one-second
-window sees more than rate + 1 calls. It is a rate, not a concurrency cap — a 45 s flight search
-never queues a stay search behind it. Calls made under a search deadline are not sent once it
+One process-wide pacer for **every** LiteAPI call (board searches, galleries, reviews,
+details): a token bucket at `LITEAPI_RATE_PER_S` (default 8/s; 4/s on a sandbox key, whose
+limit is 5/s) holding at most one token, so no one-second window sees more than rate + 1
+calls. It is a rate, not a concurrency cap — a slow detail-page call never queues a stay
+search behind it. Flights never touch it (they are Duffel's). Calls made under a search deadline are not sent once it
 has passed. A 429 on a rates call is retried once after `Retry-After` when the deadline allows;
 dropped keep-alives, resets and truncated bodies retry like a 503. Multi-city boards search
 their cities concurrently under this pacer instead of serially. `/data/hotel` is memoized per
@@ -97,8 +104,7 @@ FLIGHT_OPTIONS_PER_CITY=8   # itineraries per departure city
 STAY_CANDIDATES=150         # properties priced before choosing (capped at 60 per route city)
 STAY_SEARCH_DEADLINE_S=25   # wall-time budget for one city's whole stay search
 LITEAPI_RATE_PER_S=         # pacing; default 8, 4 on a sandbox key
-DUFFEL_ACCESS_TOKEN=        # second flight supplier (test tokens are free and self-serve; airports resolve through LiteAPI)
-DUFFEL_STAYS=               # 1 = Duffel accommodations on the Stay tab (live Stays access only)
+DUFFEL_ACCESS_TOKEN=        # the flight supplier (test tokens are free and self-serve); unset = AI flight estimates
 ```
 
 ### Data contract — fields added to every stay option (`options.schema_version = 2`)
@@ -122,8 +128,8 @@ DUFFEL_STAYS=               # 1 = Duffel accommodations on the Stay tab (live St
 
 - `lane` ∈ `Best match · Your voted style · Best value · Top rated · Closest to the center ·
   Splurge · Budget pick · Also fits`.
-- `supplier` ∈ `liteapi · duffel · ai · sample` (per option; `source` stays the board-level
-  and details-level field it already is).
+- `supplier` ∈ `liteapi · ai · sample` for stays, `duffel · ai · sample` for flights (per
+  option; `source` stays the board-level and details-level field it already is).
 - `reasons[].short` is a ≤18-character chip label, never cut inside a word: an accommodation
   vote has a fixed short form ("airbnb/vacation rental" → "Vacation rental"); anything longer
   is cut back to its last whole word and ends in "…". `why` is the lane plus the strongest
@@ -135,18 +141,16 @@ DUFFEL_STAYS=               # 1 = Duffel accommodations on the Stay tab (live St
   AI/sample menus. On an estimate, every reason whose number comes from the menu (`budget`,
   `price`, `rating`, `location`, a flight's `lane` line) is prefixed `est.`; a `style` reason's
   "2 of 3 of you voted for" is the group's real tally and stays bare.
-- Duffel stays additionally carry `bookable: false`, `duffel_accommodation_id`,
-  `duffel_search_result_id` and `duffel_details` (their option page is the search payload).
-  They never carry `liteapi_hotel_id`, so rooming and booking paths ignore them.
+- Every live stay carries `liteapi_hotel_id` — the handle the rooming and booking paths use.
 - Every pre-existing field keeps its name and meaning.
 
 Board-level additions: `schema_version`, `generated_at`, `group_prefs` (`accommodation_votes`,
 `budget_range`, `top_vibes`, `group_size`, `group_pace` — so the UI can print what the group
 asked for), `lodging_band` (null when unknown), `stay_search` — `{town: {listed, priced,
-batches_failed, truncated, top_ups, mode, duffel}}` in EVERY mode (a single-base trip has one
-town, the anchor), `stay_suppliers`, `flight_suppliers`, `flights_sandbox` (= any sandbox
-itinerary). `flights_source` / `stay_source` name the supplier actually present (`liteapi`
-when any LiteAPI live option is on the board, else the other supplier).
+batches_failed, truncated, top_ups, mode}}` in EVERY mode (a single-base trip has one
+town, the anchor), `stay_suppliers`, `flight_suppliers`, `flights_sandbox` (= any itinerary
+from Duffel test mode, i.e. "Duffel Airways"). `flights_source` (`duffel`) / `stay_source`
+(`liteapi`) name the supplier of the live options present.
 
 ### Data contract — fields added to every flight option
 
@@ -160,20 +164,24 @@ when any LiteAPI live option is on the board, else the other supplier).
   ],
   "why": "Lands 08:20 on Nov 21 — most of day one in Rome",
   "supplier": "duffel", "sandbox": true, "currency": "USD",
-  "duffel_offer_id": "off_…", "duffel_offer_ids": ["off_…"], "offer_ids": []
+  "duffel_offer_id": "off_…", "duffel_offer_ids": ["off_…"]
 }
 ```
 
 Roles stay snake_case internally (`cheapest nonstop fastest balanced bags early_arrival
 no_early_start late_return one_airline`); `lane` is the display name. `why` is the lane reason
 only (plus the existing open-jaw note); bags live in `reasons`, so nothing prints twice.
-`offer_ids` are LiteAPI's (the `/flights/verify` handle); Duffel ids are separate.
+Every live flight carries its Duffel offer id(s). The id gates auto-booking at checkout and
+drives the detail page's re-verify; `booking_service.build_lock` does NOT re-read it — the lock
+re-searches the same itinerary from the stored segments' airports and dates and matches it by
+itinerary signature (`ref.board_offer_id` is kept for the audit trail only). A one-way pair
+carries both legs' ids in `duffel_offer_ids`, no `duffel_offer_id`, and `separate_tickets: true`.
 
 ### Scoring (stays) — `option_ranking.score_stay`, pure
 
 | Dimension | Weight | Known when | Rule | Reason |
 |---|---|---|---|---|
-| style | 0.35 | the group voted | vote-share-weighted `style_affinity` (core 1.0 / partial 0.5; the old `_affinity` rules, now matching LiteAPI type ids **or** label words for AI/sample/Duffel stays) | core: `"{Type label} — the style k of n of you voted for"`; partial: `"Close to the {vote} style you asked for"` |
+| style | 0.35 | the group voted | vote-share-weighted `style_affinity` (core 1.0 / partial 0.5; the old `_affinity` rules, now matching LiteAPI type ids **or** label words for AI/sample stays) | core: `"{Type label} — the style k of n of you voted for"`; partial: `"Close to the {vote} style you asked for"` |
 | budget | 0.25 | a band exists | per-person total for THIS stay's nights vs the band for the same nights: 1.0 inside, 0.85 under, linear to 0 at 1.6× the ceiling | `"$410 per person for 5 nights — inside your $300–$900 stay budget"` / `under your …` / `$14 over your $436 stay ceiling` (≤1.3×) / `$214 per person over the group's ceiling` (>1.3×) |
 | rating | 0.20 | a guest score exists | `rating/10 × confidence`, confidence `min(1, log10(reviews+1)/3)`; a missing or zero count gets 0.4 (≈15 reviews' worth — never more than a real sample) | printed only with ≥20 reviews: `"8.9/10 from 1,204 guest reviews"` (≥8.0); `"Top-rated: 9.4/10 from …"` (≥9) |
 | vibe | 0.10 | facilities or a description exist | **whole-word/phrase** regex hits (never substrings — "spa" in "spacious" is not a spa) on the **facility names** first (LiteAPI `facilityIds` joined to `/data/facilities`), the description second, for the top two vibes — never the hotel's name; central vibes also accept ≤1.5 km | `"Spa & Pool — matches the group's relaxation vibe"`, `"Central — close to the nightlife you voted for"` |
@@ -222,12 +230,15 @@ menu — `supplier` ai/sample, `lane` "Also fits", `live_price` false, `stay_all
 
 ### Flights — `flight_service` + `option_ranking.pick_flight_roles`
 
-LiteAPI and Duffel are searched in parallel (Duffel under its own 15 s timeout, so it can only
-add options). Candidates merge by itinerary signature (sorted carrier + flight number +
-departure tuples — Duffel candidates set `journey_key` to it): the cheaper copy wins; a copy in
-another currency than the board's is dropped (no silent FX); sandbox inventory never mixes with
-production inventory (production wins). `sandbox` is per candidate (LiteAPI `sand_` key, Duffel
-`live_mode` false).
+Duffel is the only source. Each place resolves through `GET /places/suggestions` (cached per
+process): the town's city code when Duffel has one (NYC covers JFK/EWR/LGA; Rome → ROM), else
+its airport; a country in the text ("Rome, Italy") filters out namesakes elsewhere; the full
+code set validates where an open-jaw return really leaves from. One `POST /air/offer_requests`
+per departure city (15 s bound — a search that trickles past it is abandoned and the city
+falls back to the AI menu). An offer in another currency than the board's (USD) is dropped —
+no silent FX. `journey_key` is the itinerary signature (sorted carrier + flight number +
+departure tuples), so two fare brands on the same flights read as one journey. `sandbox` is
+per candidate (Duffel `live_mode` false: test mode's "Duffel Airways", IATA ZZ).
 
 Roles are claimed in the pace's order — `very` busy promotes early_arrival and late_return to
 right after cheapest, `slightly` promotes no_early_start — and each role ranks its qualifying
@@ -249,30 +260,35 @@ itineraries and takes the **first that is not a near-duplicate** of one already 
 Then the price gap to the cheapest (`"$38 more than the cheapest fare"`) and bags.
 `match_score = 100 × (0.6 × floor/price + 0.4 × floor_minutes/minutes)`.
 
-**Open jaw.** When the suppliers ignore the open-jaw return (Duffel's true open-jaw offers
-already took part in the primary search), two LiteAPI one-way searches are paired per role:
+**Open jaw.** The trip is asked as one two-slice Duffel request (into the first city, home
+from the last). Only when Duffel answered and no offer honors the return city are two Duffel
+one-way searches paired per role (a first search that timed out or failed, or a return / home
+city that doesn't resolve to an airport, returns `[]` and the AI open-jaw menu covers the city —
+a plain round trip is never passed off as the open jaw). A pair is two separate tickets: its
+`why` says "Priced as two one-way tickets — you book these yourself" and checkout makes it a
+self-book item without re-searching (booking the legs as two Duffel orders is not built):
 outbound-driven roles (early arrival, no early start) take their outbound pick plus the
 cheapest return; late return takes the cheapest outbound plus its return pick; one airline needs
 the same carrier on both legs; bags needs both; nonstop needs both; price/time roles pair
 role-for-role. Reasons are judged on the combined trip against the other pairs.
 
-**Detail page.** `live_flight_details` re-verifies through the supplier that quoted the fare:
-LiteAPI `/flights/verify` for LiteAPI options, `GET /air/offers/{id}` for Duffel options
-(`source: "duffel"`); only while the offer can still be alive.
+**Detail page.** `live_flight_details` re-verifies through `GET /air/offers/{id}` (both legs
+of a one-way pair, summed; `source: "duffel"`), only while the offer can still be alive. A live
+fare stored by an older board from another supplier (LiteAPI flights, e.g. its sandbox airline
+"Nuitee Air") is never re-verified (`source: "board"`); the board response relabels it
+(`trips._retire_legacy_flights`: `live_price: false`, `earlier_search: "liteapi"`,
+`flights_legacy: true`) so the UI says it came from an earlier search Rovyn can't book, and the
+option page still draws its stored segments.
 
 AI-estimated flights are asked for 6 per city spanning the roles; samples grow to 5. Both are
 labeled by the same role picker (`label_flights`): roles claimed as usual, the rest carry the
 price gap and bags with no lane; `match_score` is omitted for estimates.
 
-### Duffel Stays — adapter shipped, wiring opt-in
+### Stays are LiteAPI's alone
 
-`duffel_service.search_stays` maps `POST /stays/search` results (priced from
-`cheapest_rate_total_amount`, USD only) into stay records with photos, amenities and the
-description as a ready detail sheet. It joins the board only with `DUFFEL_STAYS=1`, because
-Duffel's test mode serves a synthetic test hotel at a fixed location and live Stays access is
-requested separately from Flights — it cannot widen a real board today. When wired, a Duffel
-copy of a LiteAPI hotel (matching distinctive name words, within 150 m) is dropped; the rest
-enter scoring and lanes like any other record.
+Duffel Stays was wired behind `DUFFEL_STAYS` and is now removed (adapter, flag, fixtures):
+every stay Rovyn shows is one LiteAPI can price, detail and book. The research stays in
+`docs/PROVIDER-API-FACTS.md`.
 
 ### Board payload and media — `trips.py`
 
@@ -291,10 +307,10 @@ enter scoring and lanes like any other record.
 ```
 backend/services/option_ranking.py   (new) pure: lodging band, scoring, reasons, stay lanes, flight roles,
                                       annotate_* for AI/sample menus — no I/O
-backend/services/duffel_service.py   (new) urllib client; flight search → candidates; get_offer; stays search
+backend/services/duffel_service.py   (new) urllib client; places; flight search → candidates; get_offer
 backend/services/hotel_service.py    throttle; wide search (deadline pool, top-ups, fallbacks, re-price,
-                                      facilities map, records, lanes); media (media, complete); Duffel detail sheet
-backend/services/flight_service.py   merge suppliers; roles + reasons; open-jaw pairing; supplier-aware verify
+                                      facilities map, records, lanes); media (media, complete)
+backend/services/flight_service.py   Duffel places → IATA; roles + reasons; open-jaw pairing; Duffel re-verify
 backend/services/ai_service.py       lodging band on prefs; concurrent cities; per-city targets; padding;
                                       board provenance fields; wider AI/sample menus; shared cost constants
 backend/routers/trips.py             _lighten_details; media not persisted when incomplete
@@ -314,12 +330,19 @@ per-city target with three voted styles; the 204 → id-batch fallback, a failin
 batch against a 1.5 s deadline; thin pricing (one re-price, then board padding with estimates,
 `stay_all_live` false); a tiny budget (no budget reasons, no splurge in the cheapest third);
 sample menus (8 stays, /5 ratings normalized, `est.` on estimated numbers but never on vote
-tallies, chips never cut mid-word); flights (8 distinct lanes, both suppliers called once, the
-duplicate itinerary collapsed to the cheaper USD copy, the median formula, pace orders, GBP copy
-rejected, supplier-aware re-verify); open jaw (≥6 lanes, flies home from Florence); no keys → no
-calls; Duffel stays mapped, deduped and gated; the multi-city board end to end (6 per city, all
-three styles per city, city-night budget reasons, provenance, each departure city's flight link
-sized to its own travelers); the API (detail stubs, throttled media not frozen).
+tallies, chips never cut mid-word); flights from recorded-shape Duffel fixtures
+(`duffel_offers.json`, `duffel_offers_home.json`, `duffel_places.json`: 8 distinct lanes, places
+resolved through Duffel with the country filter, one offer request, the median formula, pace
+orders, a GBP offer rejected, live-mode offers unflagged, every card's offer id re-found by the
+booking engine, Duffel re-verify); open jaw (one two-slice request; paired one-ways only when
+unsold, ≥6 lanes, flies home from Florence, labeled "you book these yourself"; a first search
+that never answered or a return/home city without an airport prices nothing); legacy LiteAPI
+fares relabeled on read (`flights_legacy`, response-only); no keys → no calls; stays LiteAPI-only even with
+the old flag set; no LiteAPI flight or Duffel stays endpoint called in the whole run (a
+`FORBIDDEN` guard beside `CALLS["unexpected"]`); the multi-city board end to end (6 per city, all
+three styles per city, city-night budget reasons, provenance, flights home from the last city
+(Venice), each departure city's flight link sized to its own
+travelers); the API (detail stubs, throttled media not frozen).
 `tests/test_maps_and_links.py` stays green.
 
 ## Boundaries
@@ -328,7 +351,7 @@ sized to its own travelers); the API (detail stubs, throttled media not frozen).
   field; one deadline per city search; stdlib only; blank `DATABASE_URL`/`SUPABASE_URL` on any
   test or spike run.
 - **Ask first:** new dependencies; changing the `⌈group/2⌉` occupancy heuristic (the rooming
-  work); turning `DUFFEL_STAYS` on by default; changing the lane order.
+  work); adding a second supplier to either category; changing the lane order.
 - **Never:** let a model write a number or a reason; call `/data/hotel` per candidate during
   board generation; mix currencies or sandbox/production inventory on one board.
 
@@ -341,9 +364,9 @@ sized to its own travelers); the API (detail stubs, throttled media not frozen).
 2. Every accommodation style that received a vote appears at least once when the city has it;
    a route city shows at least voted styles + 3.
 3. The cheapest and the best-rated **priced** hotels are always on the board.
-4. Flights show up to 8 distinct itineraries per city, lanes never lost to look-alikes; with
-   `DUFFEL_ACCESS_TOKEN` set Duffel offers merge and dedupe; without it no Duffel call is made,
-   and a Duffel token without the LiteAPI key makes no call to either supplier.
+4. Flights show up to 8 distinct Duffel itineraries per city, lanes never lost to look-alikes,
+   each carrying its Duffel offer id; without `DUFFEL_ACCESS_TOKEN` no flight call is made and
+   the Flights tab shows AI estimates.
 5. A city's stay search returns within `STAY_SEARCH_DEADLINE_S` even when a supplier hangs.
 6. `tests/test_options_breadth.py` and `tests/test_maps_and_links.py` pass; `npm run build`
    is clean.

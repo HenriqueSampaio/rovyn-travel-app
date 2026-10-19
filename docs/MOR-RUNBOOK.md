@@ -12,7 +12,9 @@ attorney review steps 6–11 before real money moves. Nothing here is legal advi
 prototype on `feature/stripe-mor-prototype` implements that as *Rovyn is the merchant of record
 (MoR)*: travelers pay Rovyn by card (Stripe), Rovyn buys from suppliers at net rates (LiteAPI
 hotels charged to Rovyn's card at booking; Duffel flights paid from a prepaid balance), and Rovyn
-keeps the spread and owns refunds, disputes and taxes.
+keeps the spread and owns refunds, disputes and taxes. One supplier per category, the one that
+books it: the planning board searches flights on Duffel only and stays on LiteAPI only
+(decided 2026-10-19), so every live option a group stars is one Rovyn can book.
 
 The alternative, *supplier is the merchant of record*, keeps the booking inside the app but the
 traveler's card is charged by Nuitée (LiteAPI's payment SDK) — or, for activities, by Viator
@@ -31,7 +33,7 @@ steps 2, 7 and 8 are done.
 |---|---|---|
 | Stripe test keys (`sk_test_…`, `whsec_…`) | dashboard.stripe.com → Developers → API keys; `stripe listen --forward-to localhost:8000/webhooks/stripe` for webhooks | free |
 | LiteAPI sandbox booking | the existing `sand_…` key: set `LITEAPI_BOOK_MODE=sandbox` and `LITEAPI_BOOK_API_KEY` to it. Every sandbox key carries a hidden test card, so `payment.method = ACC_CREDIT_CARD` bookings are free and reserve nothing | free |
-| Duffel test token (`duffel_test_…`) | app.duffel.com (self-serve); test mode has an unlimited balance; scenario routes: JFK→EWR holdable order, LHR→STN price change, LGW→STN insufficient balance | free |
+| Duffel test token (`duffel_test_…`) | app.duffel.com (self-serve); the same token makes the board's flights live (test inventory: "Duffel Airways", ZZ); test mode has an unlimited balance; scenario routes: JFK→EWR holdable order, LHR→STN price change, LGW→STN insufficient balance | free |
 | Resend (receipts) | already configured | free tier |
 
 With those three set, the full flow runs: authorize → book → capture → confirmations → receipts

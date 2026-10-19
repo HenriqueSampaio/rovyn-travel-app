@@ -733,7 +733,7 @@ def create_options(trip_id: str, user: dict = Depends(get_current_user)):
     with get_conn() as conn:
         trip = _member_trip(conn, trip_id, user["id"])
         if trip["options"]:
-            return {"options": json.loads(trip["options"])}
+            return {"options": _retire_legacy_flights(json.loads(trip["options"]))}
         if user["id"] != trip["leader_id"]:
             raise HTTPException(status_code=403, detail="Only the trip leader can open the planning board.")
         if trip["options_generating"]:
@@ -802,7 +802,7 @@ def read_options(trip_id: str, user: dict = Depends(get_current_user)):
     if options:
         from backend.services.ai_service import _duration_days
         recommended = recommended_picks(_duration_days(options.get("dates", {})), my_pace)
-        options = _lighten_details(options)
+        options = _retire_legacy_flights(_lighten_details(options))
 
     return {
         "options": options,
@@ -817,6 +817,45 @@ def read_options(trip_id: str, user: dict = Depends(get_current_user)):
         "my_pace": my_pace,
         "recommended": recommended,
     }
+
+
+def _retire_legacy_flights(options: dict) -> dict:
+    """The board payload with live fares that an older board stored from a
+    supplier other than Duffel relabeled for what they are now.
+
+    Flights are booked through Duffel alone, but boards built before that
+    still hold LiteAPI fares (its sandbox airline "Nuitee Air" among them).
+    Rovyn can't re-check or book those, so they lose the LIVE PRICE badge
+    (live_price false, sandbox false, earlier_search names the supplier) and
+    the board says why (flights_legacy). The board-level flags are recomputed
+    from what stays live. Storage is untouched — this is the RESPONSE only,
+    and checkout already treats such a flight as self-book (no Duffel hint)."""
+    flights = options.get("flights")
+    if not isinstance(flights, dict):
+        return options
+    legacy = False
+    groups = {}
+    for city, opts in flights.items():
+        out = []
+        for o in opts or []:
+            if isinstance(o, dict) and o.get("live_price") and o.get("supplier") != "duffel":
+                o = {**o, "live_price": False, "sandbox": False, "earlier_search": o.get("supplier") or "liteapi",
+                     "duffel_offer_id": "", "duffel_offer_ids": []}
+                legacy = True
+            out.append(o)
+        groups[city] = out
+    if not legacy:
+        return options
+    every = [o for opts in groups.values() for o in opts if isinstance(o, dict)]
+    live = [o for o in every if o.get("live_price")]
+    fixed = {**options, "flights": groups, "flights_legacy": True,
+             "flights_sandbox": any(o.get("sandbox") for o in live),
+             "flights_all_live": bool(every) and len(live) == len(every)}
+    if live:
+        fixed["flights_source"] = "duffel"
+    else:
+        fixed.pop("flights_source", None)
+    return fixed
 
 
 def _lighten_details(options: dict) -> dict:
@@ -1239,7 +1278,7 @@ def set_route_lock(trip_id: str, req: RouteLockRequest, user: dict = Depends(get
             raise HTTPException(status_code=400, detail="This trip has one home base — there's no day split to lock.")
         route["locked"] = bool(req.locked)
         conn.execute("UPDATE trips SET options = ? WHERE id = ?", (json.dumps(options), trip_id))
-    return {"options": options}
+    return {"options": _retire_legacy_flights(options)}
 
 
 # ---------------------------------------------------------------------------

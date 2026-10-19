@@ -22,7 +22,7 @@
   ],
   "offers": [
    {
-    "id": "off_dup_j01",
+    "id": "off_j01",
     "live_mode": false,
     "total_amount": "1512.00",
     "total_currency": "USD",
@@ -59,13 +59,15 @@
         "id": "seg_204",
         "origin": {
          "iata_code": "JFK",
-         "name": "JFK",
-         "city_name": "JFK"
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
         },
         "destination": {
          "iata_code": "LIS",
-         "name": "LIS",
-         "city_name": "LIS"
+         "name": "Lisbon Humberto Delgado Airport",
+         "city_name": "Lisbon",
+         "type": "airport"
         },
         "departing_at": "2026-11-20T20:30:00",
         "arriving_at": "2026-11-21T08:40:00",
@@ -97,13 +99,15 @@
         "id": "seg_1016",
         "origin": {
          "iata_code": "LIS",
-         "name": "LIS",
-         "city_name": "LIS"
+         "name": "Lisbon Humberto Delgado Airport",
+         "city_name": "Lisbon",
+         "type": "airport"
         },
         "destination": {
          "iata_code": "MAD",
-         "name": "MAD",
-         "city_name": "MAD"
+         "name": "Madrid Barajas Airport",
+         "city_name": "Madrid",
+         "type": "airport"
         },
         "departing_at": "2026-11-21T10:30:00",
         "arriving_at": "2026-11-21T12:55:00",
@@ -135,13 +139,15 @@
         "id": "seg_3230",
         "origin": {
          "iata_code": "MAD",
-         "name": "MAD",
-         "city_name": "MAD"
+         "name": "Madrid Barajas Airport",
+         "city_name": "Madrid",
+         "type": "airport"
         },
         "destination": {
          "iata_code": "FCO",
-         "name": "FCO",
-         "city_name": "FCO"
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
         },
         "departing_at": "2026-11-21T14:40:00",
         "arriving_at": "2026-11-21T16:55:00",
@@ -169,7 +175,19 @@
          }
         ]
        }
-      ]
+      ],
+      "origin": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      }
      },
      {
       "id": "sli_2",
@@ -180,13 +198,15 @@
         "id": "seg_3233",
         "origin": {
          "iata_code": "FCO",
-         "name": "FCO",
-         "city_name": "FCO"
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
         },
         "destination": {
          "iata_code": "MAD",
-         "name": "MAD",
-         "city_name": "MAD"
+         "name": "Madrid Barajas Airport",
+         "city_name": "Madrid",
+         "type": "airport"
         },
         "departing_at": "2026-11-25T18:30:00",
         "arriving_at": "2026-11-25T20:50:00",
@@ -218,13 +238,15 @@
         "id": "seg_1021",
         "origin": {
          "iata_code": "MAD",
-         "name": "MAD",
-         "city_name": "MAD"
+         "name": "Madrid Barajas Airport",
+         "city_name": "Madrid",
+         "type": "airport"
         },
         "destination": {
          "iata_code": "LIS",
-         "name": "LIS",
-         "city_name": "LIS"
+         "name": "Lisbon Humberto Delgado Airport",
+         "city_name": "Lisbon",
+         "type": "airport"
         },
         "departing_at": "2026-11-25T22:10:00",
         "arriving_at": "2026-11-25T22:30:00",
@@ -256,13 +278,15 @@
         "id": "seg_203",
         "origin": {
          "iata_code": "LIS",
-         "name": "LIS",
-         "city_name": "LIS"
+         "name": "Lisbon Humberto Delgado Airport",
+         "city_name": "Lisbon",
+         "type": "airport"
         },
         "destination": {
          "iata_code": "JFK",
-         "name": "JFK",
-         "city_name": "JFK"
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
         },
         "departing_at": "2026-11-26T09:00:00",
         "arriving_at": "2026-11-26T12:15:00",
@@ -285,6 +309,3232 @@
            {
             "type": "carry_on",
             "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ],
+      "origin": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      }
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   },
+   {
+    "id": "off_j02",
+    "live_mode": false,
+    "total_amount": "1544.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "TP",
+     "name": "TAP Air Portugal"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_off_j02_1",
+      "duration": "PT20H15M",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j02_00",
+        "origin": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "LIS",
+         "name": "Lisbon Humberto Delgado Airport",
+         "city_name": "Lisbon",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-20T20:15:00",
+        "arriving_at": "2026-11-21T08:25:00",
+        "duration": "PT7H10M",
+        "marketing_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "operating_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "marketing_carrier_flight_number": "206",
+        "operating_carrier_flight_number": "206",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j02_01",
+        "origin": {
+         "iata_code": "LIS",
+         "name": "Lisbon Humberto Delgado Airport",
+         "city_name": "Lisbon",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "MAD",
+         "name": "Madrid Barajas Airport",
+         "city_name": "Madrid",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-21T10:20:00",
+        "arriving_at": "2026-11-21T12:45:00",
+        "duration": "PT1H25M",
+        "marketing_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "operating_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "marketing_carrier_flight_number": "1018",
+        "operating_carrier_flight_number": "1018",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j02_02",
+        "origin": {
+         "iata_code": "MAD",
+         "name": "Madrid Barajas Airport",
+         "city_name": "Madrid",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-21T14:25:00",
+        "arriving_at": "2026-11-21T16:40:00",
+        "duration": "PT2H15M",
+        "marketing_carrier": {
+         "iata_code": "IB",
+         "name": "Iberia"
+        },
+        "operating_carrier": {
+         "iata_code": "IB",
+         "name": "Iberia"
+        },
+        "marketing_carrier_flight_number": "3232",
+        "operating_carrier_flight_number": "3232",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "sli_off_j02_2",
+      "duration": "PT21H35M",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j02_10",
+        "origin": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "MAD",
+         "name": "Madrid Barajas Airport",
+         "city_name": "Madrid",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T18:45:00",
+        "arriving_at": "2026-11-25T21:05:00",
+        "duration": "PT2H20M",
+        "marketing_carrier": {
+         "iata_code": "IB",
+         "name": "Iberia"
+        },
+        "operating_carrier": {
+         "iata_code": "IB",
+         "name": "Iberia"
+        },
+        "marketing_carrier_flight_number": "3235",
+        "operating_carrier_flight_number": "3235",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j02_11",
+        "origin": {
+         "iata_code": "MAD",
+         "name": "Madrid Barajas Airport",
+         "city_name": "Madrid",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "LIS",
+         "name": "Lisbon Humberto Delgado Airport",
+         "city_name": "Lisbon",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T22:25:00",
+        "arriving_at": "2026-11-25T22:45:00",
+        "duration": "PT1H20M",
+        "marketing_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "operating_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "marketing_carrier_flight_number": "1023",
+        "operating_carrier_flight_number": "1023",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j02_12",
+        "origin": {
+         "iata_code": "LIS",
+         "name": "Lisbon Humberto Delgado Airport",
+         "city_name": "Lisbon",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-26T09:15:00",
+        "arriving_at": "2026-11-26T12:30:00",
+        "duration": "PT8H15M",
+        "marketing_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "operating_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "marketing_carrier_flight_number": "205",
+        "operating_carrier_flight_number": "205",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   },
+   {
+    "id": "off_j03",
+    "live_mode": false,
+    "total_amount": "3280.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "AZ",
+     "name": "ITA Airways"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_off_j03_1",
+      "duration": "PT8H15M",
+      "fare_brand_name": "Economy Classic",
+      "origin": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j03_00",
+        "origin": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-20T17:35:00",
+        "arriving_at": "2026-11-21T07:50:00",
+        "duration": "PT8H15M",
+        "marketing_carrier": {
+         "iata_code": "AZ",
+         "name": "ITA Airways"
+        },
+        "operating_carrier": {
+         "iata_code": "AZ",
+         "name": "ITA Airways"
+        },
+        "marketing_carrier_flight_number": "609",
+        "operating_carrier_flight_number": "609",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "sli_off_j03_2",
+      "duration": "PT9H50M",
+      "fare_brand_name": "Economy Classic",
+      "origin": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j03_10",
+        "origin": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T10:10:00",
+        "arriving_at": "2026-11-25T14:00:00",
+        "duration": "PT9H50M",
+        "marketing_carrier": {
+         "iata_code": "AZ",
+         "name": "ITA Airways"
+        },
+        "operating_carrier": {
+         "iata_code": "AZ",
+         "name": "ITA Airways"
+        },
+        "marketing_carrier_flight_number": "610",
+        "operating_carrier_flight_number": "610",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   },
+   {
+    "id": "off_j04",
+    "live_mode": false,
+    "total_amount": "3620.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "DL",
+     "name": "Delta Air Lines"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_off_j04_1",
+      "duration": "PT8H10M",
+      "fare_brand_name": "Main Cabin",
+      "origin": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j04_00",
+        "origin": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-20T22:05:00",
+        "arriving_at": "2026-11-21T12:15:00",
+        "duration": "PT8H10M",
+        "marketing_carrier": {
+         "iata_code": "DL",
+         "name": "Delta Air Lines"
+        },
+        "operating_carrier": {
+         "iata_code": "DL",
+         "name": "Delta Air Lines"
+        },
+        "marketing_carrier_flight_number": "246",
+        "operating_carrier_flight_number": "246",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "sli_off_j04_2",
+      "duration": "PT9H40M",
+      "fare_brand_name": "Main Cabin",
+      "origin": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j04_10",
+        "origin": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T11:50:00",
+        "arriving_at": "2026-11-25T15:30:00",
+        "duration": "PT9H40M",
+        "marketing_carrier": {
+         "iata_code": "DL",
+         "name": "Delta Air Lines"
+        },
+        "operating_carrier": {
+         "iata_code": "DL",
+         "name": "Delta Air Lines"
+        },
+        "marketing_carrier_flight_number": "247",
+        "operating_carrier_flight_number": "247",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   },
+   {
+    "id": "off_j05",
+    "live_mode": false,
+    "total_amount": "2080.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "TP",
+     "name": "TAP Air Portugal"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_off_j05_1",
+      "duration": "PT10H40M",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j05_00",
+        "origin": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "LIS",
+         "name": "Lisbon Humberto Delgado Airport",
+         "city_name": "Lisbon",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-20T18:50:00",
+        "arriving_at": "2026-11-21T06:55:00",
+        "duration": "PT7H5M",
+        "marketing_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "operating_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "marketing_carrier_flight_number": "208",
+        "operating_carrier_flight_number": "208",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j05_01",
+        "origin": {
+         "iata_code": "LIS",
+         "name": "Lisbon Humberto Delgado Airport",
+         "city_name": "Lisbon",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-21T08:15:00",
+        "arriving_at": "2026-11-21T10:30:00",
+        "duration": "PT2H15M",
+        "marketing_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "operating_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "marketing_carrier_flight_number": "838",
+        "operating_carrier_flight_number": "838",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "sli_off_j05_2",
+      "duration": "PT11H40M",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j05_10",
+        "origin": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "LIS",
+         "name": "Lisbon Humberto Delgado Airport",
+         "city_name": "Lisbon",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T13:20:00",
+        "arriving_at": "2026-11-25T15:40:00",
+        "duration": "PT2H20M",
+        "marketing_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "operating_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "marketing_carrier_flight_number": "839",
+        "operating_carrier_flight_number": "839",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j05_11",
+        "origin": {
+         "iata_code": "LIS",
+         "name": "Lisbon Humberto Delgado Airport",
+         "city_name": "Lisbon",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T17:30:00",
+        "arriving_at": "2026-11-25T20:45:00",
+        "duration": "PT8H15M",
+        "marketing_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "operating_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "marketing_carrier_flight_number": "209",
+        "operating_carrier_flight_number": "209",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   },
+   {
+    "id": "off_j06",
+    "live_mode": false,
+    "total_amount": "2440.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "UA",
+     "name": "United Airlines"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_off_j06_1",
+      "duration": "PT11H",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "EWR",
+       "name": "Newark Liberty International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j06_00",
+        "origin": {
+         "iata_code": "EWR",
+         "name": "Newark Liberty International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "FRA",
+         "name": "Frankfurt Airport",
+         "city_name": "Frankfurt",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-20T09:40:00",
+        "arriving_at": "2026-11-20T23:10:00",
+        "duration": "PT7H30M",
+        "marketing_carrier": {
+         "iata_code": "UA",
+         "name": "United Airlines"
+        },
+        "operating_carrier": {
+         "iata_code": "UA",
+         "name": "United Airlines"
+        },
+        "marketing_carrier_flight_number": "100",
+        "operating_carrier_flight_number": "100",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j06_01",
+        "origin": {
+         "iata_code": "FRA",
+         "name": "Frankfurt Airport",
+         "city_name": "Frankfurt",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-21T00:40:00",
+        "arriving_at": "2026-11-21T02:30:00",
+        "duration": "PT1H50M",
+        "marketing_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "operating_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "marketing_carrier_flight_number": "232",
+        "operating_carrier_flight_number": "232",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "sli_off_j06_2",
+      "duration": "PT12H",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "EWR",
+       "name": "Newark Liberty International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j06_10",
+        "origin": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "FRA",
+         "name": "Frankfurt Airport",
+         "city_name": "Frankfurt",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T16:40:00",
+        "arriving_at": "2026-11-25T18:40:00",
+        "duration": "PT2H",
+        "marketing_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "operating_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "marketing_carrier_flight_number": "233",
+        "operating_carrier_flight_number": "233",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j06_11",
+        "origin": {
+         "iata_code": "FRA",
+         "name": "Frankfurt Airport",
+         "city_name": "Frankfurt",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "EWR",
+         "name": "Newark Liberty International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T20:30:00",
+        "arriving_at": "2026-11-25T23:40:00",
+        "duration": "PT9H10M",
+        "marketing_carrier": {
+         "iata_code": "UA",
+         "name": "United Airlines"
+        },
+        "operating_carrier": {
+         "iata_code": "UA",
+         "name": "United Airlines"
+        },
+        "marketing_carrier_flight_number": "101",
+        "operating_carrier_flight_number": "101",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   },
+   {
+    "id": "off_j07",
+    "live_mode": false,
+    "total_amount": "2600.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "LH",
+     "name": "Lufthansa"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_off_j07_1",
+      "duration": "PT10H",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j07_00",
+        "origin": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "FRA",
+         "name": "Frankfurt Airport",
+         "city_name": "Frankfurt",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-20T19:00:00",
+        "arriving_at": "2026-11-21T06:00:00",
+        "duration": "PT7H",
+        "marketing_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "operating_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "marketing_carrier_flight_number": "401",
+        "operating_carrier_flight_number": "401",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j07_01",
+        "origin": {
+         "iata_code": "FRA",
+         "name": "Frankfurt Airport",
+         "city_name": "Frankfurt",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-21T07:00:00",
+        "arriving_at": "2026-11-21T08:20:00",
+        "duration": "PT1H50M",
+        "marketing_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "operating_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "marketing_carrier_flight_number": "230",
+        "operating_carrier_flight_number": "230",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "sli_off_j07_2",
+      "duration": "PT10H40M",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j07_10",
+        "origin": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "FRA",
+         "name": "Frankfurt Airport",
+         "city_name": "Frankfurt",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T09:30:00",
+        "arriving_at": "2026-11-25T11:30:00",
+        "duration": "PT2H",
+        "marketing_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "operating_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "marketing_carrier_flight_number": "231",
+        "operating_carrier_flight_number": "231",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j07_11",
+        "origin": {
+         "iata_code": "FRA",
+         "name": "Frankfurt Airport",
+         "city_name": "Frankfurt",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T13:00:00",
+        "arriving_at": "2026-11-25T16:10:00",
+        "duration": "PT9H10M",
+        "marketing_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "operating_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "marketing_carrier_flight_number": "400",
+        "operating_carrier_flight_number": "400",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   },
+   {
+    "id": "off_j08",
+    "live_mode": false,
+    "total_amount": "2240.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "KL",
+     "name": "KLM"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_off_j08_1",
+      "duration": "PT11H40M",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j08_00",
+        "origin": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "AMS",
+         "name": "Amsterdam Schiphol Airport",
+         "city_name": "Amsterdam",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-20T11:15:00",
+        "arriving_at": "2026-11-21T00:50:00",
+        "duration": "PT7H35M",
+        "marketing_carrier": {
+         "iata_code": "KL",
+         "name": "KLM"
+        },
+        "operating_carrier": {
+         "iata_code": "KL",
+         "name": "KLM"
+        },
+        "marketing_carrier_flight_number": "642",
+        "operating_carrier_flight_number": "642",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j08_01",
+        "origin": {
+         "iata_code": "AMS",
+         "name": "Amsterdam Schiphol Airport",
+         "city_name": "Amsterdam",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-21T04:10:00",
+        "arriving_at": "2026-11-21T06:30:00",
+        "duration": "PT2H20M",
+        "marketing_carrier": {
+         "iata_code": "KL",
+         "name": "KLM"
+        },
+        "operating_carrier": {
+         "iata_code": "KL",
+         "name": "KLM"
+        },
+        "marketing_carrier_flight_number": "1597",
+        "operating_carrier_flight_number": "1597",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "sli_off_j08_2",
+      "duration": "PT11H30M",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j08_10",
+        "origin": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "AMS",
+         "name": "Amsterdam Schiphol Airport",
+         "city_name": "Amsterdam",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T07:10:00",
+        "arriving_at": "2026-11-25T09:40:00",
+        "duration": "PT2H30M",
+        "marketing_carrier": {
+         "iata_code": "KL",
+         "name": "KLM"
+        },
+        "operating_carrier": {
+         "iata_code": "KL",
+         "name": "KLM"
+        },
+        "marketing_carrier_flight_number": "1598",
+        "operating_carrier_flight_number": "1598",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j08_11",
+        "origin": {
+         "iata_code": "AMS",
+         "name": "Amsterdam Schiphol Airport",
+         "city_name": "Amsterdam",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T11:00:00",
+        "arriving_at": "2026-11-25T13:50:00",
+        "duration": "PT8H50M",
+        "marketing_carrier": {
+         "iata_code": "KL",
+         "name": "KLM"
+        },
+        "operating_carrier": {
+         "iata_code": "KL",
+         "name": "KLM"
+        },
+        "marketing_carrier_flight_number": "641",
+        "operating_carrier_flight_number": "641",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   },
+   {
+    "id": "off_j09",
+    "live_mode": false,
+    "total_amount": "2360.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "AF",
+     "name": "Air France"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_off_j09_1",
+      "duration": "PT11H30M",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j09_00",
+        "origin": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "CDG",
+         "name": "Paris Charles de Gaulle Airport",
+         "city_name": "Paris",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-20T21:40:00",
+        "arriving_at": "2026-11-21T10:50:00",
+        "duration": "PT7H10M",
+        "marketing_carrier": {
+         "iata_code": "AF",
+         "name": "Air France"
+        },
+        "operating_carrier": {
+         "iata_code": "AF",
+         "name": "Air France"
+        },
+        "marketing_carrier_flight_number": "7",
+        "operating_carrier_flight_number": "7",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j09_01",
+        "origin": {
+         "iata_code": "CDG",
+         "name": "Paris Charles de Gaulle Airport",
+         "city_name": "Paris",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-21T12:00:00",
+        "arriving_at": "2026-11-21T13:05:00",
+        "duration": "PT2H5M",
+        "marketing_carrier": {
+         "iata_code": "AF",
+         "name": "Air France"
+        },
+        "operating_carrier": {
+         "iata_code": "AF",
+         "name": "Air France"
+        },
+        "marketing_carrier_flight_number": "1104",
+        "operating_carrier_flight_number": "1104",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "sli_off_j09_2",
+      "duration": "PT11H20M",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j09_10",
+        "origin": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "AMS",
+         "name": "Amsterdam Schiphol Airport",
+         "city_name": "Amsterdam",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T17:15:00",
+        "arriving_at": "2026-11-25T19:45:00",
+        "duration": "PT2H30M",
+        "marketing_carrier": {
+         "iata_code": "KL",
+         "name": "KLM"
+        },
+        "operating_carrier": {
+         "iata_code": "KL",
+         "name": "KLM"
+        },
+        "marketing_carrier_flight_number": "1601",
+        "operating_carrier_flight_number": "1601",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j09_11",
+        "origin": {
+         "iata_code": "AMS",
+         "name": "Amsterdam Schiphol Airport",
+         "city_name": "Amsterdam",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T21:00:00",
+        "arriving_at": "2026-11-25T23:50:00",
+        "duration": "PT8H50M",
+        "marketing_carrier": {
+         "iata_code": "KL",
+         "name": "KLM"
+        },
+        "operating_carrier": {
+         "iata_code": "KL",
+         "name": "KLM"
+        },
+        "marketing_carrier_flight_number": "643",
+        "operating_carrier_flight_number": "643",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   },
+   {
+    "id": "off_j10",
+    "live_mode": false,
+    "total_amount": "2560.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "LH",
+     "name": "Lufthansa"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_off_j10_1",
+      "duration": "PT10H50M",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j10_00",
+        "origin": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "FRA",
+         "name": "Frankfurt Airport",
+         "city_name": "Frankfurt",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-20T16:20:00",
+        "arriving_at": "2026-11-21T05:30:00",
+        "duration": "PT7H10M",
+        "marketing_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "operating_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "marketing_carrier_flight_number": "405",
+        "operating_carrier_flight_number": "405",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j10_01",
+        "origin": {
+         "iata_code": "FRA",
+         "name": "Frankfurt Airport",
+         "city_name": "Frankfurt",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-21T06:20:00",
+        "arriving_at": "2026-11-21T07:10:00",
+        "duration": "PT1H50M",
+        "marketing_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "operating_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "marketing_carrier_flight_number": "226",
+        "operating_carrier_flight_number": "226",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "sli_off_j10_2",
+      "duration": "PT10H40M",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j10_10",
+        "origin": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "FRA",
+         "name": "Frankfurt Airport",
+         "city_name": "Frankfurt",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T11:00:00",
+        "arriving_at": "2026-11-25T13:00:00",
+        "duration": "PT2H",
+        "marketing_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "operating_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "marketing_carrier_flight_number": "229",
+        "operating_carrier_flight_number": "229",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j10_11",
+        "origin": {
+         "iata_code": "FRA",
+         "name": "Frankfurt Airport",
+         "city_name": "Frankfurt",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T14:30:00",
+        "arriving_at": "2026-11-25T17:40:00",
+        "duration": "PT9H10M",
+        "marketing_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "operating_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "marketing_carrier_flight_number": "404",
+        "operating_carrier_flight_number": "404",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   },
+   {
+    "id": "off_j11",
+    "live_mode": false,
+    "total_amount": "2800.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "LX",
+     "name": "Swiss"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_off_j11_1",
+      "duration": "PT12H",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j11_00",
+        "origin": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "ZRH",
+         "name": "Zurich Airport",
+         "city_name": "Zurich",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-20T10:05:00",
+        "arriving_at": "2026-11-21T00:10:00",
+        "duration": "PT7H10M",
+        "marketing_carrier": {
+         "iata_code": "LX",
+         "name": "Swiss"
+        },
+        "operating_carrier": {
+         "iata_code": "LX",
+         "name": "Swiss"
+        },
+        "marketing_carrier_flight_number": "17",
+        "operating_carrier_flight_number": "17",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j11_01",
+        "origin": {
+         "iata_code": "ZRH",
+         "name": "Zurich Airport",
+         "city_name": "Zurich",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-21T06:15:00",
+        "arriving_at": "2026-11-21T07:45:00",
+        "duration": "PT1H30M",
+        "marketing_carrier": {
+         "iata_code": "LX",
+         "name": "Swiss"
+        },
+        "operating_carrier": {
+         "iata_code": "LX",
+         "name": "Swiss"
+        },
+        "marketing_carrier_flight_number": "1728",
+        "operating_carrier_flight_number": "1728",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "sli_off_j11_2",
+      "duration": "PT11H40M",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j11_10",
+        "origin": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "ZRH",
+         "name": "Zurich Airport",
+         "city_name": "Zurich",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T14:10:00",
+        "arriving_at": "2026-11-25T15:50:00",
+        "duration": "PT1H40M",
+        "marketing_carrier": {
+         "iata_code": "LX",
+         "name": "Swiss"
+        },
+        "operating_carrier": {
+         "iata_code": "LX",
+         "name": "Swiss"
+        },
+        "marketing_carrier_flight_number": "1729",
+        "operating_carrier_flight_number": "1729",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j11_11",
+        "origin": {
+         "iata_code": "ZRH",
+         "name": "Zurich Airport",
+         "city_name": "Zurich",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T17:30:00",
+        "arriving_at": "2026-11-25T20:40:00",
+        "duration": "PT9H10M",
+        "marketing_carrier": {
+         "iata_code": "LX",
+         "name": "Swiss"
+        },
+        "operating_carrier": {
+         "iata_code": "LX",
+         "name": "Swiss"
+        },
+        "marketing_carrier_flight_number": "16",
+        "operating_carrier_flight_number": "16",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   },
+   {
+    "id": "off_j12",
+    "live_mode": false,
+    "total_amount": "3040.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "BA",
+     "name": "British Airways"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_off_j12_1",
+      "duration": "PT9H20M",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j12_00",
+        "origin": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "LHR",
+         "name": "London Heathrow Airport",
+         "city_name": "London",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-20T15:30:00",
+        "arriving_at": "2026-11-21T03:30:00",
+        "duration": "PT7H",
+        "marketing_carrier": {
+         "iata_code": "BA",
+         "name": "British Airways"
+        },
+        "operating_carrier": {
+         "iata_code": "BA",
+         "name": "British Airways"
+        },
+        "marketing_carrier_flight_number": "178",
+        "operating_carrier_flight_number": "178",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j12_01",
+        "origin": {
+         "iata_code": "LHR",
+         "name": "London Heathrow Airport",
+         "city_name": "London",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-21T04:40:00",
+        "arriving_at": "2026-11-21T06:55:00",
+        "duration": "PT2H35M",
+        "marketing_carrier": {
+         "iata_code": "BA",
+         "name": "British Airways"
+        },
+        "operating_carrier": {
+         "iata_code": "BA",
+         "name": "British Airways"
+        },
+        "marketing_carrier_flight_number": "548",
+        "operating_carrier_flight_number": "548",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "sli_off_j12_2",
+      "duration": "PT10H",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j12_10",
+        "origin": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "LHR",
+         "name": "London Heathrow Airport",
+         "city_name": "London",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T15:40:00",
+        "arriving_at": "2026-11-25T17:35:00",
+        "duration": "PT2H55M",
+        "marketing_carrier": {
+         "iata_code": "BA",
+         "name": "British Airways"
+        },
+        "operating_carrier": {
+         "iata_code": "BA",
+         "name": "British Airways"
+        },
+        "marketing_carrier_flight_number": "549",
+        "operating_carrier_flight_number": "549",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j12_11",
+        "origin": {
+         "iata_code": "LHR",
+         "name": "London Heathrow Airport",
+         "city_name": "London",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T19:00:00",
+        "arriving_at": "2026-11-25T22:10:00",
+        "duration": "PT8H20M",
+        "marketing_carrier": {
+         "iata_code": "BA",
+         "name": "British Airways"
+        },
+        "operating_carrier": {
+         "iata_code": "BA",
+         "name": "British Airways"
+        },
+        "marketing_carrier_flight_number": "179",
+        "operating_carrier_flight_number": "179",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   },
+   {
+    "id": "off_j13",
+    "live_mode": false,
+    "total_amount": "4720.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "DL",
+     "name": "Delta Air Lines"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_off_j13_1",
+      "duration": "PT8H20M",
+      "fare_brand_name": "Comfort+",
+      "origin": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j13_00",
+        "origin": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-20T10:30:00",
+        "arriving_at": "2026-11-21T00:40:00",
+        "duration": "PT8H20M",
+        "marketing_carrier": {
+         "iata_code": "DL",
+         "name": "Delta Air Lines"
+        },
+        "operating_carrier": {
+         "iata_code": "DL",
+         "name": "Delta Air Lines"
+        },
+        "marketing_carrier_flight_number": "444",
+        "operating_carrier_flight_number": "444",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "sli_off_j13_2",
+      "duration": "PT9H45M",
+      "fare_brand_name": "Comfort+",
+      "origin": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j13_10",
+        "origin": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T09:00:00",
+        "arriving_at": "2026-11-25T12:45:00",
+        "duration": "PT9H45M",
+        "marketing_carrier": {
+         "iata_code": "DL",
+         "name": "Delta Air Lines"
+        },
+        "operating_carrier": {
+         "iata_code": "DL",
+         "name": "Delta Air Lines"
+        },
+        "marketing_carrier_flight_number": "445",
+        "operating_carrier_flight_number": "445",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   },
+   {
+    "id": "off_j14",
+    "live_mode": false,
+    "total_amount": "1580.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "N0",
+     "name": "Norse Atlantic"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_off_j14_1",
+      "duration": "PT12H20M",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j14_00",
+        "origin": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "OSL",
+         "name": "Oslo Airport",
+         "city_name": "Oslo",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-20T06:00:00",
+        "arriving_at": "2026-11-20T18:30:00",
+        "duration": "PT7H30M",
+        "marketing_carrier": {
+         "iata_code": "N0",
+         "name": "Norse Atlantic"
+        },
+        "operating_carrier": {
+         "iata_code": "N0",
+         "name": "Norse Atlantic"
+        },
+        "marketing_carrier_flight_number": "800",
+        "operating_carrier_flight_number": "800",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j14_01",
+        "origin": {
+         "iata_code": "OSL",
+         "name": "Oslo Airport",
+         "city_name": "Oslo",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "STN",
+         "name": "London Stansted Airport",
+         "city_name": "London",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-20T20:00:00",
+        "arriving_at": "2026-11-20T22:10:00",
+        "duration": "PT2H10M",
+        "marketing_carrier": {
+         "iata_code": "FR",
+         "name": "Ryanair"
+        },
+        "operating_carrier": {
+         "iata_code": "FR",
+         "name": "Ryanair"
+        },
+        "marketing_carrier_flight_number": "1912",
+        "operating_carrier_flight_number": "1912",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j14_02",
+        "origin": {
+         "iata_code": "STN",
+         "name": "London Stansted Airport",
+         "city_name": "London",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-21T03:00:00",
+        "arriving_at": "2026-11-21T05:50:00",
+        "duration": "PT2H40M",
+        "marketing_carrier": {
+         "iata_code": "FR",
+         "name": "Ryanair"
+        },
+        "operating_carrier": {
+         "iata_code": "FR",
+         "name": "Ryanair"
+        },
+        "marketing_carrier_flight_number": "9906",
+        "operating_carrier_flight_number": "9906",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "sli_off_j14_2",
+      "duration": "PT12H20M",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_j14_10",
+        "origin": {
+         "iata_code": "FCO",
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "STN",
+         "name": "London Stansted Airport",
+         "city_name": "London",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T12:00:00",
+        "arriving_at": "2026-11-25T14:40:00",
+        "duration": "PT2H40M",
+        "marketing_carrier": {
+         "iata_code": "FR",
+         "name": "Ryanair"
+        },
+        "operating_carrier": {
+         "iata_code": "FR",
+         "name": "Ryanair"
+        },
+        "marketing_carrier_flight_number": "9907",
+        "operating_carrier_flight_number": "9907",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j14_11",
+        "origin": {
+         "iata_code": "STN",
+         "name": "London Stansted Airport",
+         "city_name": "London",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "OSL",
+         "name": "Oslo Airport",
+         "city_name": "Oslo",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T16:00:00",
+        "arriving_at": "2026-11-25T18:50:00",
+        "duration": "PT2H10M",
+        "marketing_carrier": {
+         "iata_code": "FR",
+         "name": "Ryanair"
+        },
+        "operating_carrier": {
+         "iata_code": "FR",
+         "name": "Ryanair"
+        },
+        "marketing_carrier_flight_number": "1913",
+        "operating_carrier_flight_number": "1913",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_j14_12",
+        "origin": {
+         "iata_code": "OSL",
+         "name": "Oslo Airport",
+         "city_name": "Oslo",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T20:30:00",
+        "arriving_at": "2026-11-26T00:40:00",
+        "duration": "PT8H10M",
+        "marketing_carrier": {
+         "iata_code": "N0",
+         "name": "Norse Atlantic"
+        },
+        "operating_carrier": {
+         "iata_code": "N0",
+         "name": "Norse Atlantic"
+        },
+        "marketing_carrier_flight_number": "801",
+        "operating_carrier_flight_number": "801",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
            }
           ]
          }
@@ -341,13 +3591,15 @@
         "id": "seg_101",
         "origin": {
          "iata_code": "JFK",
-         "name": "JFK",
-         "city_name": "JFK"
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
         },
         "destination": {
          "iata_code": "FCO",
-         "name": "FCO",
-         "city_name": "FCO"
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
         },
         "departing_at": "2026-11-20T18:00:00",
         "arriving_at": "2026-11-21T08:00:00",
@@ -379,7 +3631,19 @@
          }
         ]
        }
-      ]
+      ],
+      "origin": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      }
      },
      {
       "id": "sli_2",
@@ -390,13 +3654,15 @@
         "id": "seg_102",
         "origin": {
          "iata_code": "FCO",
-         "name": "FCO",
-         "city_name": "FCO"
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
         },
         "destination": {
          "iata_code": "JFK",
-         "name": "JFK",
-         "city_name": "JFK"
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
         },
         "departing_at": "2026-11-25T12:00:00",
         "arriving_at": "2026-11-25T15:30:00",
@@ -428,7 +3694,19 @@
          }
         ]
        }
-      ]
+      ],
+      "origin": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      }
      }
     ],
     "conditions": {
@@ -479,13 +3757,15 @@
         "id": "seg_48",
         "origin": {
          "iata_code": "JFK",
-         "name": "JFK",
-         "city_name": "JFK"
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
         },
         "destination": {
          "iata_code": "AMS",
-         "name": "AMS",
-         "city_name": "AMS"
+         "name": "Amsterdam Schiphol Airport",
+         "city_name": "Amsterdam",
+         "type": "airport"
         },
         "departing_at": "2026-11-20T18:10:00",
         "arriving_at": "2026-11-21T07:45:00",
@@ -521,13 +3801,15 @@
         "id": "seg_1599",
         "origin": {
          "iata_code": "AMS",
-         "name": "AMS",
-         "city_name": "AMS"
+         "name": "Amsterdam Schiphol Airport",
+         "city_name": "Amsterdam",
+         "type": "airport"
         },
         "destination": {
          "iata_code": "FCO",
-         "name": "FCO",
-         "city_name": "FCO"
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
         },
         "departing_at": "2026-11-21T09:20:00",
         "arriving_at": "2026-11-21T11:35:00",
@@ -559,7 +3841,19 @@
          }
         ]
        }
-      ]
+      ],
+      "origin": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      }
      },
      {
       "id": "sli_2",
@@ -570,13 +3864,15 @@
         "id": "seg_1602",
         "origin": {
          "iata_code": "FCO",
-         "name": "FCO",
-         "city_name": "FCO"
+         "name": "Rome Fiumicino Airport",
+         "city_name": "Rome",
+         "type": "airport"
         },
         "destination": {
          "iata_code": "AMS",
-         "name": "AMS",
-         "city_name": "AMS"
+         "name": "Amsterdam Schiphol Airport",
+         "city_name": "Amsterdam",
+         "type": "airport"
         },
         "departing_at": "2026-11-25T18:50:00",
         "arriving_at": "2026-11-25T21:20:00",
@@ -612,13 +3908,15 @@
         "id": "seg_49",
         "origin": {
          "iata_code": "AMS",
-         "name": "AMS",
-         "city_name": "AMS"
+         "name": "Amsterdam Schiphol Airport",
+         "city_name": "Amsterdam",
+         "type": "airport"
         },
         "destination": {
          "iata_code": "JFK",
-         "name": "JFK",
-         "city_name": "JFK"
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
         },
         "departing_at": "2026-11-26T10:00:00",
         "arriving_at": "2026-11-26T12:45:00",
@@ -650,7 +3948,19 @@
          }
         ]
        }
-      ]
+      ],
+      "origin": {
+       "iata_code": "FCO",
+       "name": "Rome Fiumicino Airport",
+       "city_name": "Rome",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      }
      }
     ],
     "conditions": {

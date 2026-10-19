@@ -1,31 +1,23 @@
-"""Duffel (duffel.com) as a SECOND supply source for the planning board —
-flights and stays, search only.
+"""Duffel (duffel.com) — the planning board's ONLY live flight source, search
+side. Every flight Rovyn books goes through Duffel too (duffel_booking.py,
+paid from the Duffel Balance), so every live fare on the board is one the
+booking engine can re-price and hold. Stays are LiteAPI's alone.
 
-LiteAPI is the board's first source. With a DUFFEL_ACCESS_TOKEN set (test
-tokens are free and self-serve), Duffel's offers are searched alongside and
-merged in, so the group sees airlines one supplier alone would miss.
-Everything maps into the exact candidate shapes the LiteAPI code already
-produces, so ranking, lanes and reasons (option_ranking) never know which
-supplier a row came from:
+  suggest_places  GET  /places/suggestions   free text -> airports and cities
+                                             (flight_service resolves IATA codes)
+  search_flights  POST /air/offer_requests   round trip, open jaw or one-way ->
+                                             the lean candidates flight_service
+                                             ranks, with duffel_offer_id
+  get_offer       GET  /air/offers/{id}      the fresh price of one offer (the
+                                             detail page's re-verify)
 
-  search_flights  -> flight_service._parse_journey-shaped candidates, with
-                     supplier="duffel" and duffel_offer_id (a hold order later)
-  get_offer       -> the fresh price of one offer (the detail page's re-verify)
-  search_stays    -> hotel_service stay records, with supplier="duffel",
-                     duffel_accommodation_id and duffel_search_result_id.
-                     Wired into the board only behind DUFFEL_STAYS=1 — Duffel
-                     stays carry their own price and content but no LiteAPI
-                     rates, so they are never routed to rooming or booking.
-
-Airport resolution still comes from LiteAPI's airports endpoint, so Duffel
-widens a board that has a LiteAPI key; on its own it is not searched.
-
-Best-effort like every live integration here: any failure returns []/None and
-the board falls back to what LiteAPI (or the AI menu) produced; without a
-token no request is ever made. A 429 is retried once after Duffel's
-ratelimit-reset, a 5xx once after a short pause — both only when the wait
-fits the call's own timeout. Booking (hold orders, quotes) is the payments
-work — intentionally not wired here.
+Best-effort like every live integration here: any failure returns []/None
+(suggest_places raises, so a failed lookup is never cached as "no airport")
+and the board falls back to the AI menu; without a token no request is ever
+made. A 429 is retried once after Duffel's ratelimit-reset, a 5xx once after
+a short pause — both only when the wait fits the call's own timeout.
+Test tokens (duffel_test_…) serve Duffel's own test airline, "Duffel Airways"
+(IATA ZZ) — options carry sandbox=True so the board can say so.
 """
 import json
 import os
@@ -39,7 +31,6 @@ from email.utils import parsedate_to_datetime
 
 import certifi
 
-from backend.services import option_ranking as ranking
 
 _SSL_CTX = ssl.create_default_context(cafile=certifi.where())
 _BASE = "https://api.duffel.com"
@@ -47,8 +38,7 @@ _VERSION = "v2"
 _OFFER_SUPPLIER_TIMEOUT_MS = 12000  # Duffel's per-airline wait (2–60 s allowed)
 FLIGHT_HTTP_TIMEOUT = 15            # the board never waits longer than this on Duffel
 _OFFER_VERIFY_TIMEOUT = 10
-_STAYS_HTTP_TIMEOUT = 20
-_STAYS_RADIUS_KM = 5
+_PLACES_TIMEOUT = 8
 _MAX_PASSENGERS = 9
 _RETRY_PAUSE = 1.5
 
@@ -58,15 +48,9 @@ def duffel_available() -> bool:
 
 
 def duffel_test_mode() -> bool:
-    """Test tokens serve Duffel's own test airline and test hotels — the UI
-    must not pass those off as real inventory."""
+    """Test tokens serve Duffel's own test airline ("Duffel Airways", ZZ) —
+    the UI must not pass that off as a real carrier."""
     return os.environ.get("DUFFEL_ACCESS_TOKEN", "").startswith("duffel_test_")
-
-
-def duffel_stays_enabled() -> bool:
-    """Duffel accommodations on the Stay tab — opt-in until their content
-    and prices have been checked against real inventory."""
-    return duffel_available() and os.environ.get("DUFFEL_STAYS", "").strip() in ("1", "true", "yes")
 
 
 def _retry_pause(exc: urllib.error.HTTPError) -> float:
@@ -119,6 +103,23 @@ def _request(path: str, payload: dict | None = None, params: dict | None = None,
 
 
 # ---------------------------------------------------------------------------
+# Places
+# ---------------------------------------------------------------------------
+
+def suggest_places(query: str) -> list[dict]:
+    """GET /places/suggestions?query=… -> Duffel Place objects: {type
+    "airport"|"city", iata_code, iata_city_code, iata_country_code, name,
+    city_name, city{iata_code, airports[]}, airports[] (cities only)}.
+    [] without a token or a query; RAISES on a transport failure so the
+    caller's cache never stores an outage as "no airport here"."""
+    if not (duffel_available() and (query or "").strip()):
+        return []
+    data = _request("/places/suggestions", params={"query": query.strip()}, timeout=_PLACES_TIMEOUT)
+    places = data.get("data") or []
+    return [p for p in places if isinstance(p, dict)] if isinstance(places, list) else []
+
+
+# ---------------------------------------------------------------------------
 # Flights
 # ---------------------------------------------------------------------------
 
@@ -135,8 +136,8 @@ def _iso_minutes(duration: str | None) -> int:
 
 
 def _plain_time(iso: str | None) -> str:
-    """Duffel stamps local times as '2026-11-20T07:40:00' — the same local
-    convention LiteAPI uses, so the board's formatting applies unchanged."""
+    """Duffel stamps local times as '2026-11-20T07:40:00' (the airport's own
+    clock, no offset) — what the board prints and ranks by."""
     return (iso or "")[:19]
 
 
@@ -160,8 +161,8 @@ def _segment(seg: dict, direction: str) -> dict:
 
 
 def itinerary_signature(segments: list[dict]) -> str:
-    """The same itinerary from two suppliers must dedupe: sorted
-    (carrier, flight number, departure) tuples make a supplier-neutral key."""
+    """One key per itinerary — sorted (carrier, flight number, departure)
+    tuples, so two fare brands on the same flights read as one journey."""
     parts = sorted(
         f"{(s.get('carrier') or {}).get('marketingCode', '')}{(s.get('flight') or {}).get('marketingNumber', '')}"
         f"@{(s.get('departureTime') or '')[:16]}"
@@ -189,7 +190,8 @@ def _baggage(slice_: dict) -> tuple[bool, bool]:
 def _offer_to_candidate(offer: dict, travelers: int) -> dict | None:
     """One Duffel offer -> the lean candidate shape flight_service ranks.
     Per-person price = the offer total over the passengers it was priced
-    for; the currency travels with it (no silent FX)."""
+    for; the currency travels with it (no silent FX). A one-way offer has
+    its single slice under "out" and no "back"."""
     slices = offer.get("slices") or []
     if not slices:
         return None
@@ -214,7 +216,6 @@ def _offer_to_candidate(offer: dict, travelers: int) -> dict | None:
                         or sum(s["duration"]["minutes"] for s in back),
         "stops": max(len(out) - 1, (len(back) - 1) if back else 0),
         "carriers": carriers,
-        "offer_id": "",  # LiteAPI offer ids only — the booking paths tell them apart
         "journey_key": "duffel:" + itinerary_signature(out + back),
         "expires_at": offer.get("expires_at") or "",
         "fare_family": slices[0].get("fare_brand_name") or "",
@@ -226,21 +227,24 @@ def _offer_to_candidate(offer: dict, travelers: int) -> dict | None:
     }
 
 
-def search_flights(origin: str, destination: str, depart_date: str, return_date: str,
+def search_flights(origin: str, destination: str, depart_date: str, return_date: str | None = None,
                    travelers: int = 1, return_from: str | None = None,
-                   return_to: str | None = None) -> list[dict]:
-    """Round-trip (or open-jaw) offers from Duffel as ranked candidates,
-    cheapest first. IATA airport or metro codes. [] on any failure or
-    without a token — the LiteAPI search carries the board alone then."""
-    if not (duffel_available() and origin and destination and depart_date and return_date):
+                   return_to: str | None = None, raise_errors: bool = False) -> list[dict]:
+    """Offers from Duffel as ranked candidates, cheapest first: a round trip,
+    an open jaw (return_from / return_to differ from the outbound pair — one
+    multi-slice request, as Duffel documents), or a one-way without a
+    return_date. IATA airport or city codes. [] without a token, and [] on
+    any failure — unless raise_errors, which lets a caller tell "Duffel
+    answered with no offers" apart from a timeout, 429 or 5xx."""
+    if not (duffel_available() and origin and destination and depart_date):
         return []
     n = max(1, min(int(travelers or 1), _MAX_PASSENGERS))
+    slices = [{"origin": origin, "destination": destination, "departure_date": depart_date}]
+    if return_date:
+        slices.append({"origin": return_from or destination, "destination": return_to or origin,
+                       "departure_date": return_date})
     body = {
-        "slices": [
-            {"origin": origin, "destination": destination, "departure_date": depart_date},
-            {"origin": return_from or destination, "destination": return_to or origin,
-             "departure_date": return_date},
-        ],
+        "slices": slices,
         "passengers": [{"type": "adult"}] * n,
         "cabin_class": "economy",
         "max_connections": 1,
@@ -250,6 +254,8 @@ def search_flights(origin: str, destination: str, depart_date: str, return_date:
                         params={"return_offers": "true", "supplier_timeout": _OFFER_SUPPLIER_TIMEOUT_MS},
                         timeout=FLIGHT_HTTP_TIMEOUT)
     except Exception:
+        if raise_errors:
+            raise
         return []
     offers = (data.get("data") or {}).get("offers") or []
     cands = [c for c in (_offer_to_candidate(o, n) for o in offers if isinstance(o, dict)) if c]
@@ -273,95 +279,3 @@ def get_offer(offer_id: str) -> dict | None:
     except Exception:
         return None
 
-
-# ---------------------------------------------------------------------------
-# Stays
-# ---------------------------------------------------------------------------
-
-def _result_to_record(result: dict) -> dict | None:
-    """One Duffel stays search result -> a provider-neutral stay record,
-    priced from the search itself (cheapest rate for every room requested).
-    Non-USD results are dropped: a price must compare like for like.
-    Duffel's review_score is already out of 10 (1.0–10.0 per its docs)."""
-    acc = result.get("accommodation") or {}
-    name = (acc.get("name") or "").strip()
-    if not name:
-        return None
-    currency = result.get("cheapest_rate_currency") or "USD"
-    if currency != "USD":
-        return None
-    try:
-        total = float(result.get("cheapest_rate_total_amount"))
-    except (TypeError, ValueError):
-        return None
-    loc = acc.get("location") or {}
-    coords = loc.get("geographic_coordinates") or {}
-    addr = loc.get("address") or {}
-    rating10 = None
-    if acc.get("review_score") is not None:
-        try:
-            rating10 = round(max(0.0, min(10.0, float(acc["review_score"]))), 1)
-        except (TypeError, ValueError):
-            rating10 = None
-    photos = [p.get("url") for p in (acc.get("photos") or []) if p.get("url")]
-    stars = acc.get("rating")
-    facilities = [a.get("description") or a.get("type") or "" for a in (acc.get("amenities") or [])]
-    description = (acc.get("description") or "").strip()
-    address = ", ".join(p for p in (addr.get("line_one"), addr.get("city_name")) if p)
-    return {
-        "key": f"duffel:{acc.get('id') or result.get('id') or name}",
-        "name": name,
-        "type_id": None,
-        "type_label": ranking.star_label(ranking.label_from_name(name), stars),
-        "stars": stars,
-        "rating10": rating10,
-        "review_count": acc.get("review_count"),
-        "lat": coords.get("latitude"),
-        "lng": coords.get("longitude"),
-        "price_total": total,
-        "currency": currency,
-        "facilities": [f for f in facilities if f],
-        "description": description[:400],
-        "address": address,
-        "image": {"url": photos[0], "thumb": photos[0], "alt": name, "credit": name, "credit_url": ""}
-                 if photos else None,
-        "supplier": "duffel",
-        "sandbox": duffel_test_mode(),
-        "duffel_accommodation_id": acc.get("id"),
-        "duffel_search_result_id": result.get("id"),
-        # The option page for a Duffel stay is built from this very payload
-        # (no second endpoint to call), cached on the option like live details
-        "details": {
-            "kind": "live",
-            "source": "duffel",
-            "description": description,
-            "address": address,
-            "facilities": [f for f in facilities if f],
-            "photos": [{"url": u, "caption": ""} for u in photos[:10]],
-            "star_rating": stars,
-            **({"lat": coords.get("latitude"), "lng": coords.get("longitude")}
-               if coords.get("latitude") is not None and coords.get("longitude") is not None else {}),
-        },
-    }
-
-
-def search_stays(lat: float, lng: float, check_in: str, check_out: str,
-                 rooms: int, guests: int, radius_km: int = _STAYS_RADIUS_KM) -> list[dict]:
-    """Accommodations around a point for the group's dates, as stay records
-    priced for the whole party. [] on any failure or without a token."""
-    if not (duffel_available() and check_in and check_out and lat is not None and lng is not None):
-        return []
-    body = {
-        "rooms": max(1, int(rooms or 1)),
-        "guests": [{"type": "adult"}] * max(1, int(guests or 1)),
-        "check_in_date": check_in,
-        "check_out_date": check_out,
-        "location": {"radius": radius_km,
-                     "geographic_coordinates": {"latitude": lat, "longitude": lng}},
-    }
-    try:
-        data = _request("/stays/search", payload=body, timeout=_STAYS_HTTP_TIMEOUT)
-    except Exception:
-        return []
-    results = (data.get("data") or {}).get("results") or []
-    return [r for r in (_result_to_record(x) for x in results if isinstance(x, dict)) if r]

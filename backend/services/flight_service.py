@@ -1,31 +1,35 @@
-"""Live flight data via LiteAPI's flights product — the air half of Phase A —
-widened with Duffel as a second supplier and explained per itinerary.
+"""Live flight data via Duffel — the air half of Phase A — explained per
+itinerary.
 
-With LITEAPI_API_KEY set, the planning board's per-city flight menus become
-REAL bookable itineraries with live fares instead of AI estimates:
+All flight bookings go through Duffel (paid from the Duffel Balance, see
+duffel_booking.py), so the board searches Duffel and nothing else: with
+DUFFEL_ACCESS_TOKEN set, the per-city flight menus become REAL bookable
+itineraries with live fares instead of AI estimates. Each carries its
+duffel_offer_id, which gates auto-booking at checkout and drives the
+detail page's re-verify; the lock itself (booking_service.build_lock)
+re-searches the same itinerary from the stored segments and matches it by
+itinerary signature — the stored id is never re-read:
 
-  POST /flights/rates            legs-based search (round trip / one-way / open-jaw)
-  GET  /data/flights/airports    free-text place -> IATA (metro codes included)
-  POST /flights/verify           re-quote a stored offer while it's still valid
+  GET  /places/suggestions   free-text place -> IATA (city codes like NYC included)
+  POST /air/offer_requests   round trip, open jaw (one multi-slice request) or one-way
+  GET  /air/offers/{id}      re-quote a stored offer while it's still valid
 
-With DUFFEL_ACCESS_TOKEN set as well, Duffel's offers for the same legs are
-searched in parallel and merged in before the diversity pass (duplicates of
-the same itinerary collapse to the cheaper copy). Airport resolution comes
-from LiteAPI, so Duffel widens a LiteAPI board — a Duffel token alone searches
-nothing. Every option then carries a lane (Cheapest, Nonstop, Early arrival…)
-and data-backed reasons from option_ranking — the "why" is computed, never
+Every option carries a lane (Cheapest, Nonstop, Early arrival…) and
+data-backed reasons from option_ranking — the "why" is computed, never
 written by a model.
 
 Open-jaw routes (land in the route's first city, fly home from its last) are
-requested as true open-jaw legs from both suppliers; if they answer with
-plain round trips instead — the sandbox does — the trip is re-priced as two
-LiteAPI one-way fares paired per role, and failing that the round-trip quote
-is kept with an honest "why".
+requested as one two-slice offer request; only if Duffel ANSWERED and no
+offer honors the return city is the trip re-priced as two Duffel one-way
+fares paired per role. Such a pair is two separate tickets Rovyn can't book
+as one item yet, so it is labeled "you book these yourself" and checkout
+sends it straight to self-book. A return city that can't be resolved, or a
+first search that failed or timed out, returns [] (the AI menu covers it)
+rather than passing a plain round trip off as the open jaw.
 
 Everything here is best-effort: any failure returns []/None and callers fall
 back to the AI flight menu, so live fares never break trip planning.
-Booking (prebook -> book, hold orders) is the payments work and intentionally
-not wired.
+Booking (hold orders, balance payments) lives in booking_service.
 """
 import os
 import re
@@ -38,22 +42,19 @@ from backend.services.duffel_service import (
     FLIGHT_HTTP_TIMEOUT as _DUFFEL_TIMEOUT,
     duffel_available,
     get_offer as duffel_get_offer,
-    itinerary_signature,
     search_flights as duffel_search_flights,
+    suggest_places,
 )
-from backend.services.hotel_service import _country_code, _lite_request, _split_place, liteapi_sandbox
+from backend.services.hotel_service import _country_code, _split_place
 
-_RATES_TIMEOUT = 45  # rate searches routinely take 10s+ on a cold route
+# Every fare on the board is priced in this currency: the settlement charges
+# USD, and an offer in another currency can't be ranked against the rest
+# without a silent FX guess, so it is left off.
+BOARD_CURRENCY = "USD"
 
 
 def flights_available() -> bool:
-    return bool(os.environ.get("LITEAPI_API_KEY"))
-
-
-# Sandbox keys serve TEST inventory — placeholder carriers ("Nuitee Air" is
-# LiteAPI's own house brand), not real airlines. Surfaced on the board so the
-# UI can say so instead of letting a made-up airline pass as real.
-flights_sandbox = liteapi_sandbox
+    return duffel_available()
 
 
 def flight_target() -> int:
@@ -68,35 +69,47 @@ def flight_target() -> int:
 # Airport resolution — free text ("New York", "Split, Croatia") -> IATA
 # ---------------------------------------------------------------------------
 
+def _place_codes(place: dict) -> list[str]:
+    """A Duffel place's own code, then its airports' (a city lists them; an
+    airport in a metro area lists its siblings under city.airports)."""
+    codes = [place.get("iata_code")]
+    codes += [a.get("iata_code") for a in place.get("airports") or [] if isinstance(a, dict)]
+    return [c for c in codes if c]
+
+
 @lru_cache(maxsize=256)
 def _airport_lookup(place: str) -> tuple[str, tuple[str, ...]] | None:
     """(search code, all plausible codes for the place) or None.
 
-    Prefers a metro "all airports" code (NYC covers JFK/EWR/LGA) so searches
-    fan out across the whole area; the full code tuple validates whether an
-    open-jaw answer really departs from the requested city. Cached per
-    process — airports don't move. Needs the LiteAPI key: without one there
-    is nothing to ask."""
+    Prefers a city code (NYC covers JFK/EWR/LGA) so searches fan out across
+    the whole metro area; the full code tuple validates whether an open-jaw
+    answer really departs from the requested city. Places whose name matches
+    the town come first, and a country in the text ("Rome, Italy") filters
+    out namesakes elsewhere. Cached per process — airports don't move; a
+    failed lookup raises and is never cached."""
     city, country = _split_place(place)
     if not city or len(city) < 2 or not flights_available():
         return None
-    data = _lite_request("/data/flights/airports", params={"q": city})
-    groups = data.get("data") or []
-    airports = []
-    for g in groups if isinstance(groups, list) else []:
-        airports.extend(g.get("airports") or [])
+    places = [p for p in suggest_places(city) if p.get("iata_code")]
     code = _country_code(country)
     if code:
-        airports = [a for a in airports if (a.get("country") or "").upper() == code] or airports
-    airports = [a for a in airports if a.get("iata")]
-    if not airports:
+        places = [p for p in places if (p.get("iata_country_code") or "").upper() == code] or places
+    if not places:
         return None
-    served = [a for a in airports if a.get("hasAirlineService")]
-    metro = next((a for a in airports
-                  if not a.get("hasAirlineService") and "all airports" in (a.get("name") or "").lower()), None)
-    primary = (metro or (served[0] if served else airports[0]))["iata"]
-    codes = tuple(dict.fromkeys(a["iata"] for a in airports[:8]))
-    return primary, codes
+    town = city.casefold()
+
+    def named(p: dict) -> bool:
+        return town in ((p.get("city_name") or "").casefold(), (p.get("name") or "").casefold(),
+                        ((p.get("city") or {}).get("name") or "").casefold())
+
+    pool = [p for p in places if named(p)] or places  # Duffel's own order within each
+    metro = next((p for p in pool if p.get("type") == "city"), None)
+    if metro is None and (pool[0].get("city") or {}).get("iata_code"):
+        metro = pool[0]["city"]  # an airport inside a metro area: search the city code
+    primary = (metro or pool[0])["iata_code"]
+    codes = [primary] + _place_codes(metro or {})
+    codes += [c for p in pool for c in _place_codes(p) + _place_codes(p.get("city") or {})]
+    return primary, tuple(dict.fromkeys(codes))[:10]
 
 
 def _resolve(place: str) -> tuple[str, tuple[str, ...]] | None:
@@ -107,7 +120,7 @@ def _resolve(place: str) -> tuple[str, tuple[str, ...]] | None:
 
 
 # ---------------------------------------------------------------------------
-# Parsing /flights/rates journeys into lean candidates
+# Segment rows for the board (candidates come from duffel_service)
 # ---------------------------------------------------------------------------
 
 _fmt_minutes = ranking.hm  # '9h 10m' — one formatter for cards and reasons
@@ -160,100 +173,10 @@ def _route_str(segs: list[dict]) -> str:
     return f"{start} → {end}" + (f" (via {', '.join(vias)})" if vias else "")
 
 
-def _parse_journey(j: dict, travelers: int) -> dict | None:
-    """One /flights/rates journey -> a lean candidate, or None if unusable."""
-    segs = j.get("segments") or []
-    out = [s for s in segs if s.get("direction") != "INBOUND"]
-    back = [s for s in segs if s.get("direction") == "INBOUND"]
-    if not out:
-        return None
-    offer = j.get("cheapestOffer") or {}
-    pricing = ((offer.get("pricing") or {}).get("display")) or {}
-    per_person = ((pricing.get("perPassenger") or {}).get("adult") or {}).get("total") or pricing.get("total")
-    if not per_person:
-        return None
-    fare = offer.get("fare") or {}
-    seats = fare.get("seatsRemaining")
-    if isinstance(seats, int) and 0 < seats < travelers:
-        return None  # not enough seats in this fare for the whole party
-    durations = {(d.get("direction") or "OUTBOUND"): (d.get("duration") or {}).get("minutes")
-                 for d in j.get("legDurations") or []}
-    baggage = offer.get("baggage") or {}
-    return {
-        "out": out,
-        "back": back,
-        "price": float(per_person),
-        "currency": pricing.get("currency") or "USD",
-        "out_minutes": durations.get("OUTBOUND") or sum(
-            (s.get("duration") or {}).get("minutes") or 0 for s in out),
-        "back_minutes": durations.get("INBOUND") or sum(
-            (s.get("duration") or {}).get("minutes") or 0 for s in back),
-        "stops": max(len(out) - 1, len(back) - 1 if back else 0),
-        "carriers": list(dict.fromkeys(
-            (s.get("carrier") or {}).get("marketingName") or "Airline" for s in segs)),
-        "offer_id": offer.get("offerId") or "",
-        "journey_key": j.get("journeyKey") or ("liteapi:" + itinerary_signature(segs)),
-        "expires_at": offer.get("expiration") or "",
-        "fare_family": fare.get("family") or "",
-        "carry_on": bool(baggage.get("hasCarryOnBag")),
-        "checked_bag": bool(baggage.get("hasCheckedBag")),
-        "supplier": "liteapi",
-        "sandbox": flights_sandbox(),
-        "duffel_offer_id": "",
-    }
-
-
-def _search_journeys(legs: list[dict], travelers: int) -> list[dict]:
-    """All parseable journey candidates for a legs itinerary, cheapest first."""
-    body = _lite_request("/flights/rates", payload={
-        "legs": legs,
-        "adults": max(1, min(int(travelers or 1), 9)),
-        "currency": "USD",
-        "cabinClass": "ECONOMY",
-    }, timeout=_RATES_TIMEOUT)
-    journeys = []
-    for group in body.get("data") or []:
-        journeys.extend(group.get("journeys") or [])
-    cands = [c for c in (_parse_journey(j, travelers) for j in journeys) if c]
-    cands.sort(key=lambda c: c["price"])
-    return cands
-
-
-# ---------------------------------------------------------------------------
-# Merging two suppliers' candidates
-# ---------------------------------------------------------------------------
-
-def _signature(cand: dict) -> str:
-    return itinerary_signature((cand.get("out") or []) + (cand.get("back") or []))
-
-
-def _merge_candidates(primary: list[dict], secondary: list[dict]) -> list[dict]:
-    """LiteAPI + Duffel candidates as one list, cheapest first.
-
-    The same itinerary from both suppliers appears once — the cheaper copy.
-    A secondary fare in another currency than the board's is dropped
-    outright (no silent FX). Sandbox inventory is never mixed with
-    production inventory: production wins and the other supplier is dropped."""
-    if not secondary:
-        return list(primary)
-    if not primary:
-        return list(secondary)
-    live_primary = not all(c.get("sandbox") for c in primary)
-    live_secondary = not all(c.get("sandbox") for c in secondary)
-    if live_primary != live_secondary:
-        return list(primary) if live_primary else list(secondary)
-    merged: dict[str, dict] = {}
-    for cand in primary:
-        merged.setdefault(_signature(cand), cand)
-    board_currency = (primary[0].get("currency") or "USD")
-    for cand in secondary:
-        if (cand.get("currency") or "USD") != board_currency:
-            continue  # a GBP fare can't be ranked against USD ones — no silent FX
-        sig = _signature(cand)
-        existing = merged.get(sig)
-        if existing is None or cand["price"] < existing["price"]:
-            merged[sig] = cand
-    return sorted(merged.values(), key=lambda c: c["price"])
+# An open jaw priced as two one-way Duffel tickets. Rovyn books one Duffel
+# offer per checklist flight, so a pair is never auto-booked: the board says
+# so, and booking_service.build_lock sends it straight to self-book.
+PAIR_NOTE = "Priced as two one-way tickets — you book these yourself"
 
 
 # ---------------------------------------------------------------------------
@@ -312,8 +235,8 @@ def _option_from(role: str, out_cand: dict, back_cand: dict | None = None,
     out + back pair of one-way candidates (the open-jaw fallback)."""
     pair = back_cand is not None
     out_segs = out_cand["out"]
-    # A paired return comes from its own one-way search, whose segments are
-    # tagged OUTBOUND — they land in the candidate's "out" bucket.
+    # A paired return comes from its own one-way search — its leg sits in
+    # the candidate's "out" bucket.
     back_segs = (back_cand["back"] or back_cand["out"]) if pair else out_cand["back"]
     out_rows = _layovers([_seg_row(s) for s in out_segs], out_segs)
     back_rows = _layovers([_seg_row(s) for s in back_segs], back_segs)
@@ -328,7 +251,6 @@ def _option_from(role: str, out_cand: dict, back_cand: dict | None = None,
 
     legs = (out_cand, back_cand) if pair else (out_cand,)
     expiries = [c.get("expires_at") for c in legs if c.get("expires_at")]
-    suppliers = list(dict.fromkeys(c.get("supplier") or "liteapi" for c in legs))
     duffel_ids = [c.get("duffel_offer_id") for c in legs if c.get("duffel_offer_id")]
     return {
         "airline": " + ".join(carriers[:2]) + (" and partners" if len(carriers) > 2 else ""),
@@ -342,10 +264,9 @@ def _option_from(role: str, out_cand: dict, back_cand: dict | None = None,
         "duration": _fmt_minutes(out_cand["out_minutes"]),
         "return_duration": _fmt_minutes(back_minutes),
         "est_price_per_person": round(price),
-        "currency": out_cand.get("currency") or "USD",
+        "currency": out_cand.get("currency") or BOARD_CURRENCY,
         "why": why,
         "live_price": True,
-        "offer_ids": [c["offer_id"] for c in legs if c.get("offer_id")],
         "journey_key": "+".join(filter(None, [out_cand["journey_key"],
                                               back_cand["journey_key"] if pair else ""])),
         "fare_family": out_cand["fare_family"],
@@ -357,35 +278,35 @@ def _option_from(role: str, out_cand: dict, back_cand: dict | None = None,
         "role": role,
         "reasons": reasons,
         "match_score": match_score,
-        "supplier": suppliers[0] if len(suppliers) == 1 else "+".join(suppliers),
+        "supplier": "duffel",
         "sandbox": any(c.get("sandbox") for c in legs),
         "duffel_offer_id": duffel_ids[0] if len(duffel_ids) == 1 and not pair else "",
+        # Both legs' ids — the detail page re-verifies each; never auto-booked
         "duffel_offer_ids": duffel_ids,
+        "separate_tickets": pair,
     }
 
 
-def _search_both(legs: list[dict], travelers: int, origin, dest, return_from, home_to,
-                 depart_date: str, return_date: str) -> list[dict]:
-    """LiteAPI and Duffel at once, each bounded by its own wait. The pool is
-    NOT a context manager: a supplier that trickles past its bound is
+def _search(origin, dest, depart_date: str, return_date: str | None, travelers: int,
+            return_from=None, home_to=None) -> list[dict] | None:
+    """One Duffel offer request, board-currency candidates only — or None
+    when Duffel never answered (timeout, 429/5xx after its retry, transport
+    error), so callers can tell "no offers" from "no answer". The pool is
+    NOT a context manager: a search that trickles past its bound is
     abandoned (shutdown without waiting), never allowed to hold the board."""
-    pool = ThreadPoolExecutor(max_workers=2)
+    pool = ThreadPoolExecutor(max_workers=1)
     try:
-        lite_f = pool.submit(_search_journeys, legs, travelers)
-        duffel_f = pool.submit(duffel_search_flights, origin[0], dest[0], depart_date, return_date,
-                               travelers, return_from[0], home_to[0]) if duffel_available() else None
-        try:
-            lite = lite_f.result(timeout=_RATES_TIMEOUT + 5)
-        except Exception:
-            lite = []
+        future = pool.submit(duffel_search_flights, origin[0], dest[0], depart_date, return_date, travelers,
+                             return_from[0] if return_from else None, home_to[0] if home_to else None,
+                             raise_errors=True)
         try:
             # _DUFFEL_TIMEOUT bounds the socket; this bounds the wait itself
-            duffel = duffel_f.result(timeout=_DUFFEL_TIMEOUT + 0.5) if duffel_f else []
+            cands = future.result(timeout=_DUFFEL_TIMEOUT + 0.5)
         except Exception:
-            duffel = []
+            return None
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
-    return _merge_candidates(lite, duffel)
+    return [c for c in cands if (c.get("currency") or BOARD_CURRENCY) == BOARD_CURRENCY]
 
 
 def real_flight_options(origin_city: str, dest_city: str, depart_date: str,
@@ -396,13 +317,12 @@ def real_flight_options(origin_city: str, dest_city: str, depart_date: str,
     """Up to FLIGHT_OPTIONS_PER_CITY live round-trip offers from one departure
     city, mapped to the board's flight-option schema, one per role
     (cheapest / nonstop / fastest / best balance / bags / early arrival /
-    no early start / late return / one airline), LiteAPI and Duffel merged.
+    no early start / late return / one airline), all from Duffel.
 
     return_from_city: open-jaw trips fly home from the route's last city.
     return_to_city:   travelers who end the trip in a different home city.
     pace:             the group's pace reorders which roles claim first.
-    Needs the LiteAPI key (airports are resolved through it); Duffel joins
-    when its token is set too. Returns [] on ANY failure — callers must fall
+    Needs the Duffel token. Returns [] on ANY failure — callers must fall
     back to the AI menu."""
     if not (flights_available() and origin_city and dest_city and depart_date and return_date):
         return []
@@ -416,38 +336,35 @@ def real_flight_options(origin_city: str, dest_city: str, depart_date: str,
             return []
         home_to = origin
         if return_to_city and return_to_city.strip().casefold() != origin_city.strip().casefold():
-            home_to = _resolve(return_to_city) or origin
+            home_to = _resolve(return_to_city)
+            if not home_to:
+                return []  # never price a return to the wrong home city as if it were right
 
         open_jaw = bool(return_from_city) and (
             _split_place(return_from_city)[0].casefold() != town.casefold())
-        return_from = (_resolve(return_from_city) if open_jaw else None) or dest
-
-        legs = [
-            {"origin": origin[0], "destination": dest[0], "date": depart_date, "direction": "OUTBOUND"},
-            {"origin": return_from[0], "destination": home_to[0], "date": return_date, "direction": "INBOUND"},
-        ]
-        cands = _search_both(legs, travelers, origin, dest, return_from, home_to, depart_date, return_date)
-
+        return_from = dest
         if open_jaw:
-            honored = [c for c in cands
-                       if c["back"] and c["back"][0].get("originCode") in return_from[1]]
-            if honored:
-                return [_option_from(role, c, reasons=rs, match_score=ms)
-                        for role, c, rs, ms in _pick_diverse(honored, pace=pace, dest_city=town)]
-            # The provider ignored the open-jaw return (sandbox inventory does)
-            # — price the trip as two one-way fares instead, which honors both
-            # cities and stays fully bookable.
-            pair_options = _open_jaw_as_one_ways(
-                origin, dest, return_from, home_to, depart_date, return_date, travelers,
-                pace=pace, dest_city=town)
-            if pair_options:
-                return pair_options
-            if cands:  # last resort: keep the live quote, say what it really is
-                note = (f"Live price is a round trip via {town} — "
-                        f"your actual return leaves from {_split_place(return_from_city)[0]}, so treat it as a floor")
-                return [_option_from(role, c, why_extra=note, reasons=rs, match_score=ms)
-                        for role, c, rs, ms in _pick_diverse(cands, pace=pace, dest_city=town)]
-            return []
+            return_from = _resolve(return_from_city)
+            if not return_from:
+                # Unknown return city (lookup failed, or no airport there):
+                # a plain round trip would pass the honor check below and be
+                # held and charged as if it flew home from the right city.
+                return []
+
+        cands = _search(origin, dest, depart_date, return_date, travelers, return_from, home_to)
+        if cands is None:
+            return []  # Duffel never answered — the AI menu covers this city
+        if open_jaw:
+            # Offers answer the slices asked for; the check guards against a
+            # return that left from somewhere the place lookup doesn't know
+            cands = [c for c in cands if c["back"] and c["back"][0].get("originCode") in return_from[1]]
+            if not cands:
+                # Duffel answered and no airline sold the open jaw as one
+                # ticket — price it as two one-way fares instead. That honors
+                # both cities, but it is two separate tickets the travelers
+                # book themselves (checkout does not book pairs).
+                return _open_jaw_as_one_ways(origin, dest, return_from, home_to, depart_date, return_date,
+                                             travelers, pace=pace, dest_city=town)
 
         return [_option_from(role, c, reasons=rs, match_score=ms)
                 for role, c, rs, ms in _pick_diverse(cands, pace=pace, dest_city=town)]
@@ -459,24 +376,15 @@ def real_flight_options(origin_city: str, dest_city: str, depart_date: str,
 def _open_jaw_as_one_ways(origin, dest, return_from, home_to,
                           depart_date: str, return_date: str, travelers: int,
                           pace: str | None = None, dest_city: str = "") -> list[dict]:
-    """Two LiteAPI one-way searches (into the first city, home from the
+    """Two Duffel one-way searches (into the first city, home from the
     last), paired per role: outbound-driven roles (early arrival, no early
     start) take their outbound pick plus the cheapest return; late return
     takes the cheapest outbound plus its return pick; one airline and bags
     need both legs to qualify; nonstop must be nonstop both ways; price/time
-    roles pair role-for-role. Duffel's true open-jaw offers already took
-    part in the primary search — this fallback is LiteAPI-only."""
-    def one_way(frm, to, date):
-        try:
-            return _search_journeys(
-                [{"origin": frm[0], "destination": to[0], "date": date, "direction": "OUTBOUND"}],
-                travelers)
-        except Exception:
-            return []
-
+    roles pair role-for-role."""
     with ThreadPoolExecutor(max_workers=2) as pool:
-        out_f = pool.submit(one_way, origin, dest, depart_date)
-        back_f = pool.submit(one_way, return_from, home_to, return_date)
+        out_f = pool.submit(_search, origin, dest, depart_date, None, travelers)
+        back_f = pool.submit(_search, return_from, home_to, return_date, None, travelers)
         out_cands, back_cands = out_f.result(), back_f.result()
     if not (out_cands and back_cands):
         return []
@@ -534,7 +442,7 @@ def _open_jaw_as_one_ways(origin, dest, return_from, home_to,
         combined.append(f)
     if not combined:
         return []
-    note = "Priced as two one-way fares (booked separately)"
+    note = PAIR_NOTE
     options = []
     for (role, o, b), label in zip(pairs, ranking.explain_fixed_roles(combined, [r for r, _, _ in pairs])):
         if label is None:
@@ -547,32 +455,6 @@ def _open_jaw_as_one_ways(origin, dest, return_from, home_to,
 # ---------------------------------------------------------------------------
 # Option-detail screen — stored segments + best-effort re-quote
 # ---------------------------------------------------------------------------
-
-def _verified_price(offer_id: str) -> float | None:
-    """POST /flights/verify -> fresh per-person price, or None. Offers expire
-    within ~30 minutes of a search, so this mostly succeeds right after board
-    generation and quietly fails later — callers keep the stored price."""
-    body = _lite_request("/flights/verify", payload={"offerId": offer_id},
-                         timeout=15, attempts=1)
-
-    def find_per_adult(node):
-        if isinstance(node, dict):
-            adult = (node.get("perPassenger") or {}).get("adult") if "perPassenger" in node else None
-            if isinstance(adult, dict) and adult.get("total"):
-                return float(adult["total"])
-            for v in node.values():
-                found = find_per_adult(v)
-                if found:
-                    return found
-        elif isinstance(node, list):
-            for v in node:
-                found = find_per_adult(v)
-                if found:
-                    return found
-        return None
-
-    return find_per_adult(body.get("data") or body)
-
 
 def _offer_alive(expires: str) -> bool:
     """Whether a stored offer can still be re-verified. Supplier stamps may
@@ -589,22 +471,22 @@ def _offer_alive(expires: str) -> bool:
 
 
 def live_flight_details(option: dict) -> dict:
-    """The option-detail payload for a flight. Live options serve their stored
-    segments instantly; the fare is re-verified only while the quoted offer
-    can still be alive — through the supplier that quoted it (LiteAPI's
-    /flights/verify, or Duffel's GET /air/offers/{id}). AI/sample flights stay
-    source="board" so the screen keeps rendering the board's own facts.
-    Never raises: on any surprise the page still gets the stored facts."""
+    """The option-detail payload for a flight. Live Duffel options serve their
+    stored segments instantly; the fare is re-verified through GET
+    /air/offers/{id} only while the quoted offer can still be alive. AI and
+    sample flights — and live fares stored by an older board from another
+    supplier — stay source="board" so the screen keeps rendering the board's
+    own facts. Never raises: on any surprise the page still gets the stored
+    facts."""
     try:
         segments = option.get("segments") or {}
-        if not (option.get("live_price") and segments.get("out")):
+        if not (option.get("live_price") and segments.get("out") and option.get("supplier") == "duffel"):
             return {"kind": "live", "source": "board"}
 
-        supplier = option.get("supplier") or "liteapi"
         details = {
             "kind": "live",
-            "source": "duffel" if supplier == "duffel" else "liteapi",
-            "supplier": supplier,
+            "source": "duffel",
+            "supplier": "duffel",
             "segments": segments,
             "out_duration": option.get("duration") or "",
             "back_duration": option.get("return_duration") or "",
@@ -617,18 +499,13 @@ def live_flight_details(option: dict) -> dict:
         if not _offer_alive(str(option.get("expires_at") or "")):
             return details
         try:
-            if supplier == "duffel":
-                fresh = duffel_get_offer(option.get("duffel_offer_id") or "")
-                if fresh and (fresh.get("currency") or "USD") == (option.get("currency") or "USD"):
-                    details["price_per_person"] = round(fresh["price_per_person"])
-                    details["price_fresh"] = True
-            elif supplier == "liteapi":
-                offer_ids = option.get("offer_ids") or []
-                if offer_ids and flights_available():
-                    fresh = [_verified_price(oid) for oid in offer_ids]
-                    if all(p is not None for p in fresh):
-                        details["price_per_person"] = round(sum(fresh))
-                        details["price_fresh"] = True
+            # A one-way pair re-verifies both legs; the sum is the trip's fare
+            offer_ids = option.get("duffel_offer_ids") or [option.get("duffel_offer_id") or ""]
+            fresh = [duffel_get_offer(oid) for oid in offer_ids if oid]
+            if fresh and all(f and (f.get("currency") or BOARD_CURRENCY) == (option.get("currency") or BOARD_CURRENCY)
+                             for f in fresh):
+                details["price_per_person"] = round(sum(f["price_per_person"] for f in fresh))
+                details["price_fresh"] = True
         except Exception:
             pass  # stored quote + its age is the honest fallback
         return details

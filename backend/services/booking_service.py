@@ -678,8 +678,16 @@ def build_lock(ctx: dict, settlement_id: str, money_mode: str, prior: dict | Non
             "attempt_ref": attempt_ref(key), "ref": {"board_offer_id": f.get("duffel_offer_id")}, "note": None,
         }
         hinted = bool(f.get("duffel_offer_id") or f.get("duffel_offer_ids"))
+        # An open jaw the board priced as two one-way tickets: the lock books
+        # ONE Duffel offer per flight item, and re-searching the pair as one
+        # ticket is bound to miss (no airline sold it as one — that's why it
+        # was paired), so say what it really is instead of "no longer on sale".
+        pair = bool(f.get("separate_tickets")) or (
+            len(f.get("duffel_offer_ids") or []) > 1 and not f.get("duffel_offer_id"))
         if key in self_booked:
             item["note"] = _already_booked_note(self_booked[key])
+        elif travelers and pair:
+            item["note"] = "Priced as two separate one-way tickets — Rovyn can't book this pair yet, book both legs yourself"
         elif travelers and hinted and duffel.duffel_available():
             try:
                 live = _lock_flight(f, travelers, money_mode, lock_time)

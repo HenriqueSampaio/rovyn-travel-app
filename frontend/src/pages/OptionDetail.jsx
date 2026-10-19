@@ -235,8 +235,11 @@ export default function OptionDetail() {
     }
     if (category === 'flights') {
       setDetails({
-        data: opt.live_price && opt.segments?.out?.length ? {
-          source: 'liteapi',
+        // Duffel fares re-verify below; a fare an older board stored from
+        // another supplier (earlier_search) still draws its stored segments,
+        // but is never re-checked — Rovyn can't book it.
+        data: ((opt.live_price && opt.supplier === 'duffel') || opt.earlier_search) && opt.segments?.out?.length ? {
+          source: opt.earlier_search ? 'earlier' : 'duffel',
           segments: opt.segments,
           out_duration: opt.duration || '',
           back_duration: opt.return_duration || '',
@@ -250,7 +253,7 @@ export default function OptionDetail() {
       if (opt.live_price) {
         // fare re-verify — updates the freshness note when it lands
         api.getOptionDetails(tripId, optionId)
-          .then(res => { if (res.details?.source === 'liteapi') setDetails({ data: res.details }); })
+          .then(res => { if (res.details?.source === 'duffel') setDetails({ data: res.details }); })
           .catch(() => {});
       }
       return;
@@ -309,7 +312,7 @@ export default function OptionDetail() {
   const liveReady = Boolean(details) && (category !== 'stay' || media !== undefined);
 
   const d = details?.data;
-  const liveSegs = category === 'flights' && d?.source === 'liteapi' && d.segments?.out?.length
+  const liveSegs = category === 'flights' && ['duffel', 'earlier'].includes(d?.source) && d.segments?.out?.length
     ? d.segments : null;
   const title = opt.name || opt.airline || opt.carrier || opt.mode || 'Details';
   const city = (opt.city || '').split(',')[0].trim();
@@ -332,7 +335,8 @@ export default function OptionDetail() {
     category === 'stay' ? [`$${opt.price_per_night}`, ' / night', `≈ $${opt.total_per_person} per person total`]
     : category === 'flights' ? [
         `$${d?.price_per_person ?? opt.est_price_per_person}`, '',
-        opt.live_price ? 'round trip · live fare, per person' : 'est. round trip',
+        opt.live_price ? 'round trip · live fare, per person'
+          : opt.earlier_search ? 'round trip · earlier quote, per person' : 'est. round trip',
       ]
     : category === 'transport' ? [`$${opt.est_price_per_person}`, '', 'per person, one way']
     : opt.cost_per_person > 0 ? [`$${opt.cost_per_person}`, '', 'per person'] : ['Free', '', ''];
@@ -441,9 +445,11 @@ export default function OptionDetail() {
             </p>
           )}
           <p className="muted" style={{ fontSize: 13.5, marginTop: 6, fontStyle: 'italic' }}>
-            Live fares via LiteAPI — {d.price_fresh
+            {d.source === 'earlier' ? (
+              'Fare from an earlier LiteAPI search — Rovyn books flights through Duffel only, so this fare can’t be re-checked or booked here.'
+            ) : <>Live fares via Duffel — {d.price_fresh
               ? 'this fare was re-verified just now.'
-              : `showing the fare quoted ${splitWhen((d.priced_at || '').replace('T', ' ')).date || 'at board time'} — fares move, so re-check before booking.`}
+              : `showing the fare quoted ${splitWhen((d.priced_at || '').replace('T', ' ')).date || 'at board time'} — fares move, so re-check before booking.`}</>}
           </p>
         </section>
       ) : (
@@ -453,8 +459,10 @@ export default function OptionDetail() {
           <FlightLeg label="BACK" depart={opt.return} arrive={opt.return_arrive}
                      route={opt.return_route || opt.route} duration={opt.return_duration} />
           <p className="muted" style={{ fontSize: 13.5, marginTop: 10 }}>
-            {opt.live_price
-              ? 'Live fare via LiteAPI — the full segment breakdown isn’t available for this flight.'
+            {opt.earlier_search
+              ? 'Fare from an earlier LiteAPI search — Rovyn books flights through Duffel only, so this fare can’t be re-checked or booked here.'
+              : opt.live_price
+              ? 'Live fare — the full segment breakdown isn’t available for this flight.'
               : 'Rovyn’s estimate for planning — exact times, baggage and fare rules live on the airline and Expedia.'}
           </p>
         </section>
