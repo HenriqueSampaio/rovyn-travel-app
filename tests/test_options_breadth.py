@@ -330,6 +330,16 @@ def money(n):
     return f"${int(round(n)):,}"
 
 
+def cut_mid_word(reason):
+    """A chip that is its own sentence hard-cut inside a word — the review's
+    "Airbnb/vacation re". A chip cut at a boundary ("Beachfront & Sea…") or
+    naming its reason in other words ("In budget") is fine."""
+    short = reason["short"].removesuffix("…")
+    text = reason["text"].removeprefix("est. ")
+    return (bool(short) and text.startswith(short) and len(short) < len(text)
+            and text[len(short)] not in " /&+,;:·-–—")
+
+
 def search_rome(votes, prefs, target=12, report=None, **kw):
     return real_stay_options("Rome, Italy", "2026-11-20", "2026-11-23", 4, 3, "", votes,
                              prefs=prefs, target=target, report=report if report is not None else {}, **kw)
@@ -381,6 +391,8 @@ ok("why = lane · strongest reason", all(o["why"].startswith(o["lane"] + " · ")
    [o["why"] for o in stays][:3])
 ok("every reason carries a short chip label (<= 18 chars)",
    all(0 < len(r["short"]) <= 18 for o in stays for r in o["reasons"]))
+ok("no chip is its sentence cut inside a word", not any(cut_mid_word(r) for o in stays for r in o["reasons"]),
+   [r for o in stays for r in o["reasons"] if cut_mid_word(r)])
 ok("ratings are /10 and say so", all(o["rating_scale"] == "10" for o in stays if o["rating10"] is not None))
 ok("match scores are 0–100", all(0 <= o["match_score"] <= 100 for o in stays), [o["match_score"] for o in stays])
 ok("the existing option fields survive",
@@ -574,8 +586,9 @@ ok("the board pads thin live pricing up to the floor of four", len(board["stay"]
 ok("padding is labeled as estimates: supplier sample, lane Also fits, not live",
    padding and all(o["supplier"] == "sample" and o["lane"] == "Also fits" for o in padding), padding[:1])
 ok("stay_all_live is False when estimates pad the board", board["stay_all_live"] is False)
-ok("estimates say est. on every reason that prints a number",
-   all(r["text"].startswith("est. ") for o in padding for r in o["reasons"] if any(ch.isdigit() for ch in r["text"])))
+ok("estimates say est. on every number they invent, never on the group's vote tally",
+   all(r["text"].startswith("est. ") == (r["kind"] != "style")
+       for o in padding for r in o["reasons"] if any(ch.isdigit() for ch in r["text"])))
 ok("estimates carry no match score", all(o["match_score"] is None for o in padding))
 ok("the board carries the schema version, prefs and band for the UI",
    board["schema_version"] == 2 and board["group_prefs"]["accommodation_votes"] == {"boutique hotel": 3, "airbnb/vacation rental": 1}
@@ -620,8 +633,26 @@ labeled = ranking.annotate_stays(sample["stay"], PREFS, 3, "sample")
 ok("eight sample stays, each laned", len(labeled) == 8 and all(o["lane"] in ranking.STAY_LANES for o in labeled), len(labeled))
 ok("sample ratings are normalized to /10 and flagged as a 5-scale",
    all(o["rating10"] == round(o["rating"] * 2, 1) and o["rating_scale"] == "5" for o in labeled))
-ok("sample reasons are estimates", all(o["match_score"] is None for o in labeled)
-   and all(r["text"].startswith("est. ") for o in labeled for r in o["reasons"] if any(ch.isdigit() for ch in r["text"])))
+numbered = [r for o in labeled for r in o["reasons"] if any(ch.isdigit() for ch in r["text"])]
+ok("sample numbers are estimates — est. on every price line, never on the group's vote tally",
+   all(o["match_score"] is None for o in labeled)
+   and all(r["text"].startswith("est. ") == (r["kind"] != "style") for r in numbered)
+   and any(r["kind"] == "style" for r in numbered), numbered)
+villa = next(o for o in labeled if o["type"] == "airbnb/vacation rental")
+ok("a stay typed with a vote gets the vote's chip form, and its tally reads bare",
+   next(r for r in villa["reasons"] if r["kind"] == "style")
+   == {"kind": "style", "text": "Airbnb/vacation rental — the style 1 of 4 of you voted for", "short": "Vacation rental"},
+   villa["reasons"])
+ok("no sample chip is cut inside a word", not any(cut_mid_word(r) for o in labeled for r in o["reasons"]),
+   [r for o in labeled for r in o["reasons"] if cut_mid_word(r)])
+sample_flights = ranking.annotate_flights(
+    ai_service._sample_flights_for_city("Boston", "Rome, Italy", {"start": "2026-11-20", "end": "2026-11-23"}),
+    "moderately", "Rome", "sample")
+flight_numbered = [r for f in sample_flights for r in f["reasons"] if any(ch.isdigit() for ch in r["text"])]
+ok("sample flights still say est. on every fare, time and duration — lane lines included",
+   {r["kind"] for r in flight_numbered} == {"lane", "price"} and all(r["text"].startswith("est. ") for r in flight_numbered),
+   flight_numbered)
+ok("no sample flight chip is cut inside a word", not any(cut_mid_word(r) for f in sample_flights for r in f["reasons"]))
 voted = ranking.annotate_stays(sample["stay"], prefs_for({"hostel": 2, "luxury resort": 1}), 3, "sample")
 ok("a hostel vote puts the sample hostel up front, and the resort vote is covered too",
    any(o["lane"] in ("Best match", "Your voted style") and "hostel" in o["type"] for o in voted[:3])
@@ -694,6 +725,29 @@ ok("a type label from a name: a hotel's own suites stay a hotel",
    ranking.label_from_name("Hotel Palazzo Suites") == "hotel" and ranking.label_from_name("Trastevere Loft Apartments") == "apartment"
    and ranking.label_from_name("Embassy Suites") == "hotel" and ranking.star_label("hotel", 4) == "4-star hotel"
    and ranking.star_label("villa", 4) == "villa")
+ok("every accommodation vote has a fixed chip form, whatever its casing",
+   {v: ranking.short_label(v) for v in ranking.VOTE_TYPE_IDS}
+   == {"hostel": "Hostel", "boutique hotel": "Boutique hotel", "4-star hotel": "4-star hotel",
+       "luxury resort": "Luxury resort", "airbnb/vacation rental": "Vacation rental"}
+   and ranking.short_label("Airbnb/vacation rental") == "Vacation rental")
+ok("a long chip is cut back to its last whole word — a slash counts — and marked with …",
+   [ranking.short_label(t) for t in ("Beachfront & Sea view", "Mountain view & Lake", "Countryside/vineyard estate",
+                                     "Bed & breakfast farmhouse")]
+   == ["Beachfront & Sea…", "Mountain view…", "Countryside…", "Bed & breakfast…"])
+ok("a chip that fits is left alone: no … unless something was cut",
+   ranking.short_label("Apartment or villa") == "Apartment or villa" and ranking.short_label("Lands 08:30") == "Lands 08:30")
+overflow = ranking.score_stay({"name": "Podere", "type_label": "agriturismofarmhousevilla", "per_person_total": 300,
+                               "nights": 3}, prefs_for({"airbnb/vacation rental": 1}), "ai")
+ok("a label whose first word overflows any chip falls back to the vote's chip, never a broken word",
+   ranking.short_label("Agriturismofarmhousevilla") == ""
+   and next(r["short"] for r in overflow["reasons"] if r["kind"] == "style") == "Vacation rental", overflow["reasons"])
+ai_bb = ranking.score_stay({"name": "Casa Roma", "type_label": "bed & breakfast", "per_person_total": 300, "nights": 3,
+                            "rating10": 9.0, "review_count": 120, "distance_km": 0.8},
+                           prefs_for({"boutique hotel": 2, "hostel": 1}, group=3), "ai")
+ok("an AI stay: the vote tally is real (no est.); its price, score and distance are estimates (est.)",
+   [(r["kind"], r["text"].startswith("est. ")) for r in ai_bb["reasons"]]
+   == [("style", False), ("budget", True), ("rating", True), ("location", True)]
+   and ai_bb["reasons"][0]["text"] == "Bed & breakfast — the style 2 of 3 of you voted for", ai_bb["reasons"])
 
 
 def fact(key, price, minutes, stops=1, carrier="XX"):
