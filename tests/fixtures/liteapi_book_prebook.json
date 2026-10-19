@@ -1,0 +1,172 @@
+{
+ "data": {
+  "prebookId": "2DZbIOvT7",
+  "offerId": "3gAYonJzkt4AEaRzcmlk2gFMRzRaVE1aQldHRTNURU5aVUdJWURNTkJXTVkzVEtOUlNHWlJUTU5KU0dBM1RFTlRHR1pURE1aQlNHQVpUQ01SUUdZMkRNWlJY\u2026",
+  "hotelId": "lp36d84",
+  "currency": "USD",
+  "roomTypes": [
+   {
+    "rates": [
+     {
+      "rateId": "I42FUVCNLJBFOR2FGNKEKTS2KVDUSWKEJVHEEV2NLEZVIS2OKJJUOWSSKRGU4SSTI5ATGVCFJZKEOR22KRCE2WSCKNDUCWSUINGVEUKHLEZEITK2KJMEOVJT\u2026",
+      "occupancyNumber": 1,
+      "name": "Smart Double Room 1 Double Bed",
+      "maxOccupancy": 2,
+      "adultCount": 2,
+      "childCount": 0,
+      "childrenAges": [],
+      "boardType": "BI",
+      "boardName": "Breakfast Included",
+      "priceType": "commission",
+      "commission": [
+       {
+        "amount": 0,
+        "currency": "USD"
+       }
+      ],
+      "retailRate": {
+       "total": [
+        {
+         "amount": 243.12,
+         "currency": "USD"
+        }
+       ],
+       "suggestedSellingPrice": [
+        {
+         "amount": 279.585,
+         "currency": "USD",
+         "source": ""
+        }
+       ],
+       "initialPrice": null,
+       "taxesAndFees": [
+        {
+         "included": true,
+         "description": "VAT",
+         "amount": 24.31,
+         "currency": "USD"
+        },
+        {
+         "included": false,
+         "description": "City tax",
+         "amount": 50.64,
+         "currency": "USD"
+        }
+       ]
+      },
+      "cancellationPolicies": {
+       "cancelPolicyInfos": [
+        {
+         "cancelTime": "2026-11-22 10:00:00",
+         "amount": 243.12,
+         "currency": "USD",
+         "type": "amount",
+         "timezone": "GMT"
+        }
+       ],
+       "refundableTag": "RFN"
+      },
+      "paymentTypes": [
+       "NUITEE_PAY"
+      ],
+      "providerCommission": {
+       "amount": 0,
+       "currency": ""
+      },
+      "perks": [],
+      "promotions": null
+     },
+     {
+      "rateId": "I42FUVCNLJBFOR2FGNKEKTS2KVDUSWKEJVHEEV2NLEZVIS2OKJJUOWSSKRGU4SSTI5ATGVCFJZKEOR22KRCE2WSCKNDUCWSUINGVEUKHLEZEITK2KJMEOVJT\u2026",
+      "occupancyNumber": 2,
+      "name": "Smart Double Room 1 Double Bed",
+      "maxOccupancy": 2,
+      "adultCount": 2,
+      "childCount": 0,
+      "childrenAges": [],
+      "boardType": "BI",
+      "boardName": "Breakfast Included",
+      "priceType": "commission",
+      "commission": [
+       {
+        "amount": 0,
+        "currency": "USD"
+       }
+      ],
+      "retailRate": {
+       "total": [
+        {
+         "amount": 243.12,
+         "currency": "USD"
+        }
+       ],
+       "suggestedSellingPrice": [
+        {
+         "amount": 279.585,
+         "currency": "USD",
+         "source": ""
+        }
+       ],
+       "initialPrice": null,
+       "taxesAndFees": [
+        {
+         "included": true,
+         "description": "VAT",
+         "amount": 24.31,
+         "currency": "USD"
+        },
+        {
+         "included": false,
+         "description": "City tax",
+         "amount": 50.64,
+         "currency": "USD"
+        }
+       ]
+      },
+      "cancellationPolicies": {
+       "cancelPolicyInfos": [
+        {
+         "cancelTime": "2026-11-22 10:00:00",
+         "amount": 243.12,
+         "currency": "USD",
+         "type": "amount",
+         "timezone": "GMT"
+        }
+       ],
+       "refundableTag": "RFN"
+      },
+      "paymentTypes": [
+       "NUITEE_PAY"
+      ],
+      "providerCommission": {
+       "amount": 0,
+       "currency": ""
+      },
+      "perks": [],
+      "promotions": null
+     }
+    ]
+   }
+  ],
+  "suggestedSellingPrice": 559.16,
+  "isPackageRate": false,
+  "commission": 0,
+  "price": 486.24,
+  "priceType": "commission",
+  "priceDifferencePercent": 0,
+  "cancellationChanged": false,
+  "boardChanged": false,
+  "supplier": "nuitee",
+  "supplierId": 2,
+  "paymentTypes": [
+   "NUITEE_PAY",
+   "ACC_CREDIT_CARD",
+   "WALLET"
+  ],
+  "checkin": "2026-11-29",
+  "checkout": "2026-12-02",
+  "sellingPriceToUser": 486.24
+ },
+ "guestLevel": 0,
+ "sandbox": true
+}

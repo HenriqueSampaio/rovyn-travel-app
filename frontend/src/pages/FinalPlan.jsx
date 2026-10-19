@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { motion, Reorder, useDragControls } from 'framer-motion';
 import {
   BedDouble, Bus, CalendarDays, Check, CheckCircle2, ClipboardCheck, Compass,
@@ -8,6 +8,7 @@ import {
   Send, Ship, Star, Sun, Sunset, Ticket, TrainFront, Undo2, Users, Wallet, X,
 } from 'lucide-react';
 import { api, auth } from '../api/index.js';
+import Checkout from '../components/Checkout.jsx';
 import { Page, Loading, ErrorText, JourneyTracker, Hero, MapImage, RouteTimeline, Thumb, ThinkingLoader, TripAvatar, useSwipeTabs } from '../ui.jsx';
 
 const COST_LABELS = {
@@ -60,6 +61,8 @@ function BookingsChecklist({ bookings, busy, onConfirm, onUnbook }) {
 
   if (!bookings) return <Loading text="Preparing your booking checklist…" />;
   const { items, total, booked } = bookings;
+  // Items the open group checkout is buying: recording one by hand would book it twice
+  const charged = new Set(bookings.charged_keys || []);
 
   async function submit(itemKey) {
     const ok = await onConfirm(itemKey, code.trim(), note.trim());
@@ -73,8 +76,9 @@ function BookingsChecklist({ bookings, busy, onConfirm, onUnbook }) {
   return (
     <>
       <p className="muted" style={{ maxWidth: 560, marginBottom: 6 }}>
-        Rovyn doesn't charge for travel yet — book each item directly with the seller,
-        then record the confirmation here so the whole group sees what's done.
+        {items.some(i => i.provider !== 'self')
+          ? 'Rovyn booked the items marked "Booked by Rovyn". Book the rest directly with the seller, then record the confirmation here so the whole group sees what\'s done.'
+          : 'Book each item directly with the seller, then record the confirmation here so the whole group sees what\'s done — or pay in Rovyn from Costs & payment and let Rovyn book the stay and flights.'}
       </p>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 26 }}>
         <div style={{ flex: 1, maxWidth: 260, height: 2, background: 'var(--line-soft)' }}>
@@ -112,25 +116,33 @@ function BookingsChecklist({ bookings, busy, onConfirm, onUnbook }) {
                         The plan changed after this was booked — cancel it with the seller, or keep it and tap undo to clear it from the list.
                       </p>
                     )}
-                    {item.status === 'booked' ? (
-                      <p style={{ fontSize: 13.5, color: 'var(--pine)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
-                        <CheckCircle2 size={14} /> Booked by {item.booked_by} — confirmation <strong>{item.confirmation}</strong>
+                    {item.status === 'booked' || item.status === 'pending_confirmation' ? (
+                      <p style={{ fontSize: 13.5, color: 'var(--pine)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
+                        <CheckCircle2 size={14} />
+                        {item.provider !== 'self'
+                          ? <>Booked by Rovyn{item.provider === 'simulated' ? ' (simulated)' : ''} — {item.status === 'pending_confirmation'
+                              ? 'hotel confirmation code pending' : <>confirmation <strong>{item.confirmation}</strong></>}</>
+                          : <>Booked by {item.booked_by} — confirmation <strong>{item.confirmation}</strong></>}
                         {item.note ? <span className="muted">· {item.note}</span> : null}
                       </p>
                     ) : (
-                      <p className="muted" style={{ fontSize: 13, marginTop: 3 }}>Not booked yet</p>
+                      <p className="muted" style={{ fontSize: 13, marginTop: 3 }}>Not booked yet{item.note ? ` — ${item.note}` : ''}</p>
                     )}
                   </div>
                   <span style={{ display: 'inline-flex', gap: 12, alignItems: 'center', flexShrink: 0 }}>
-                    {item.link && (
+                    {item.link && item.provider === 'self' && !charged.has(item.item_key) && (
                       <a className="ext-link" href={item.link} target="_blank" rel="noreferrer" style={{ padding: '8px 16px', fontSize: 13 }}>
                         <ExternalLink size={13} /> Book on {sellerLabel(item.link)}
                       </a>
                     )}
-                    {item.status === 'booked' ? (
+                    {item.provider !== 'self' ? (
+                      <span className="muted" style={{ fontSize: 12.5 }}>manage in Costs &amp; payment</span>
+                    ) : item.status === 'booked' ? (
                       <button className="btn-quiet" disabled={busy} onClick={() => onUnbook(item.item_key)} title="Mark as not booked">
                         <Undo2 size={13} /> undo
                       </button>
+                    ) : charged.has(item.item_key) ? (
+                      <span className="muted" style={{ fontSize: 12.5 }}>Rovyn is booking this in the group checkout</span>
                     ) : (
                       <button className="btn-quiet" disabled={busy}
                               onClick={() => { setOpenKey(openKey === item.item_key ? null : item.item_key); setCode(''); setNote(''); }}>
@@ -139,7 +151,7 @@ function BookingsChecklist({ bookings, busy, onConfirm, onUnbook }) {
                     )}
                   </span>
                 </div>
-                {openKey === item.item_key && item.status !== 'booked' && (
+                {openKey === item.item_key && item.status !== 'booked' && !charged.has(item.item_key) && (
                   <div style={{ marginTop: 12, maxWidth: 480 }}>
                     <input
                       placeholder="Confirmation code (PNR, booking number, voucher #…)"
@@ -452,6 +464,8 @@ export default function FinalPlan() {
   const [bookings, setBookings] = useState(null);
   const pollRef = useRef(null);
   const bookingsReqId = useRef(0);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const returnHandled = useRef(false);
 
   async function refreshBookings() {
     // Monotonic counter: a stale poll response can never overwrite a newer one
@@ -483,6 +497,25 @@ export default function FinalPlan() {
     return () => clearInterval(pollRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tripId]);
+
+  // Back from Stripe's hosted Checkout: land on the requested tab, confirm the
+  // session with the backend (it re-reads Stripe), then clean the URL.
+  useEffect(() => {
+    if (returnHandled.current) return;
+    const tabParam = searchParams.get('tab');
+    const outcome = searchParams.get('checkout');
+    const sessionId = searchParams.get('session_id');
+    if (!tabParam && !outcome) return;
+    returnHandled.current = true;
+    if (tabParam) setTab(tabParam);
+    const finish = () => setSearchParams({}, { replace: true });
+    if (outcome === 'success' && sessionId) {
+      api.confirmCheckout(tripId, sessionId).catch(err => setError(err.message)).finally(() => { load(); finish(); });
+    } else {
+      finish();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   useEffect(() => {
     if (data?.trip?.me?.paid && !receipt) {
@@ -532,11 +565,18 @@ export default function FinalPlan() {
 
   const { plan, checks, trip } = data;
   const status = data.status;
+  // The server's own lock (an open group checkout, or any payment in motion) —
+  // a pending or authorized share never reads as "paid", so guessing from the
+  // checks left edit controls up that every edit endpoint refused. Older
+  // backends don't send it: fall back to "someone has paid".
   const anyPaid = checks.some(c => c.paid);
-  const editable = !anyPaid && ['final_review', 'approved'].includes(status);
+  const planLocked = data.plan_locked === undefined ? anyPaid : data.plan_locked;
+  const editable = !planLocked && ['final_review', 'approved'].includes(status);
   const myCheck = checks.find(c => c.user_id === me?.id);
   const iApproved = trip?.me?.approved;
   const iPaid = trip?.me?.paid;
+  const iAuthorized = trip?.me?.payment_status === 'authorized' || trip?.me?.payment_status === 'nothing_due';
+  const iPending = trip?.me?.payment_status === 'pending';
   const selfBooked = trip?.me?.booking_mode === 'self_book' || receipt?.mode === 'self_book';
   const days = plan.itinerary?.days || [];
   const canBook = ['approved', 'booked'].includes(status);
@@ -643,14 +683,15 @@ export default function FinalPlan() {
         );
       }
     } else if (status === 'approved') {
-      statusText = <span className="muted">{trip.paid_count} of {trip.total_members} locked in</span>;
-      action = !iPaid ? (
+      const committed = trip.paid_count + (trip.authorized_count || 0);
+      statusText = <span className="muted">{committed} of {trip.total_members} locked in</span>;
+      action = !iPaid && !iAuthorized ? (
         <button className="btn clay" onClick={() => goTab('money')} disabled={busy}>
-          <Wallet size={15} /> Choose how to book — ${myCheck?.total.toLocaleString()}
+          <Wallet size={15} /> {iPending ? 'Finish paying' : 'Choose how to book'} — ${myCheck?.total.toLocaleString()}
         </button>
       ) : (
         <span className="serif muted" style={{ fontStyle: 'italic', fontSize: 15 }}>
-          You're locked in — waiting on the others.
+          {iPaid ? "You're locked in — waiting on the others." : 'Your share is authorized — waiting on the others.'}
         </span>
       );
     } else {
@@ -1027,28 +1068,7 @@ export default function FinalPlan() {
             </div>
 
             {['approved', 'booked'].includes(status) ? (
-              !iPaid ? (
-                <div style={{ display: 'grid', gap: 20, maxWidth: 560 }}>
-                  <div>
-                    <button className="btn clay" disabled title="Automated booking arrives with Phase B">
-                      <CreditCard size={16} /> Pay in full — Rovyn books everything · ${myCheck.total.toLocaleString()}
-                    </button>
-                    <p className="muted" style={{ fontSize: 13, marginTop: 7, maxWidth: 480 }}>
-                      One payment and every flight, stay and ticket is booked for you automatically.
-                      <strong style={{ color: 'var(--clay)' }}> Coming soon</strong> — Phase B of Rovyn's booking architecture.
-                    </p>
-                  </div>
-                  <div>
-                    <button className="btn" onClick={() => chooseBooking('self_book')} disabled={busy}>
-                      {busy ? <Loader2 className="spin" size={16} /> : <ClipboardCheck size={16} />} I'll book everything myself
-                    </button>
-                    <p className="muted" style={{ fontSize: 13, marginTop: 7, maxWidth: 480 }}>
-                      Rovyn opens your booking checklist with a deep link for every item — you pay each
-                      seller directly and the whole group tracks progress together.
-                    </p>
-                  </div>
-                </div>
-              ) : selfBooked ? (
+              selfBooked ? (
                 <div>
                   <p style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--pine)', fontWeight: 700, marginBottom: 6 }}>
                     <CheckCircle2 size={17} /> You're booking it yourself — nothing was charged
@@ -1062,18 +1082,10 @@ export default function FinalPlan() {
                   </button>
                 </div>
               ) : (
-                <div>
-                  <p style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--pine)', fontWeight: 700, marginBottom: 6 }}>
-                    <CheckCircle2 size={17} /> Paid{receipt ? ` — receipt ${receipt.receipt_no}` : ''}
-                  </p>
-                  {emailInfo && (
-                    <p className="muted" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
-                      <Mail size={14} />
-                      {emailInfo.sent || emailInfo.status === 'sent'
-                        ? 'A receipt email is on its way to your inbox.'
-                        : 'Receipt saved here in Rovyn — add RESEND_API_KEY to Rovyn/.env to email real receipts.'}
-                    </p>
-                  )}
+                /* The group checkout — Rovyn as merchant of record (docs/PAYMENTS-MOR-SPEC.md) */
+                <div style={{ padding: '18px 0 4px', borderTop: '1px solid var(--line-soft)' }}>
+                  <Checkout tripId={tripId} trip={trip} summary={data.checkout} onChanged={load} goTab={goTab}
+                            onSelfBook={() => chooseBooking('self_book')} busy={busy} />
                 </div>
               )
             ) : (
@@ -1085,18 +1097,18 @@ export default function FinalPlan() {
             <div style={{ marginTop: 26 }}>
               <p className="eyebrow" style={{ fontSize: 10.5, marginBottom: 10 }}>
                 <Users size={11} style={{ verticalAlign: -1, marginRight: 6 }} />
-                Group status — {trip.paid_count} of {trip.total_members} locked in
+                Group status — {trip.paid_count + (trip.authorized_count || 0)} of {trip.total_members} locked in
               </p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
                 {checks.map(c => (
                   <span key={c.user_id} style={{
                     display: 'inline-flex', alignItems: 'center', gap: 7, padding: '7px 14px',
-                    border: '1px solid', borderColor: c.paid ? 'var(--pine)' : 'var(--line)',
+                    border: '1px solid', borderColor: c.paid || ['authorized', 'nothing_due'].includes(c.payment_status) ? 'var(--pine)' : 'var(--line)',
                     borderRadius: 999, fontSize: 13, fontWeight: 600,
-                    color: c.paid ? 'var(--pine)' : 'var(--muted)',
+                    color: c.paid || ['authorized', 'nothing_due'].includes(c.payment_status) ? 'var(--pine)' : 'var(--muted)',
                   }}>
-                    {c.paid ? <CheckCircle2 size={13} /> : <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--line)' }} />}
-                    {c.name} · ${c.total.toLocaleString()}
+                    {c.paid || ['authorized', 'nothing_due'].includes(c.payment_status) ? <CheckCircle2 size={13} /> : <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--line)' }} />}
+                    {c.name} · ${c.total.toLocaleString()}{c.payment_status === 'authorized' ? ' · authorized' : c.payment_status === 'nothing_due' ? ' · nothing due' : ''}
                   </span>
                 ))}
               </div>
@@ -1200,7 +1212,9 @@ export default function FinalPlan() {
         {tab === 'overview' && <Overview />}
         {tab === 'itinerary' && <Itinerary />}
         {tab === 'travel' && <Travel />}
-        {tab === 'money' && <Money />}
+        {/* Money() is called, not mounted: a closure component would remount the
+            Checkout (and reset its form) on every 3 s poll */}
+        {tab === 'money' && Money()}
         {tab === 'bookings' && canBook && (
           <BookingsChecklist bookings={bookings} busy={busy} onConfirm={confirmBooking} onUnbook={unbookBooking} />
         )}

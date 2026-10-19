@@ -96,6 +96,26 @@ class BookingConfirmRequest(BaseModel):
     note: str = Field(default="", max_length=500)
 
 
+class TravelerProfileRequest(BaseModel):
+    # What airlines and hotels need to issue a ticket or hold a room — nothing more.
+    given_name: str = Field(min_length=1, max_length=80)
+    family_name: str = Field(min_length=1, max_length=80)
+    born_on: str = ""   # YYYY-MM-DD, required when a flight is booked for this traveler
+    gender: str = ""    # "m" | "f" (the airline schema)
+    title: str = ""     # "mr" | "ms" | "mrs" | "miss"
+    phone: str = ""     # E.164, e.g. +14155550123
+
+
+class ConfirmCheckoutRequest(BaseModel):
+    session_id: str = Field(min_length=1, max_length=200)
+
+
+class StartCheckoutRequest(BaseModel):
+    # Required when the locked check contains a non-refundable item that is
+    # booked only after the cards are captured.
+    acknowledge_non_refundable: bool = False
+
+
 class PostMediaItem(BaseModel):
     url: str          # /media/... path returned by the upload endpoint
     media_type: str   # "image" | "video"
