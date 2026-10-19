@@ -6,13 +6,25 @@
    {
     "id": "pas_1",
     "type": "adult"
+   },
+   {
+    "id": "pas_2",
+    "type": "adult"
+   },
+   {
+    "id": "pas_3",
+    "type": "adult"
+   },
+   {
+    "id": "pas_4",
+    "type": "adult"
    }
   ],
   "offers": [
    {
     "id": "off_dup_j01",
     "live_mode": false,
-    "total_amount": "378.00",
+    "total_amount": "1512.00",
     "total_currency": "USD",
     "expires_at": "2099-01-01T00:00:00Z",
     "owner": {
@@ -22,6 +34,18 @@
     "passengers": [
      {
       "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
       "type": "adult"
      }
     ],
@@ -282,7 +306,7 @@
    {
     "id": "off_zz_nonstop",
     "live_mode": false,
-    "total_amount": "870.00",
+    "total_amount": "3480.00",
     "total_currency": "USD",
     "expires_at": "2099-01-01T00:00:00Z",
     "owner": {
@@ -292,6 +316,18 @@
     "passengers": [
      {
       "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
       "type": "adult"
      }
     ],
@@ -408,7 +444,7 @@
    {
     "id": "off_dl_ams",
     "live_mode": false,
-    "total_amount": "705.00",
+    "total_amount": "2820.00",
     "total_currency": "USD",
     "expires_at": "2099-01-01T00:00:00Z",
     "owner": {
@@ -418,6 +454,18 @@
     "passengers": [
      {
       "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
       "type": "adult"
      }
     ],
