@@ -11,7 +11,7 @@ and mean it, and what makes the whole layer unit-testable with fixtures.
 Two layers, for stays and for flights alike:
 
   score_*        one candidate -> per-dimension scores, a match score, reasons
-  pick_*_lanes   many scored candidates -> the diverse subset the board shows,
+  pick_*         many scored candidates -> the diverse subset the board shows,
                  each stamped with the lane it won (Best match, Best value…)
 
 The suppliers (hotel_service, flight_service, duffel_service) build plain
@@ -19,10 +19,15 @@ The suppliers (hotel_service, flight_service, duffel_service) build plain
 sample menus go through the same functions, so lanes and reasons exist in
 every mode and a sample board reads like a live one. Dimensions a supplier
 cannot inform (no guest score, no coordinates, no facilities) are left OUT
-of the score rather than guessed at — a hotel is never marked down for data
-we simply don't have.
+of the score rather than guessed at — a hotel is never marked down (or up)
+for data we simply don't have.
+
+Lanes are truthful: a lane is stamped only when its claim holds against
+everything already on the board. When nothing free can honestly carry a
+lane, the lane is skipped rather than stretched.
 """
 import math
+import re
 import statistics
 from collections import Counter
 
@@ -30,8 +35,11 @@ from collections import Counter
 # Lodging budget band
 # ---------------------------------------------------------------------------
 
-MEALS_PER_DAY = 50        # the check's own meal estimate (ai_service.compute_costs)
-LOCAL_TRANSPORT_FLAT = 80  # the check's own local-transport estimate
+# The two flat estimates the final check uses (ai_service.compute_costs reads
+# them from here) — one definition, so the board's "fits your budget" and the
+# check do the same arithmetic.
+MEALS_PER_DAY = 50
+LOCAL_TRANSPORT_FLAT = 80
 BAND_LOW_SHARE = 0.45     # a stay's share of what is left after meals/transport…
 BAND_HIGH_SHARE = 0.65    # …leaving the rest for activities and events
 SPLURGE_MIN_PER_NIGHT = 25  # below this ceiling a budget is too small to call anything a splurge
@@ -81,6 +89,20 @@ def band_for_nights(band: dict | None, nights: int) -> dict | None:
             "nights": int(nights)}
 
 
+def splurge_allowed(prefs: dict | None) -> bool:
+    """A Splurge lane makes sense when there is a band, or when nobody gave a
+    budget at all. A budget too small to produce a band means every
+    well-rated place is already over it — calling one a splurge is noise."""
+    prefs = prefs or {}
+    if prefs.get("lodging_band"):
+        return True
+    ceiling = (prefs.get("budget_range") or {}).get("max") or 0
+    try:
+        return float(ceiling) <= 0
+    except (TypeError, ValueError):
+        return True
+
+
 # ---------------------------------------------------------------------------
 # Accommodation style — questionnaire vote vs property type
 # ---------------------------------------------------------------------------
@@ -123,8 +145,52 @@ VOTE_LABELS = {  # how a vote reads in a sentence
 
 # Property types that put a whole group under one roof
 HOME_TYPE_IDS = {201, 207, 213, 219, 220, 223, 228, 229, 230, 232}
-_HOME_WORDS = ("apartment", "villa", "holiday home", "cottage", "condo", "chalet",
-               "residence", "aparthotel", "country house", "loft", "house", "rental")
+_HOME_PHRASES = ("apartment", "villa", "holiday home", "cottage", "condo", "chalet",
+                 "residence", "aparthotel", "country house", "loft", "house", "rental")
+_NOT_HOME_PHRASES = ("guest house", "guesthouse", "b&b", "bed & breakfast", "car rental")
+
+# A property-type label from a NAME — for suppliers that carry no type field
+# (Duffel) and for the home-type test on labels. Word order matters: the
+# first phrase found wins, and a hotel's own suites stay a hotel.
+_NAME_LABEL_WORDS = (
+    ("hostel", "hostel"), ("apartments", "apartment"), ("apartment", "apartment"),
+    ("villa", "villa"), ("resort", "resort"), ("b&b", "bed & breakfast"),
+    ("bed & breakfast", "bed & breakfast"), ("bed and breakfast", "bed & breakfast"),
+    ("guest house", "guest house"), ("guesthouse", "guest house"), ("aparthotel", "aparthotel"),
+    ("residence", "residence"), ("loft", "apartment"), ("inn", "inn"), ("riad", "riad"),
+    ("hotel", "hotel"), ("palace", "hotel"),
+)
+
+
+def _phrase_re(phrase: str) -> re.Pattern:
+    """Whole-word/phrase matcher — 'spa' must not fire inside 'spacious'."""
+    return re.compile(r"(?<![a-z0-9])" + re.escape(phrase) + r"(?![a-z0-9])")
+
+
+_NAME_LABEL_RES = tuple((_phrase_re(word), label) for word, label in _NAME_LABEL_WORDS)
+_HOME_RES = tuple(_phrase_re(p) for p in _HOME_PHRASES)
+_NOT_HOME_RES = tuple(_phrase_re(p) for p in _NOT_HOME_PHRASES)
+
+
+def label_from_name(name: str) -> str:
+    """'Trastevere Loft Apartments' -> 'apartment'; 'Embassy Suites' -> 'hotel'."""
+    low = (name or "").casefold()
+    for pattern, label in _NAME_LABEL_RES:
+        if pattern.search(low):
+            return label
+    return "hotel"
+
+
+def star_label(label: str, stars) -> str:
+    """'hotel' + 4 -> '4-star hotel'; other labels and starless places unchanged."""
+    try:
+        stars_f = float(stars) if stars is not None else 0.0
+    except (TypeError, ValueError):
+        stars_f = 0.0
+    if label in ("hotel", "resort") and stars_f:
+        shown = int(stars_f) if stars_f.is_integer() else stars_f
+        return f"{shown}-star {label}"
+    return label
 
 
 def _match_vote(vote: str, type_id, label: str, stars) -> float:
@@ -153,6 +219,12 @@ def _match_vote(vote: str, type_id, label: str, stars) -> float:
     return match
 
 
+def is_core_match(vote: str, type_id=None, label: str = "", stars=None) -> bool:
+    """The exact rule the voted-style lane uses — so the search's top-up
+    decision counts the same hotels the lane will accept."""
+    return _match_vote(vote, type_id, label, stars) >= 1.0
+
+
 def style_affinity(votes: dict | None, type_id=None, label: str = "", stars=None) -> dict:
     """How well one property fits the group's accommodation votes.
 
@@ -179,10 +251,14 @@ def style_affinity(votes: dict | None, type_id=None, label: str = "", stars=None
 
 
 def is_home_type(type_id=None, label: str = "") -> bool:
+    """Whole-group homes: apartments, villas, holiday homes… A guest house is
+    not one, whatever its name says."""
     if type_id is not None:
         return type_id in HOME_TYPE_IDS
     lab = (label or "").casefold()
-    return any(w in lab for w in _HOME_WORDS)
+    if any(p.search(lab) for p in _NOT_HOME_RES):
+        return False
+    return any(p.search(lab) for p in _HOME_RES)
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +275,7 @@ _VIBE_WORDS = {
     "culture": ("historic", "palace", "heritage", "old town", "museum"),
     "shopping": ("shopping", "mall", "boutique"),
 }
+_VIBE_RES = {vibe: tuple((w, _phrase_re(w)) for w in words) for vibe, words in _VIBE_WORDS.items()}
 _CENTRAL_VIBES = ("nightlife", "food", "culture", "shopping")
 _FAR_OK_VIBES = ("beach", "nature", "relaxation")
 _VIBE_PHRASE = {
@@ -213,20 +290,25 @@ _VIBE_PHRASE = {
 }
 
 
+def _vibe_hits(vibe: str, text: str) -> list[str]:
+    """Whole words/phrases only — 'spa' inside 'spacious' and 'pool' inside
+    'Liverpool' are not facilities."""
+    return [w for w, pattern in _VIBE_RES.get(vibe, ()) if pattern.search(text)]
+
+
 def _vibe(record: dict, top_vibes: list[str]) -> tuple[float | None, dict | None]:
     """(score, reason) — None score when there is nothing to judge from.
-    Only real property content counts: facilities and the description. A
-    hotel NAME containing "Spa" is marketing, not a facility."""
+    Only real property content counts: the facilities first, the description
+    second. A hotel NAME containing "Spa" is marketing, not a facility."""
     vibes = [v for v in (top_vibes or [])[:2] if v]
-    facilities = [str(f) for f in (record.get("facilities") or []) if f]
-    description = str(record.get("description") or "")
+    facilities = " ".join(str(f) for f in (record.get("facilities") or []) if f).casefold()
+    description = str(record.get("description") or "").casefold()
     distance = record.get("distance_km")
     if not vibes or not (facilities or description):
         return None, None
-    haystack = " ".join(facilities + [description]).casefold()
     for rank, vibe in enumerate(vibes):
         strength = 1.0 if rank == 0 else 0.8
-        hits = [w for w in _VIBE_WORDS.get(vibe, ()) if w in haystack]
+        hits = _vibe_hits(vibe, facilities) or _vibe_hits(vibe, description)
         if hits:
             shown = " & ".join(h.capitalize() for h in dict.fromkeys(hits[:2]))
             return strength, {"kind": "vibe", "text": f"{shown} — {_VIBE_PHRASE[vibe]}",
@@ -259,7 +341,9 @@ def distance_km(lat1, lng1, lat2, lng2) -> float | None:
 STAY_WEIGHTS = {"style": 0.35, "budget": 0.25, "rating": 0.20, "location": 0.10, "vibe": 0.10}
 MAX_REASONS = 4
 MIN_KNOWN_DIMENSIONS = 3   # fewer and a match score would be mostly guesswork
+MIN_REVIEWS_TO_QUOTE = 20  # a printed guest score needs a real sample behind it
 ESTIMATED_SUPPLIERS = ("ai", "sample")
+_NO_COUNT_CONFIDENCE = 0.4  # ≈ 15 reviews' worth — never more than a real sample earns
 
 
 def _money(n) -> str:
@@ -277,12 +361,15 @@ def _budget(per_person_total, nights: int, band: dict | None) -> tuple[float | N
     total = float(per_person_total)
     nights_txt = f"{int(nights)} night{'s' if int(nights) != 1 else ''}"
     shown = _money(total)
-    if total < low:
+    # A floor of $0 (everyone left the floor low, or a long trip ate it) is
+    # not a number worth printing — phrase the verdict against the ceiling
+    span = f"{_money(low)}–{_money(high)}" if low > 0 else _money(high)
+    if low > 0 and total < low:
         return 0.85, {"kind": "budget", "short": "Under budget",
-                      "text": f"{shown} per person for {nights_txt} — under your {_money(low)}–{_money(high)} stay budget"}
+                      "text": f"{shown} per person for {nights_txt} — under your {span} stay budget"}
     if total <= high:
         return 1.0, {"kind": "budget", "short": "In budget",
-                     "text": f"{shown} per person for {nights_txt} — inside your {_money(low)}–{_money(high)} stay budget"}
+                     "text": f"{shown} per person for {nights_txt} — inside your {span} stay budget"}
     ratio = total / high
     score = max(0.0, 1.0 - (ratio - 1.0) / 0.6)
     over = _money(total - high)
@@ -294,17 +381,24 @@ def _budget(per_person_total, nights: int, band: dict | None) -> tuple[float | N
 
 
 def _rating(rating10, count) -> tuple[float | None, dict | None]:
+    """A guest score weighs by how many guests gave it. No count (or a zero
+    count) is treated as a small sample — never a reason to rank a place
+    above one with real reviews — and earns no printed line."""
     if rating10 is None:
         return None, None
     r = float(rating10)
-    n = int(count or 0)
-    confidence = min(1.0, math.log10(n + 1) / 3) if n else 0.6
+    try:
+        n = int(count or 0)
+    except (TypeError, ValueError):
+        n = 0
+    confidence = min(1.0, math.log10(n + 1) / 3) if n > 0 else _NO_COUNT_CONFIDENCE
     score = max(0.0, min(1.0, r / 10)) * confidence
     shown = f"{r:.1f}/10"
+    if n < MIN_REVIEWS_TO_QUOTE:
+        return score, None
     if r >= 9.0:
-        text = f"Top-rated: {shown}" + (f" from {n:,} guest reviews" if n >= 20 else "")
-        return score, {"kind": "rating", "text": text, "short": shown}
-    if r >= 8.0 and n >= 20:
+        return score, {"kind": "rating", "text": f"Top-rated: {shown} from {n:,} guest reviews", "short": shown}
+    if r >= 8.0:
         return score, {"kind": "rating", "text": f"{shown} from {n:,} guest reviews", "short": shown}
     return score, None
 
@@ -336,7 +430,7 @@ def _estimated(reason: dict | None, supplier: str) -> dict | None:
     that prints one."""
     if not reason or supplier not in ESTIMATED_SUPPLIERS:
         return reason
-    if any(ch.isdigit() for ch in reason["text"]):
+    if any(ch.isdigit() for ch in reason["text"]) and not reason["text"].startswith("est. "):
         return dict(reason, text=f"est. {reason['text']}")
     return reason
 
@@ -441,22 +535,36 @@ def stay_target_for(base: int, votes: dict | None) -> int:
     return max(int(base or 0), voted + 3)
 
 
+def splurge_reason(item: dict, band: dict | None, supplier: str = "liteapi") -> dict | None:
+    """The numeric line a Splurge card leads with (only when a band exists)."""
+    price = item.get("per_person_total")
+    if price is None or not band or not band.get("high") or price <= band["high"]:
+        return None
+    return _estimated({"kind": "budget", "short": "Splurge",
+                       "text": f"{_money(price - band['high'])} per person over the group's ceiling"}, supplier)
+
+
 def pick_stay_lanes(scored: list[dict], target: int, votes: dict | None = None,
-                    band: dict | None = None, best_match_k: int | None = None) -> list[dict]:
+                    band: dict | None = None, best_match_k: int | None = None,
+                    allow_splurge: bool = True, supplier: str = "liteapi") -> list[dict]:
     """Choose up to `target` records, each stamped with the lane it won.
 
     Items need: key, rank_score, per_person_total, rating10, review_count,
-    distance_km, style_vote, style_core. Lanes are claimed in the order of
-    STAY_LANES (the top Best match first, then one hotel per voted style,
-    then value / rating / the remaining Best matches / location / splurge /
-    budget, then "Also fits" to fill); a record is never claimed twice.
-    Display order is claim order. Returns copies with "lane" set."""
+    distance_km, style_vote, style_core, reasons. Lanes are claimed in the
+    order of STAY_LANES (the top Best match first, then one hotel per voted
+    style, then value / rating / the remaining Best matches / location /
+    splurge / budget, then "Also fits" to fill); a record is never claimed
+    twice, and a lane whose claim would not hold against the board so far
+    (a "Budget pick" pricier than a stay already shown, a "Splurge" cheaper
+    than one) is skipped. Display order is claim order. Returns copies with
+    "lane" set and, for a Splurge, the over-ceiling line leading its reasons."""
     target = max(int(target or 0), 0)
     if not scored or not target:
         return []
     k = best_match_k if best_match_k is not None else (4 if target >= 10 else 2)
     by_key = {s["key"]: s for s in scored}
     taken: dict = {}  # key -> lane, insertion-ordered = display order
+    reasons_override: dict = {}  # key -> reasons rewritten by a lane (Splurge's lead line)
 
     def free():
         return [s for s in scored if s["key"] not in taken]
@@ -475,6 +583,9 @@ def pick_stay_lanes(scored: list[dict], target: int, votes: dict | None = None,
     def reviews(s):
         return int(s.get("review_count") or 0)
 
+    def taken_prices():
+        return [price(by_key[key]) for key in taken if price(by_key[key]) != float("inf")]
+
     # 1. The single best match
     top = by_rank(free())
     claim("Best match", top[0] if top else None)
@@ -489,10 +600,11 @@ def pick_stay_lanes(scored: list[dict], target: int, votes: dict | None = None,
             claim("Your voted style", by_rank(pool)[0])
             covered.add(vote)
     # 3. Best value — the cheapest place with a trustworthy guest score
-    decent = [s for s in free() if s.get("rating10") is not None and s["rating10"] >= 7.5 and reviews(s) >= 20]
+    decent = [s for s in free() if s.get("rating10") is not None and s["rating10"] >= 7.5
+              and reviews(s) >= MIN_REVIEWS_TO_QUOTE]
     claim("Best value", min(decent, key=lambda s: (price(s), -(s.get("rank_score") or 0))) if decent else None)
     # 4. Top rated
-    rated = [s for s in free() if s.get("rating10") is not None and reviews(s) >= 20]
+    rated = [s for s in free() if s.get("rating10") is not None and reviews(s) >= MIN_REVIEWS_TO_QUOTE]
     claim("Top rated", max(rated, key=lambda s: (s["rating10"], reviews(s), s.get("rank_score") or 0)) if rated else None)
     # 5. The remaining best matches
     for item in by_rank(free())[:max(k - 1, 0)]:
@@ -502,33 +614,35 @@ def pick_stay_lanes(scored: list[dict], target: int, votes: dict | None = None,
     if len(with_distance) * 2 >= len(scored):
         near = [s for s in free() if s.get("distance_km") is not None]
         claim("Closest to the center", min(near, key=lambda s: (s["distance_km"], -(s.get("rank_score") or 0))) if near else None)
-    # 7. Splurge — the priciest well-rated place, within reason
-    if band and band.get("high"):
-        ceiling = band["high"]
-        fancy = [s for s in free() if (s.get("rating10") or 0) >= 8.5
-                 and ceiling < price(s) <= 2 * ceiling]
-    else:
-        fancy = [s for s in free() if (s.get("rating10") or 0) >= 8.5 and price(s) != float("inf")]
-    claim("Splurge", max(fancy, key=lambda s: (price(s), s.get("rank_score") or 0)) if fancy else None)
-    # 8. Budget pick — the cheapest, full stop
+    # 7. Splurge — pricier than everything shown so far and than the typical
+    #    price, well rated, and (with a band) over the ceiling within reason
+    if allow_splurge:
+        known_prices = [price(s) for s in scored if price(s) != float("inf")]
+        floor_price = max([statistics.median(known_prices)] + taken_prices()) if known_prices else float("inf")
+        fancy = [s for s in free() if (s.get("rating10") or 0) >= 8.5 and price(s) > floor_price]
+        if band and band.get("high"):
+            fancy = [s for s in fancy if band["high"] < price(s) <= 2 * band["high"]]
+        pick = max(fancy, key=lambda s: (price(s), s.get("rank_score") or 0)) if fancy else None
+        if pick is not None:
+            lead = splurge_reason(pick, band, supplier)
+            if lead:
+                others = [r for r in (pick.get("reasons") or []) if r.get("kind") != "budget"]
+                reasons_override[pick["key"]] = [lead] + others[:MAX_REASONS - 1]
+            claim("Splurge", pick)
+    # 8. Budget pick — only when it really is the cheapest thing on the board
     rest = free()
-    claim("Budget pick", min(rest, key=lambda s: (price(s), -(s.get("rank_score") or 0))) if rest else None)
+    cheapest = min(rest, key=lambda s: (price(s), -(s.get("rank_score") or 0))) if rest else None
+    if cheapest is not None and price(cheapest) != float("inf") \
+            and price(cheapest) <= min(taken_prices(), default=float("inf")):
+        claim("Budget pick", cheapest)
     # 9. Also fits — the next-best scores until the target is reached
     for item in by_rank(free()):
         if len(taken) >= target:
             break
         claim(FILL_LANE, item)
 
-    return [dict(by_key[key], lane=lane) for key, lane in taken.items()]
-
-
-def splurge_reason(item: dict, band: dict | None) -> dict | None:
-    """The numeric line a Splurge card leads with."""
-    price = item.get("per_person_total")
-    if price is None or not band or not band.get("high") or price <= band["high"]:
-        return None
-    return {"kind": "budget", "short": "Splurge",
-            "text": f"{_money(price - band['high'])} per person over the group's ceiling"}
+    return [dict(by_key[key], lane=lane, **({"reasons": reasons_override[key]} if key in reasons_override else {}))
+            for key, lane in taken.items()]
 
 
 # ---------------------------------------------------------------------------
@@ -549,6 +663,7 @@ _PACE_ROLE_ORDER = {
                  "bags", "late_return", "early_arrival", "one_airline"),
 }
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+SIMILAR_MINUTES = 20  # within this door-to-door and 2 % of price, two itineraries read as one
 
 
 def flight_role_order(pace: str | None) -> tuple[str, ...]:
@@ -594,12 +709,24 @@ def _fmt_hhmm(minutes: int | None) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
-def _similar(a: dict, b: dict) -> bool:
+def similar_itineraries(a: dict, b: dict) -> bool:
     """Near-identical price and door-to-door time read as a duplicate."""
     if a.get("key") and a.get("key") == b.get("key"):
         return True
     return (abs(a["price"] - b["price"]) < max(10, 0.02 * b["price"])
-            and abs((a.get("minutes") or 0) - (b.get("minutes") or 0)) <= 20)
+            and abs((a.get("minutes") or 0) - (b.get("minutes") or 0)) <= SIMILAR_MINUTES)
+
+
+_similar = similar_itineraries  # the private name the first tests used
+
+
+def _pool_stats(facts: list[dict]) -> dict:
+    prices = [float(f.get("price") or 0) for f in facts]
+    minutes_all = [int(f.get("minutes") or 0) for f in facts]
+    cheapest = min(range(len(facts)), key=lambda i: (prices[i], minutes_all[i]))
+    return {"prices": prices, "minutes": minutes_all, "floor_price": min(prices),
+            "floor_minutes": min(minutes_all), "median_price": statistics.median(prices),
+            "cheapest_minutes": minutes_all[cheapest]}
 
 
 def flight_reasons(role: str | None, f: dict, floor_price: float, cheapest_minutes: int,
@@ -676,17 +803,17 @@ def pick_flight_roles(facts: list[dict], limit: int, pace: str | None = None,
     Every role ranks its qualifying itineraries and takes the FIRST one that
     is not already on the board and not a near-duplicate of one that is — a
     role is never lost because its favourite looked like the cheapest pick.
-    Returns [{"index", "role", "lane", "reasons", "match_score"}] in claim
-    order."""
+    Absolute claims stay true against the board: "Fastest" only goes to an
+    itinerary at least as fast as everything already shown (within the
+    duplicate tolerance), "Best balance" never to one that is both pricier
+    and slower than an existing pick. Returns [{"index", "role", "lane",
+    "reasons", "match_score"}] in claim order."""
     if not facts or not limit:
         return []
-    prices = [float(f.get("price") or 0) for f in facts]
-    minutes_all = [int(f.get("minutes") or 0) for f in facts]
-    floor_price = min(prices)
-    floor_minutes = min(minutes_all)
-    median_price = statistics.median(prices)
-    cheapest = min(range(len(facts)), key=lambda i: (prices[i], minutes_all[i]))
-    cheapest_minutes = minutes_all[cheapest]
+    stats = _pool_stats(facts)
+    prices, minutes_all = stats["prices"], stats["minutes"]
+    floor_price, floor_minutes = stats["floor_price"], stats["floor_minutes"]
+    median_price, cheapest_minutes = stats["median_price"], stats["cheapest_minutes"]
 
     picks: list[dict] = []
     taken_idx: set[int] = set()
@@ -698,7 +825,7 @@ def pick_flight_roles(facts: list[dict], limit: int, pace: str | None = None,
             if idx in taken_idx:
                 continue
             f = facts[idx]
-            if any(_similar(f, facts[p["index"]]) for p in picks):
+            if any(similar_itineraries(f, facts[p["index"]]) for p in picks):
                 continue
             taken_idx.add(idx)
             picks.append({
@@ -716,6 +843,11 @@ def pick_flight_roles(facts: list[dict], limit: int, pace: str | None = None,
     def by_price(idxs):
         return sorted(idxs, key=lambda i: (prices[i], minutes_all[i]))
 
+    def dominated(i: int) -> bool:
+        """Pricier AND slower than something already on the board."""
+        return any(prices[i] >= prices[p["index"]] and minutes_all[i] >= minutes_all[p["index"]]
+                   for p in picks)
+
     f = facts
     for role in flight_role_order(pace):
         if role == "cheapest":
@@ -723,10 +855,14 @@ def pick_flight_roles(facts: list[dict], limit: int, pace: str | None = None,
         elif role == "nonstop":
             claim(role, by_price([i for i in free() if f[i].get("stops") == 0]))
         elif role == "fastest":
-            claim(role, sorted(free(), key=lambda i: (minutes_all[i], prices[i])))
+            fastest_shown = min((minutes_all[p["index"]] for p in picks), default=float("inf"))
+            idxs = [i for i in free()
+                    if minutes_all[i] <= floor_minutes + SIMILAR_MINUTES and minutes_all[i] <= fastest_shown]
+            claim(role, sorted(idxs, key=lambda i: (minutes_all[i], prices[i])))
         elif role == "balanced":
             fp, fm = floor_price or 1, floor_minutes or 1
-            claim(role, sorted(free(), key=lambda i: prices[i] / fp + minutes_all[i] / fm))
+            idxs = [i for i in free() if not dominated(i)]
+            claim(role, sorted(idxs, key=lambda i: prices[i] / fp + minutes_all[i] / fm))
         elif role == "bags":
             claim(role, by_price([i for i in free() if f[i].get("checked_bag")]))
         elif role == "early_arrival":
@@ -748,6 +884,32 @@ def pick_flight_roles(facts: list[dict], limit: int, pace: str | None = None,
     return picks
 
 
+def explain_fixed_roles(facts: list[dict], roles: list[str | None],
+                        supplier: str = "liteapi") -> list[dict]:
+    """Reasons and scores for itineraries whose roles are already decided
+    (the open-jaw pairing builds one combined trip per role). Judged against
+    each other: floor, median and cheapest-minutes come from this pool, and
+    near-duplicates of an earlier entry are dropped (index None)."""
+    if not facts:
+        return []
+    stats = _pool_stats(facts)
+    out: list[dict] = []
+    kept: list[dict] = []
+    for f, role in zip(facts, roles):
+        if any(similar_itineraries(f, g) for g in kept):
+            out.append(None)
+            continue
+        kept.append(f)
+        out.append({
+            "role": role,
+            "lane": ROLE_LANES.get(role) if role else None,
+            "reasons": flight_reasons(role, f, stats["floor_price"], stats["cheapest_minutes"],
+                                      stats["median_price"], supplier),
+            "match_score": flight_match_score(f, stats["floor_price"], stats["floor_minutes"]),
+        })
+    return out
+
+
 def label_flights(facts: list[dict], pace: str | None = None, supplier: str = "ai") -> list[dict]:
     """Role/lane/reasons/score for EVERY itinerary of an already-fixed menu
     (the AI and sample flights): roles are claimed as usual; the rest get no
@@ -755,11 +917,7 @@ def label_flights(facts: list[dict], pace: str | None = None, supplier: str = "a
     if not facts:
         return []
     picks = {p["index"]: p for p in pick_flight_roles(facts, len(facts), pace, supplier)}
-    prices = [float(f.get("price") or 0) for f in facts]
-    minutes_all = [int(f.get("minutes") or 0) for f in facts]
-    floor_price, floor_minutes = min(prices), min(minutes_all)
-    median_price = statistics.median(prices)
-    cheapest_minutes = minutes_all[min(range(len(facts)), key=lambda i: (prices[i], minutes_all[i]))]
+    stats = _pool_stats(facts)
     out = []
     for i, f in enumerate(facts):
         p = picks.get(i)
@@ -768,8 +926,9 @@ def label_flights(facts: list[dict], pace: str | None = None, supplier: str = "a
                         "match_score": p["match_score"]})
         else:
             out.append({"role": None, "lane": None,
-                        "reasons": flight_reasons(None, f, floor_price, cheapest_minutes, median_price, supplier),
-                        "match_score": flight_match_score(f, floor_price, floor_minutes)})
+                        "reasons": flight_reasons(None, f, stats["floor_price"], stats["cheapest_minutes"],
+                                                  stats["median_price"], supplier),
+                        "match_score": flight_match_score(f, stats["floor_price"], stats["floor_minutes"])})
     return out
 
 
@@ -850,7 +1009,8 @@ def annotate_stays(stays: list[dict], prefs: dict | None, nights: int, supplier:
         chosen = chosen[:target] if target else chosen
     else:
         chosen = pick_stay_lanes(records, target or len(records), prefs.get("accommodation_votes"),
-                                 prefs.get("lodging_band"))
+                                 prefs.get("lodging_band"), allow_splurge=splurge_allowed(prefs),
+                                 supplier=supplier)
     out = []
     for rec in chosen:
         s = dict(rec["_stay"])

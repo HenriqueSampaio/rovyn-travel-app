@@ -17,20 +17,29 @@ supplier a row came from:
                      stays carry their own price and content but no LiteAPI
                      rates, so they are never routed to rooming or booking.
 
+Airport resolution still comes from LiteAPI's airports endpoint, so Duffel
+widens a board that has a LiteAPI key; on its own it is not searched.
+
 Best-effort like every live integration here: any failure returns []/None and
 the board falls back to what LiteAPI (or the AI menu) produced; without a
-token no request is ever made. Booking (hold orders, quotes) is the
-payments work — intentionally not wired here.
+token no request is ever made. A 429 is retried once after Duffel's
+ratelimit-reset, a 5xx once after a short pause — both only when the wait
+fits the call's own timeout. Booking (hold orders, quotes) is the payments
+work — intentionally not wired here.
 """
 import json
 import os
 import re
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from email.utils import parsedate_to_datetime
 
 import certifi
+
+from backend.services import option_ranking as ranking
 
 _SSL_CTX = ssl.create_default_context(cafile=certifi.where())
 _BASE = "https://api.duffel.com"
@@ -41,6 +50,7 @@ _OFFER_VERIFY_TIMEOUT = 10
 _STAYS_HTTP_TIMEOUT = 20
 _STAYS_RADIUS_KM = 5
 _MAX_PASSENGERS = 9
+_RETRY_PAUSE = 1.5
 
 
 def duffel_available() -> bool:
@@ -59,26 +69,53 @@ def duffel_stays_enabled() -> bool:
     return duffel_available() and os.environ.get("DUFFEL_STAYS", "").strip() in ("1", "true", "yes")
 
 
+def _retry_pause(exc: urllib.error.HTTPError) -> float:
+    """How long Duffel asked us to wait (ratelimit-reset is an HTTP date),
+    else a short default."""
+    reset = (exc.headers or {}).get("ratelimit-reset") if exc.headers else None
+    if reset:
+        try:
+            wait = (parsedate_to_datetime(reset) - parsedate_to_datetime(
+                exc.headers.get("date") or reset)).total_seconds()
+            if wait > 0:
+                return wait
+        except (TypeError, ValueError):
+            pass
+    return _RETRY_PAUSE
+
+
 def _request(path: str, payload: dict | None = None, params: dict | None = None,
              timeout: int = 30) -> dict:
-    """One Duffel call. Bodies are wrapped in {"data": ...} as the API expects."""
+    """One Duffel call. Bodies are wrapped in {"data": ...} as the API
+    expects. A 429 or 5xx is retried once when the pause fits the timeout."""
     url = _BASE + path
     if params:
         url += "?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(
-        url,
-        data=json.dumps({"data": payload}).encode() if payload is not None else None,
-        headers={
-            "Authorization": f"Bearer {os.environ.get('DUFFEL_ACCESS_TOKEN', '')}",
-            "Duffel-Version": _VERSION,
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "Rovyn/1.0 (group trip planner)",
-        },
-        method="POST" if payload is not None else "GET",
-    )
-    with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as res:
-        return json.loads(res.read().decode())
+    started = time.monotonic()
+    for attempt in range(2):
+        req = urllib.request.Request(
+            url,
+            data=json.dumps({"data": payload}).encode() if payload is not None else None,
+            headers={
+                "Authorization": f"Bearer {os.environ.get('DUFFEL_ACCESS_TOKEN', '')}",
+                "Duffel-Version": _VERSION,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "Rovyn/1.0 (group trip planner)",
+            },
+            method="POST" if payload is not None else "GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as res:
+                return json.loads(res.read().decode())
+        except urllib.error.HTTPError as exc:
+            if attempt == 0 and exc.code in (429, 502, 503, 504):
+                pause = _retry_pause(exc) if exc.code == 429 else _RETRY_PAUSE
+                if time.monotonic() - started + pause < timeout:
+                    time.sleep(pause)
+                    continue
+            raise
+    raise RuntimeError("unreachable")  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------
@@ -241,37 +278,11 @@ def get_offer(offer_id: str) -> dict | None:
 # Stays
 # ---------------------------------------------------------------------------
 
-_TYPE_WORDS = (  # a label from the name — Duffel has no property-type field
-    ("hostel", "hostel"), ("apartments", "apartment"), ("apartment", "apartment"),
-    ("villa", "villa"), ("resort", "resort"), ("b&b", "bed & breakfast"),
-    ("bed & breakfast", "bed & breakfast"), ("guest house", "guest house"),
-    ("guesthouse", "guest house"), ("aparthotel", "aparthotel"), ("residence", "residence"),
-    ("loft", "apartment"), ("suites", "aparthotel"), ("inn", "inn"), ("riad", "riad"),
-    ("palace", "hotel"), ("hotel", "hotel"),
-)
-
-
-def _type_label(name: str, stars) -> str:
-    lab = "hotel"
-    low = (name or "").casefold()
-    for word, label in _TYPE_WORDS:
-        if word in low:
-            lab = label
-            break
-    try:
-        stars_f = float(stars) if stars is not None else 0.0
-    except (TypeError, ValueError):
-        stars_f = 0.0
-    if lab in ("hotel", "resort") and stars_f:
-        shown = int(stars_f) if stars_f.is_integer() else stars_f
-        return f"{shown}-star {lab}"
-    return lab
-
-
 def _result_to_record(result: dict) -> dict | None:
     """One Duffel stays search result -> a provider-neutral stay record,
     priced from the search itself (cheapest rate for every room requested).
-    Non-USD results are dropped: a price must compare like for like."""
+    Non-USD results are dropped: a price must compare like for like.
+    Duffel's review_score is already out of 10 (1.0–10.0 per its docs)."""
     acc = result.get("accommodation") or {}
     name = (acc.get("name") or "").strip()
     if not name:
@@ -286,12 +297,10 @@ def _result_to_record(result: dict) -> dict | None:
     loc = acc.get("location") or {}
     coords = loc.get("geographic_coordinates") or {}
     addr = loc.get("address") or {}
-    score = acc.get("review_score")
     rating10 = None
-    if score is not None:
+    if acc.get("review_score") is not None:
         try:
-            s = float(score)
-            rating10 = round(s * 2, 1) if s <= 5 else round(s, 1)
+            rating10 = round(max(0.0, min(10.0, float(acc["review_score"]))), 1)
         except (TypeError, ValueError):
             rating10 = None
     photos = [p.get("url") for p in (acc.get("photos") or []) if p.get("url")]
@@ -303,7 +312,7 @@ def _result_to_record(result: dict) -> dict | None:
         "key": f"duffel:{acc.get('id') or result.get('id') or name}",
         "name": name,
         "type_id": None,
-        "type_label": _type_label(name, stars),
+        "type_label": ranking.star_label(ranking.label_from_name(name), stars),
         "stars": stars,
         "rating10": rating10,
         "review_count": acc.get("review_count"),
