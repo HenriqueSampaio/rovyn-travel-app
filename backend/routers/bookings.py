@@ -11,6 +11,11 @@ event tickets).
 The checklist is RECONCILED with the plan on every read: plan revisions update
 titles/links, remove unbooked items that left the plan, and flag already-booked
 items that left the plan as stale ("cancel or keep?") instead of hiding them.
+
+It shares its items with the group checkout (services/booking_service.py),
+so the two must never book the same thing twice: an item the open round is
+charging cannot be recorded as booked by hand, and an item a traveler already
+booked here is never charged by Rovyn.
 """
 import html
 import json
@@ -22,7 +27,7 @@ from backend.auth import get_current_user
 from backend.db import fetch_many, get_conn
 from backend.models import BookingConfirmRequest
 from backend.routers.trips import _member_trip
-from backend.services import email_service
+from backend.services import booking_service, email_service
 from backend.services.checklist import REAL_STATUSES, sync_checklist
 
 router = APIRouter()
@@ -54,6 +59,8 @@ def list_bookings(trip_id: str, user: dict = Depends(get_current_user)):
             ("SELECT data FROM questionnaires WHERE trip_id = ? AND user_id = ?", (trip_id, user["id"])),
         ])
         my_q = my_q_rows[0] if my_q_rows else None
+        # What the open group checkout is buying — the page offers no "Mark as booked" for these.
+        charged_keys = booking_service.charged_item_keys(conn, trip_id)
 
     my_city = ""
     if my_q:
@@ -87,6 +94,7 @@ def list_bookings(trip_id: str, user: dict = Depends(get_current_user)):
         "total": len(active),
         "booked": sum(1 for i in active if i["status"] in REAL_STATUSES),
         "my_departure_city": my_city,
+        "charged_keys": charged_keys,
     }
 
 
@@ -106,6 +114,11 @@ def confirm_booking(trip_id: str, item_key: str, req: BookingConfirmRequest,
             raise HTTPException(status_code=404, detail="That checklist item doesn't exist.")
         if row["provider"] != "self":
             raise HTTPException(status_code=409, detail="Rovyn booked this item — cancel it from the checkout instead of editing it by hand.")
+        if item_key in booking_service.charged_item_keys(conn, trip_id):
+            # Recording it would let Rovyn buy the same item a second time when the round settles.
+            raise HTTPException(status_code=409, detail="Rovyn is booking this in the group checkout — recording your own "
+                                                        "booking too would book it twice. To book it yourself instead, the "
+                                                        "leader must abandon the group checkout first.")
         conn.execute(
             """UPDATE bookings SET status = 'booked', confirmation = ?, note = ?,
                booked_by = ?, booked_at = ? WHERE trip_id = ? AND item_key = ?""",

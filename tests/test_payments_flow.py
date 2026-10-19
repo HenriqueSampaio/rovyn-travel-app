@@ -1657,4 +1657,201 @@ ok("a rise of ≤ $1 per person proceeds and captures no more than what was auth
    state["settlement"]["status"] == "booked" and sorted(int(c[1]) for c in STRIPE["captures"]) == [70208, 76208, 76208], STRIPE["captures"])
 ok("no unexpected outbound calls", not CALLS["unexpected"], CALLS["unexpected"])
 
+# ===========================================================================
+# 19. The plan page reads the server's lock, not who has "paid"
+# ===========================================================================
+print("plan lock read model:")
+set_mode(); reset_fakes()
+TRIP, (ana, bruno, carla) = make_trip()
+for u in (ana, bruno, carla):
+    profile(u, flight=False)
+plan_res = client.get(f"/trips/{TRIP}/plan", headers=bruno["H"]).json()
+ok("with no checkout the plan reads unlocked", plan_res["plan_locked"] is False)
+res = client.post(f"/trips/{TRIP}/checkout/lock", headers=bruno["H"])
+plan_res = client.get(f"/trips/{TRIP}/plan", headers=bruno["H"]).json()
+edit = client.post(f"/trips/{TRIP}/edit", headers=bruno["H"], json={"request": "swap the hotel"})
+ok("a price lock with nobody paid yet reads locked — exactly when the edit endpoints refuse",
+   res.status_code == 200 and plan_res["plan_locked"] is True and not any(c["paid"] for c in plan_res["checks"])
+   and edit.status_code == 400 and "locked" in edit.json()["detail"], (res.text, edit.text))
+client.post(f"/trips/{TRIP}/checkout/session", headers=ana["H"], json={})
+plan_res = client.get(f"/trips/{TRIP}/plan", headers=bruno["H"]).json()
+ok("an authorized share (never 'paid') keeps it locked", plan_res["plan_locked"] is True
+   and next(c for c in plan_res["checks"] if c["user_id"] == ana["id"])["paid"] is False)
+client.post(f"/trips/{TRIP}/checkout/abandon", headers=ana["H"])
+plan_res = client.get(f"/trips/{TRIP}/plan", headers=bruno["H"]).json()
+ok("after the leader abandons the checkout the plan reads unlocked again", plan_res["plan_locked"] is False and not locked())
+
+# ===========================================================================
+# 20. The group deadline follows whoever is still committed
+# ===========================================================================
+print("deadline follows commitments:")
+set_mode(stripe=True); reset_fakes()
+TRIP, (ana, bruno, carla) = make_trip()
+for u in (ana, bruno, carla):
+    profile(u, flight=False)
+sid_a, pi_a = authorize(ana)
+old_deadline = settlement_row()["deadline"]
+ok("the first authorization starts the deadline", old_deadline is not None)
+res = client.post(f"/trips/{TRIP}/checkout/release", headers=ana["H"])
+st = settlement_row()
+ok("releasing the only authorization clears it — no 'everyone must pay by' over an empty round",
+   res.status_code == 200 and STRIPE["intents"][pi_a]["status"] == "canceled" and st["deadline"] is None
+   and checkout(ana)["settlement"]["deadline"] is None and st["status"] == "collecting", st["deadline"])
+real_now_dt = booking_service._now_dt
+booking_service._now_dt = lambda: datetime.fromisoformat(old_deadline) + timedelta(hours=1)
+try:
+    expired = booking_service.expire_if_due(TRIP)
+    res = client.post(f"/trips/{TRIP}/checkout/lock", headers=bruno["H"])
+    swept = TRIP in booking_service.overdue_open_trip_ids()
+finally:
+    booking_service._now_dt = real_now_dt
+st = settlement_row()
+ok("after the old deadline passes the empty round is still collecting (same round, locked prices kept)",
+   expired is False and not swept and res.status_code == 200 and st["status"] == "collecting" and st["round"] == 1, (st["status"], st["round"]))
+with db.get_conn() as conn:  # a deadline left behind before releases recomputed it
+    conn.execute("UPDATE settlements SET deadline = '2000-01-01T00:00:00+00:00' WHERE id = ?", (st["id"],))
+reconciler.reconcile_all()
+st = settlement_row()
+ok("a stale deadline on a round nobody is committed to is cleared, never used to fail it",
+   st["status"] == "collecting" and st["round"] == 1 and st["deadline"] is None, (st["status"], st["deadline"]))
+sid_b, pi_b = authorize(bruno)
+sid_c, pi_c = authorize(carla)
+deadline_bc = settlement_row()["deadline"]
+client.post(f"/trips/{TRIP}/checkout/release", headers=bruno["H"])
+st = settlement_row()
+ok("one of two releasing keeps a deadline for the one still committed", deadline_bc is not None and st["deadline"] is not None
+   and st["status"] == "collecting", st["deadline"])
+res = signed({"id": "evt_dl_lost", "type": "payment_intent.canceled", "livemode": False,
+              "data": {"object": {**STRIPE["intents"][pi_c], "status": "canceled", "cancellation_reason": "automatic"}}})
+ok("a hold Stripe drops (the last commitment) clears the deadline too",
+   res.status_code == 200 and rows("SELECT status FROM payment_attempts WHERE payment_intent_id = ?", pi_c)[0]["status"] == "failed"
+   and settlement_row()["deadline"] is None, res.text)
+set_mode(stripe=True, hotel=True, flights=True); reset_fakes()
+TRIP, (ana, bruno, carla) = make_trip(plan=make_plan(stay_hotel=None))
+profile(carla, flight=False)
+res = client.post(f"/trips/{TRIP}/checkout/session", headers=carla["H"], json={})
+ok("a $0 commitment starts the clock as well", res.json().get("nothing_to_charge") is True and settlement_row()["deadline"] is not None, res.text)
+client.post(f"/trips/{TRIP}/checkout/release", headers=carla["H"])
+ok("and releasing it stops the clock", settlement_row()["deadline"] is None and settlement_row()["status"] == "collecting")
+ok("no unexpected outbound calls", not CALLS["unexpected"], CALLS["unexpected"])
+
+# ===========================================================================
+# 21. A hotel Rovyn cancelled while unwinding says so on the checklist
+# ===========================================================================
+print("unwound hotels say why:")
+set_mode(stripe=True, hotel=True); reset_fakes()
+TRIP, (ana, bruno, carla) = make_trip()
+for u in (ana, bruno, carla):
+    profile(u, flight=False)
+for u in (ana, bruno, carla):
+    sid = client.post(f"/trips/{TRIP}/checkout/session", headers=u["H"], json={}).json()["session_id"]
+    pi = pay_session(sid)
+    if u is carla:
+        STRIPE["fail_capture_for"].add(pi)
+    client.post(f"/trips/{TRIP}/checkout/confirm", headers=u["H"], json={"session_id": sid})
+row = rows("SELECT provider, status, note, cancelled_at FROM bookings WHERE trip_id = ? AND item_key = 'stay:Smart Hotel Roma'", TRIP)[0]
+item = next(i for i in client.get(f"/trips/{TRIP}/bookings", headers=bruno["H"]).json()["items"] if i["item_key"] == "stay:Smart Hotel Roma")
+ok("the all-or-nothing undo leaves a reason on the stay, not a bare 'Not booked yet'",
+   settlement_row()["status"] == "failed" and row["provider"] == "self" and row["status"] == "to_book" and row["cancelled_at"]
+   and row["note"] == booking_service.UNWOUND_HOTEL_NOTE and item["note"] == booking_service.UNWOUND_HOTEL_NOTE, row)
+reset_fakes()
+TRIP, (ana, bruno, carla) = make_trip()
+for u in (ana, bruno, carla):
+    profile(u, flight=False)
+for u in (ana, bruno, carla):
+    sid = client.post(f"/trips/{TRIP}/checkout/session", headers=u["H"], json={}).json()["session_id"]
+    pi = pay_session(sid)
+    if u is carla:
+        STRIPE["fail_capture_for"].add(pi)
+        LITE["cancel_timeout_once"] = True  # the hotel cancels, but its answer is lost
+    client.post(f"/trips/{TRIP}/checkout/confirm", headers=u["H"], json={"session_id": sid})
+st = settlement_row()
+ok("an unwind whose hotel cancel went unanswered parks with a cancel_hotel cursor",
+   st["status"] == "needs_attention" and json.loads(st["cursor"])["step"] == "cancel_hotel", st["status"])
+bump_stale(st["id"])
+reconciler.reconcile_all()
+row = rows("SELECT provider, status, note FROM bookings WHERE trip_id = ? AND item_key = 'stay:Smart Hotel Roma'", TRIP)[0]
+ok("the reconciler reads the cancellation back and leaves the same reason on the stay",
+   settlement_row()["status"] == "failed" and row == {"provider": "self", "status": "to_book", "note": booking_service.UNWOUND_HOTEL_NOTE}
+   and sum(1 for m, u in CALLS["log"] if m == "PUT") == 1, (settlement_row()["status"], row))
+ok("no unexpected outbound calls", not CALLS["unexpected"], CALLS["unexpected"])
+
+# ===========================================================================
+# 22. Something a traveler booked by hand is never charged or booked again
+# ===========================================================================
+print("self-booked items are never bought twice:")
+set_mode(); reset_fakes()
+TRIP, (ana, bruno, carla) = make_trip()
+for u in (ana, bruno, carla):
+    profile(u, flight=False)
+stay_url = urllib.parse.quote("stay:Smart Hotel Roma")
+bl = client.get(f"/trips/{TRIP}/bookings", headers=ana["H"]).json()
+ok("with no open round nothing is charged: charged_keys is empty", bl["charged_keys"] == [], bl.get("charged_keys"))
+res = client.post(f"/trips/{TRIP}/bookings/{stay_url}/confirm", headers=ana["H"], json={"confirmation": "BKG-123", "note": "Booking.com"})
+ok("Ana records the stay she booked herself", res.status_code == 200, res.text)
+client.post(f"/trips/{TRIP}/checkout/lock", headers=bruno["H"])
+state = checkout(bruno)
+stay = next(i for i in state["settlement"]["items"] if i["item_key"] == "stay:Smart Hotel Roma")
+ok("the lock does not charge a stay a traveler already booked, and says who did",
+   stay["charge"] is False and stay["provider"] == "self" and stay["note"] == "Already booked by Ana — not charged by Rovyn"
+   and state["me"]["check"]["charged_cents"] == 60000, (stay, state["me"]["check"]["charged_cents"]))
+bl = client.get(f"/trips/{TRIP}/bookings", headers=bruno["H"]).json()
+ok("charged_keys lists what the open round buys — the flights, not Ana's stay",
+   sorted(bl["charged_keys"]) == ["flight:Boston", "flight:New York"], bl["charged_keys"])
+res = client.post(f"/trips/{TRIP}/bookings/{urllib.parse.quote('flight:New York')}/confirm", headers=bruno["H"],
+                  json={"confirmation": "PNR-BYHAND"})
+ok("recording an item the round is charging is refused (409) and the row is untouched",
+   res.status_code == 409 and "group checkout" in res.json()["detail"]
+   and rows("SELECT status, confirmation FROM bookings WHERE trip_id = ? AND item_key = 'flight:New York'", TRIP)[0] == {"status": "to_book", "confirmation": None}, res.text)
+for u in (ana, bruno, carla):
+    client.post(f"/trips/{TRIP}/checkout/session", headers=u["H"], json={})
+state = checkout(ana)
+row = rows("SELECT provider, status, confirmation, booked_by FROM bookings WHERE trip_id = ? AND item_key = 'stay:Smart Hotel Roma'", TRIP)[0]
+ok("the round books the flights and keeps Ana's stay row exactly as she recorded it",
+   state["settlement"]["status"] == "booked" and row == {"provider": "self", "status": "booked", "confirmation": "BKG-123", "booked_by": ana["id"]}
+   and sorted(p["captured_cents"] for p in rows("SELECT captured_cents FROM payments WHERE trip_id = ?", TRIP)) == [54000, 60000, 60000],
+   (state["settlement"]["status"], row))
+reset_fakes()
+TRIP, (ana, bruno, carla) = make_trip()
+for u in (ana, bruno, carla):
+    profile(u, flight=False)
+client.get(f"/trips/{TRIP}/bookings", headers=ana["H"])  # the checklist rows exist
+client.post(f"/trips/{TRIP}/checkout/session", headers=ana["H"], json={})
+client.post(f"/trips/{TRIP}/checkout/session", headers=bruno["H"], json={})
+with db.get_conn() as conn:  # recorded by hand mid-round (from before the checklist refused it, or a race with that guard)
+    conn.execute("UPDATE bookings SET status = 'booked', confirmation = 'BYHAND-9', booked_by = ?, booked_at = ? "
+                 "WHERE trip_id = ? AND item_key = 'stay:Smart Hotel Roma'", (carla["id"], "2026-10-19T00:00:00+00:00", TRIP))
+client.post(f"/trips/{TRIP}/checkout/session", headers=carla["H"], json={})
+state = checkout(ana)
+stay = next(i for i in state["settlement"]["items"] if i["item_key"] == "stay:Smart Hotel Roma")
+row = rows("SELECT provider, status, confirmation, booked_by FROM bookings WHERE trip_id = ? AND item_key = 'stay:Smart Hotel Roma'", TRIP)[0]
+ok("re-verify drops a stay booked by hand after the lock: not booked again, every share captured without it",
+   state["settlement"]["status"] == "booked" and stay["charge"] is False and stay["note"] == "Already booked by Carla — not charged by Rovyn"
+   and row == {"provider": "self", "status": "booked", "confirmation": "BYHAND-9", "booked_by": carla["id"]}
+   and sorted(a["captured_cents"] for a in rows("SELECT captured_cents FROM payment_attempts WHERE trip_id = ? AND status = 'captured'", TRIP)) == [54000, 60000, 60000],
+   (state["settlement"]["status"], stay, row))
+ok("no unexpected outbound calls", not CALLS["unexpected"], CALLS["unexpected"])
+
+# ===========================================================================
+# 23. Once one traveler books it themselves, everyone else still can
+# ===========================================================================
+print("self-booking stays open to every traveler:")
+set_mode(); reset_fakes()
+TRIP, (ana, bruno, carla) = make_trip()
+res = client.post(f"/trips/{TRIP}/pay", headers=bruno["H"], json={"mode": "self_book"})
+ok("the first traveler books it themselves", res.status_code == 200 and res.json()["all_paid"] is False, res.text)
+state = checkout(carla)
+ok("the group checkout is off for everyone else, with the reason the page leads with",
+   state["available"] is False and state["self_book_chosen"] is True and state["settlement"] is None and "item by item" in state["reason"])
+res = client.post(f"/trips/{TRIP}/checkout/lock", headers=carla["H"])
+ok("no round can start once someone books it themselves", res.status_code == 400)
+res = client.post(f"/trips/{TRIP}/pay", headers=carla["H"], json={"mode": "self_book"})
+ok("a second traveler can still lock in by booking their part", res.status_code == 200 and res.json()["all_paid"] is False
+   and client.get(f"/trips/{TRIP}", headers=ana["H"]).json()["status"] == "approved", res.text)
+res = client.post(f"/trips/{TRIP}/pay", headers=ana["H"], json={"mode": "self_book"})
+status = client.get(f"/trips/{TRIP}", headers=ana["H"]).json()
+ok("so can the third, and the trip reaches booked", res.status_code == 200 and res.json()["all_paid"] is True
+   and status["status"] == "booked" and status["all_paid"] is True, res.text)
+ok("no unexpected outbound calls", not CALLS["unexpected"], CALLS["unexpected"])
+
 print(f"\nall {passed} checks passed")

@@ -42,7 +42,7 @@ from backend.db import IntegrityError, fetch_many, get_conn
 from backend.services import duffel_booking as duffel
 from backend.services import email_service
 from backend.services import payment_service as stripe
-from backend.services.checklist import checklist_from_plan, sync_checklist
+from backend.services.checklist import REAL_STATUSES, checklist_from_plan, sync_checklist
 from backend.services.redact import redact, redacted_json, request_hash
 
 _SSL_CTX = ssl.create_default_context(cafile=certifi.where())
@@ -55,6 +55,10 @@ DONE_STATUSES = ("booked", "partially_booked")
 TERMINAL_STATUSES = ("cancelled", "failed", "resolved")
 ACTIVE_ATTEMPT_STATUSES = ("pending", "authorized", "nothing_due", "releasing", "captured", "refunded")
 COMMITTED_STATUSES = ("authorized", "nothing_due")   # counts toward "everyone has paid"
+# The group's deadline runs only while somebody is committed: a round with none
+# of these has no deadline, so it can never read "everyone must pay by …" over
+# nobody, nor be expired for a clock that no longer protects anyone's hold.
+DEADLINE_STATUSES = COMMITTED_STATUSES + ("captured",)
 MAX_RECONCILE_ATTEMPTS = 3         # after this many automatic resumes a person takes over
 CAPTURE_RETRIES = 3                # re-reads of a capture whose outcome Stripe did not confirm
 PRICE_RISE_TOLERANCE_CENTS = 100   # above this per person the group must re-pay
@@ -68,6 +72,11 @@ ESTIMATE_LINES = (
     ("meals_estimate", "Meals (estimate)"),
     ("transport_estimate", "Local transport (estimate)"),
 )
+# The checklist row of a hotel Rovyn booked ahead of capture and then cancelled
+# because the round fell through: without a reason it would read as a bare
+# "Not booked yet" and the group would not know its reservation is gone.
+UNWOUND_HOTEL_NOTE = ("Rovyn's hotel booking was cancelled because the group checkout did not complete — "
+                      "book it yourself or pay in Rovyn again.")
 
 
 class BookingError(Exception):
@@ -346,22 +355,27 @@ def sim_confirmation() -> str:
 # ---------------------------------------------------------------------------
 
 def _trip_context(trip_id: str) -> dict:
+    real = ",".join("?" for _ in REAL_STATUSES)
     with get_conn(readonly=True) as conn:
         trip = conn.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
         if trip is None:
             raise BookingError("Trip not found.", "not_found", 404)
-        members, q_rows, profile_rows = fetch_many(conn, [
+        members, q_rows, profile_rows, self_rows = fetch_many(conn, [
             ("""SELECT u.id, u.name, u.email FROM trip_members t JOIN users u ON u.id = t.user_id
                WHERE t.trip_id = ? ORDER BY t.joined_at""", (trip_id,)),
             ("SELECT user_id, data FROM questionnaires WHERE trip_id = ?", (trip_id,)),
             ("""SELECT p.* FROM traveler_profiles p JOIN trip_members t ON t.user_id = p.user_id
                WHERE t.trip_id = ?""", (trip_id,)),
+            # Items a traveler already booked by hand on the checklist — Rovyn must never buy them twice.
+            (f"""SELECT b.item_key, u.name FROM bookings b LEFT JOIN users u ON u.id = b.booked_by
+                WHERE b.trip_id = ? AND b.provider = 'self' AND b.status IN ({real})""", (trip_id, *REAL_STATUSES)),
         ])
     plan = json.loads(trip["final_plan"]) if trip["final_plan"] else {}
     return {
         "trip": dict(trip), "plan": plan, "members": [dict(m) for m in members],
         "cities": {r["user_id"]: (json.loads(r["data"]).get("departure_city") or "").strip() for r in q_rows},
         "profiles": {r["user_id"]: dict(r) for r in profile_rows},
+        "self_booked": {r["item_key"]: r["name"] or "a traveler" for r in self_rows},
         "plan_hash": hashlib.sha256((trip["final_plan"] or "").encode()).hexdigest(),
     }
 
@@ -581,6 +595,9 @@ def build_lock(ctx: dict, settlement_id: str, money_mode: str, prior: dict | Non
     deadline_terms: list[str] = []
     items: list[dict] = []
     prior_items = {i["item_key"]: i for i in (prior or {}).get("items", [])}
+    # What a traveler already booked by hand on the checklist stays theirs: it is
+    # never priced, held or charged again (that would buy the same room twice).
+    self_booked = ctx.get("self_booked") or {}
 
     def attempt_ref(key: str) -> str:
         return (prior_items.get(key) or {}).get("attempt_ref") or uuid.uuid4().hex
@@ -599,7 +616,9 @@ def build_lock(ctx: dict, settlement_id: str, money_mode: str, prior: dict | Non
             "pre_capture_safe": False, "attempt_ref": attempt_ref(key),
             "ref": {"hotel_id": stay.get("liteapi_hotel_id")}, "note": None,
         }
-        if hotel_booking_enabled() and stay.get("liteapi_hotel_id"):
+        if key in self_booked:
+            item["note"] = _already_booked_note(self_booked[key])
+        elif hotel_booking_enabled() and stay.get("liteapi_hotel_id"):
             try:
                 check_in = stay.get("check_in") or (plan.get("dates") or {}).get("start") or ""
                 check_out = stay.get("check_out") or (plan.get("dates") or {}).get("end") or ""
@@ -659,7 +678,9 @@ def build_lock(ctx: dict, settlement_id: str, money_mode: str, prior: dict | Non
             "attempt_ref": attempt_ref(key), "ref": {"board_offer_id": f.get("duffel_offer_id")}, "note": None,
         }
         hinted = bool(f.get("duffel_offer_id") or f.get("duffel_offer_ids"))
-        if travelers and hinted and duffel.duffel_available():
+        if key in self_booked:
+            item["note"] = _already_booked_note(self_booked[key])
+        elif travelers and hinted and duffel.duffel_available():
             try:
                 live = _lock_flight(f, travelers, money_mode, lock_time)
                 if live.get("self"):
@@ -722,6 +743,26 @@ def _self_book(item: dict, note: str) -> None:
                  "note": note})
     item["ref"] = {"board_offer_id": (item.get("ref") or {}).get("board_offer_id")}
     item.pop("hold_pending", None)
+
+
+def _already_booked_note(who: str) -> str:
+    return f"Already booked by {who} — not charged by Rovyn"
+
+
+def _drop_already_booked(item: dict, who: str, group: int) -> None:
+    """A charged item a traveler recorded as booked by hand AFTER the prices
+    were locked: it leaves the charge (back to its estimate — what that
+    traveler pays the seller) and its airline hold, if any, is released.
+    Makes provider calls, so callers must not hold a connection."""
+    _release_holds({"items": [item]})
+    note = _already_booked_note(who)
+    if item["category"] == "flight":
+        _self_book(item, note)
+        return
+    item.update({"provider": "self", "mode": None, "charge": False, "estimate": True, "pre_capture_safe": False,
+                 "per_person_cents": item["estimate_cents"], "total_cents": item["estimate_cents"] * group,
+                 "delta_cents": 0, "note": note})
+    item["ref"] = {"hotel_id": (item.get("ref") or {}).get("hotel_id")}
 
 
 def _adopt_live_fare(item: dict, live: dict) -> None:
@@ -980,13 +1021,22 @@ def profile_requirements(lock: dict, user_id: str, profile: dict | None, email: 
 
 
 def recompute_deadline(conn, settlement_id: str) -> str | None:
-    """min(first authorization + window, card holds − 24 h, airline holds − 2 h)."""
+    """The open round's deadline: min(first commitment + window, card holds −
+    24 h, airline holds − 2 h). Called whenever a commitment appears or goes
+    away, so it always follows whoever is still committed. With nobody
+    committed it is NULL: a leftover deadline would tell the group "everyone
+    must pay by …" over an empty round, and could expire it. A closed round
+    keeps the deadline it closed with — its audit trail names it."""
     row = _settlement(conn, settlement_id)
     if row is None:
         return None
+    if row["status"] not in OPEN_STATUSES:
+        return row["deadline"]
     lock = json.loads(row["lock"])
-    attempts = [a for a in _attempts(conn, settlement_id).values() if a["status"] in ("authorized", "captured")]
+    attempts = [a for a in _attempts(conn, settlement_id).values() if a["status"] in DEADLINE_STATUSES]
     if not attempts:
+        if row["deadline"] is not None:
+            conn.execute("UPDATE settlements SET deadline = NULL, updated_at = ? WHERE id = ?", (_now(), settlement_id))
         return None
     first = min(_parse_dt(a["updated_at"]) or _now_dt() for a in attempts)
     terms = [first + timedelta(days=checkout_window_days())]
@@ -1005,13 +1055,19 @@ def recompute_deadline(conn, settlement_id: str) -> str | None:
 
 def expire_if_due(trip_id: str) -> bool:
     """A group that missed its deadline is released. Called on the write
-    paths and by the reconciler — never from the polled read."""
+    paths and by the reconciler — never from the polled read. A round where
+    nobody is committed is never failed on a deadline: no hold is left for the
+    clock to protect, so a leftover deadline is cleared and the round (its
+    locked prices, any open checkout links) carries on."""
     with get_conn() as conn:
         row = active_settlement(conn, trip_id)
         if row is None or row["status"] not in OPEN_STATUSES or not row["deadline"]:
             return False
         due = _parse_dt(row["deadline"])
         if due is None or _now_dt() < due:
+            return False
+        if not any(a["status"] in DEADLINE_STATUSES for a in _attempts(conn, row["id"]).values()):
+            recompute_deadline(conn, row["id"])
             return False
         if not _cas(conn, row["id"], "failed", OPEN_STATUSES):
             return False
@@ -1135,6 +1191,7 @@ def start_session(trip_id: str, user: dict, acknowledge: bool = False) -> dict:
             attempt = _create_pending_attempt(conn, settlement, user["id"], 0, "none")
             attempt = _update_attempt(conn, attempt["id"], status="nothing_due")
             _sync_summary(conn, attempt)
+            recompute_deadline(conn, settlement["id"])  # a $0 commitment starts the group's clock too
             _event(conn, settlement["id"], "authorize", "nothing due — committed without a card",
                    data={"user_id": user["id"], "amount_cents": 0})
         _maybe_settle(settlement["id"])
@@ -1272,6 +1329,10 @@ def _release_attempt(settlement_id: str, attempt: dict, reason: str) -> None:
                            (_now(), attempt["id"]))
         if cur.rowcount != 1:
             return
+        # The commitment ends the moment its release starts (even one Stripe has
+        # yet to confirm): the deadline now follows whoever is still committed,
+        # or goes away with the last of them.
+        recompute_deadline(conn, settlement_id)
     if attempt["provider"] == "stripe":
         try:
             _undo_at_stripe(attempt, reason)
@@ -1477,6 +1538,7 @@ def handle_stripe_event(event: dict) -> dict:
             if attempt["status"] == "authorized" and settlement["status"] in OPEN_STATUSES:
                 fresh = _update_attempt(conn, attempt["id"], status="failed")
                 _sync_summary(conn, fresh)
+                recompute_deadline(conn, settlement["id"])  # a lost hold is a commitment gone
                 _event(conn, settlement["id"], "authorize", f"authorization lost ({kind})", level="warn",
                        data={"user_id": attempt["user_id"], "reason": obj.get("cancellation_reason")})
             else:
@@ -1737,8 +1799,19 @@ def _reverify(ctx: dict, settlement: dict, lock: dict) -> tuple[dict, list[str]]
     """Fresh prices for everything charged. Returns (lock, problems)."""
     money_mode = settlement["money_mode"]
     problems = []
+    self_booked = ctx.get("self_booked") or {}
     for item in lock["items"]:
         if not item["charge"] or item.get("failed") or item.get("booking"):
+            continue
+        if item["item_key"] in self_booked:
+            # A traveler recorded it as booked by hand after the lock (from before the
+            # checklist refused that, or a race with it): Rovyn must not buy it a second
+            # time. It leaves the charge, so every share falls and the capture takes
+            # the lower amount — never a reason to make the group pay again.
+            _drop_already_booked(item, self_booked[item["item_key"]], lock["group_size"])
+            with get_conn() as conn:
+                _event(conn, settlement["id"], "verify", f"{item['title']}: already booked on the checklist — no longer charged",
+                       item_key=item["item_key"], level="warn")
             continue
         prev = item["per_person_cents"]
         try:
@@ -2440,8 +2513,9 @@ def _unbook_hotel(settlement_id: str, ctx: dict, lock: dict, item: dict) -> bool
             return False
     item.pop("booking", None)
     with get_conn() as conn:
-        conn.execute("UPDATE bookings SET status = 'to_book', provider = 'self', confirmation = NULL, booked_at = NULL, cancelled_at = ? WHERE trip_id = ? AND item_key = ?",
-                     (_now(), ctx["trip"]["id"], item["item_key"]))
+        conn.execute("UPDATE bookings SET status = 'to_book', provider = 'self', confirmation = NULL, booked_at = NULL, cancelled_at = ?, note = ? "
+                     "WHERE trip_id = ? AND item_key = ?",
+                     (_now(), UNWOUND_HOTEL_NOTE, ctx["trip"]["id"], item["item_key"]))
         _save_lock(conn, settlement_id, lock)
         _set_cursor(conn, settlement_id, None)
         _event(conn, settlement_id, "unwind", "hotel booking cancelled while unwinding", item_key=item["item_key"], level="warn")
@@ -2580,8 +2654,9 @@ def reconcile(settlement_id: str) -> dict:
                 if not (body.get("status") or "").upper().startswith("CANCEL"):
                     hotel_cancel(item["booking"]["provider_booking_id"])
                 with get_conn() as conn:
-                    conn.execute("UPDATE bookings SET status = 'to_book', provider = 'self', confirmation = NULL, booked_at = NULL, cancelled_at = ? WHERE trip_id = ? AND item_key = ?",
-                                 (_now(), trip_id, item["item_key"]))
+                    conn.execute("UPDATE bookings SET status = 'to_book', provider = 'self', confirmation = NULL, booked_at = NULL, cancelled_at = ?, note = ? "
+                                 "WHERE trip_id = ? AND item_key = ?",
+                                 (_now(), UNWOUND_HOTEL_NOTE, trip_id, item["item_key"]))
                 item.pop("booking", None)
             elif step == "cancel_booking" and item:
                 with get_conn(readonly=True) as conn:
@@ -2928,6 +3003,17 @@ def assert_profile_change_allowed(trip_id: str, user: dict, profile: dict) -> No
     if reqs["missing"]:
         raise BookingError("Your payment is in — these details are needed for the booking and can't be removed now: "
                            + ", ".join(reqs["missing"]), "profile_locked", 409)
+
+
+def charged_item_keys(conn, trip_id: str) -> list[str]:
+    """Checklist items the trip's open round buys through Rovyn (any round not
+    cancelled, failed or resolved; [] when there is none). The checklist must
+    not let a traveler record one of these as booked by hand — Rovyn would
+    then buy it a second time."""
+    row = active_settlement(conn, trip_id)
+    if row is None:
+        return []
+    return [i["item_key"] for i in json.loads(row["lock"]).get("items", []) if i.get("charge") and not i.get("failed")]
 
 
 def before_trip_delete(trip_id: str) -> None:

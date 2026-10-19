@@ -1374,6 +1374,10 @@ def read_plan(trip_id: str, user: dict = Depends(get_current_user)):
         checks = _member_checks(conn, trip) if plan else []
         payload = _status_payload(conn, trip, user["id"])
         checkout = booking_service.checkout_summary(conn, trip, user["id"]) if plan else None
+        # The rule every edit endpoint enforces (an open group checkout, or any
+        # payment in motion) — the page shows its edit controls exactly when an
+        # edit would be accepted, instead of guessing from who has "paid".
+        plan_locked = trip_is_locked(conn, trip_id)
         # Plans drafted before budget tracking landed don't carry the group's
         # agreed range — derive it from the questionnaires on the way out.
         if plan and not plan.get("budget_per_person"):
@@ -1401,6 +1405,7 @@ def read_plan(trip_id: str, user: dict = Depends(get_current_user)):
         "replacement_pool": _replacement_pool(trip, plan) if plan else [],
         "slot_locks": slot_locks,
         "checkout": checkout,
+        "plan_locked": plan_locked,
     }
 
 
