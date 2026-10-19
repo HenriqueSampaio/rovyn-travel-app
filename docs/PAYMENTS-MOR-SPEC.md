@@ -43,10 +43,12 @@ balance; a forced booking failure refunds every traveler's share of that item.
   of `backend.main`).
 - Viator/activity booking (certification needed) — visits and events remain checklist items
   with deep links and are **not charged** by Rovyn.
-- Flights that the board sourced from LiteAPI Flights: LiteAPI's flight booking was not
-  researched; only board options that carry a Duffel hint (`duffel_offer_id`, from the
-  options-breadth work) are auto-booked — and even then from a fresh offer request at lock
-  time, never from the stored id. Other flights are self-book items and are not charged.
+- Flights from any supplier but Duffel: since 2026-10-19 the board searches Duffel alone, so
+  every live flight carries a Duffel hint (`duffel_offer_id` / `duffel_offer_ids`) and is
+  auto-booked — from a fresh offer request at lock time, never from the stored id — except an
+  open jaw priced as two one-way tickets (`separate_tickets`), which is self-book. AI-estimated
+  flights (no Duffel token, or no live fare for that city) are self-book items and are not
+  charged. Stays are LiteAPI's alone (Duffel Stays is not wired).
 - The rooming board (separate branch) — occupancies come from `plan.rooming[stay].mix` when it
   exists, else `⌈group/2⌉` doubles; hotel guests are filled per room in join order.
 - Per-room split, instalments, a refunds UI beyond "release my authorization" and cancelling a
@@ -300,8 +302,10 @@ ROVYN_SETTLE_INLINE=          # 1 runs settlements inline instead of on a thread
    search; every sandbox key carries a hidden test card). A full rates → prebook → book → get → cancel
    loop was run against the sandbox on 2026-10-18 and its responses are the fixtures in
    `tests/fixtures/liteapi_book_*.json`.
-3. Duffel: `DUFFEL_ACCESS_TOKEN=duffel_test_…` — board flights need a Duffel hint from the options
-   work; the JFK→EWR test route produces holdable orders, LHR→STN simulates a price change.
+3. Duffel: `DUFFEL_ACCESS_TOKEN=duffel_test_…` — the same token makes the board's flights live
+   (each with its Duffel hint) and books them; test mode flies "Duffel Airways" (ZZ), labeled
+   test on the board. The JFK→EWR test route produces holdable orders, LHR→STN simulates a
+   price change.
 
 ### Operator tool
 
@@ -338,7 +342,7 @@ activity drag, ✕) follow `plan_locked` from the plan poll — falling back to 
 only when an older backend does not send it — so they disappear exactly when the server would
 refuse an edit (an authorized hold never reads as paid).
 
-## Tests — `tests/test_payments_flow.py` (plain python; 222 checks)
+## Tests — `tests/test_payments_flow.py` (plain python; 229 checks)
 
 A fake `urlopen` stands in for Stripe, both LiteAPI hosts and Duffel, records every call and
 raises on anything unknown; every scenario asserts the unexpected list is empty. Covered: the
@@ -363,7 +367,9 @@ the old deadline, and a stale one left in the row); the unwind note on a hotel c
 all-or-nothing undo and by the reconciler's `cancel_hotel` step; a stay a traveler booked by hand
 never charged or overwritten, `charged_keys`, the 409 on recording a charged item, and a stay
 recorded mid-round dropped at re-verify with every share captured without it; second and third
-self-bookers accepted and the trip reaching booked.
+self-bookers accepted and the trip reaching booked; a live board flight built by
+`flight_service` from the recorded-shape Duffel fixture locked and held as the same itinerary
+at the board's fare; and no LiteAPI flight or Duffel stays endpoint called in the whole run.
 `tests/test_maps_and_links.py` stays green; `npm run build` is clean; a Playwright pass on the
 isolated side-port servers walks the simulated checkout for three travelers (desktop + phone)
 through to the Bookings tab, plus release and leader abandon.
@@ -382,7 +388,12 @@ through to the Bookings tab, plus release and leader abandon.
   cancellation) rather than parking in `needs_attention`, because the outcome is known; only
   unknown outcomes park.
 - Simulated flights are simulated whether or not the option carried a Duffel hint, so the
-  no-keys demo books every flight; with a Duffel token, flights without a hint are self-book.
+  no-keys demo books every flight; with a Duffel token, flights without a hint (AI estimates)
+  are self-book.
+- A one-way pair (the open-jaw fallback, `separate_tickets` / two `duffel_offer_ids` and no
+  `duffel_offer_id`) goes straight to self-book without an offer request, with the note
+  "Priced as two separate one-way tickets — Rovyn can't book this pair yet, book both legs
+  yourself" — booking the two legs as separate Duffel orders is not built.
 - A traveler whose share is $0 commits as `nothing_due` (no card, no provider, in every money
   mode) and is marked captured at $0 when the group is charged, so the trip reads as fully paid.
 - A hold whose creation call timed out is looked up by the attempt reference in the account's

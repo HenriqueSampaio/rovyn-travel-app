@@ -970,13 +970,21 @@ export default function Plan() {
           <>
             <p className="muted" style={{ maxWidth: 560, marginBottom: 10 }}>{CATEGORY_INTRO[tab]}</p>
             {tab === 'flights' && (
-              options.flights_sandbox ? (
+              options.flights_legacy ? (
                 <p style={{ marginBottom: 10, fontSize: 13.5, color: 'var(--clay)' }}>
-                  Test-mode flights: the connected LiteAPI key is a sandbox key, so “airlines”
-                  here (like Nuitee Air) are placeholder test inventory, not bookable carriers —
-                  a production key brings real flights.
+                  This board was built before Rovyn switched to booking every flight through
+                  Duffel, so some flights here come from an earlier LiteAPI search — airlines
+                  like “Nuitee Air” are LiteAPI’s placeholder test inventory, not real carriers.
+                  Rovyn can’t check or book those fares; boards created from now on show Duffel
+                  fares only.
                 </p>
-              ) : options.flights_source === 'liteapi' ? (
+              ) : options.flights_sandbox ? (
+                <p style={{ marginBottom: 10, fontSize: 13.5, color: 'var(--clay)' }}>
+                  Test-mode flights: the connected Duffel token is a test token, so the airline
+                  here (“Duffel Airways”, code ZZ) is Duffel’s placeholder test carrier, not a real
+                  one — a live Duffel token brings real airlines.
+                </p>
+              ) : options.flights_source === 'duffel' ? (
                 <p style={{
                   display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 10,
                   fontSize: 13.5, fontWeight: 700, color: 'var(--pine)',

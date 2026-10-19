@@ -60,6 +60,7 @@ Each integration below is optional and free; the app degrades gracefully without
 | Variable | Where to get it | What it unlocks |
 |---|---|---|
 | `LITEAPI_API_KEY` | [liteapi.travel](https://www.liteapi.travel/) → self-serve signup (free, no credit card) → dashboard → API keys (use the **sandbox** key first) | Stay options on the planning board become **real hotels with live prices** for the group's exact dates, badged "LIVE PRICE". Without it: AI/sample stays as before. |
+| `DUFFEL_ACCESS_TOKEN` | [app.duffel.com](https://app.duffel.com) → self-serve signup → dashboard → Access tokens (a free **test** token, `duffel_test_…`, first) | Flight options become **real itineraries with live fares** (Duffel is the only flight supplier; test tokens show Duffel's placeholder airline, "Duffel Airways", labeled as test). Without it: AI-estimated flights. |
 | `GOOGLE_PLACES_API_KEY` | [console.cloud.google.com](https://console.cloud.google.com) → create project → enable **Places API (New)** → credentials → API key ($200/month free credit covers ~10k lookups) | Stay options and the final plan link to the hotel's **official website**. Without it: Booking.com property links only. |
 | `VIATOR_PARTNER_ID` | [viator.com/partner](https://partnerresources.viator.com/) → join affiliate program (instant, free) → your `pid` | ~8% commission on activities booked through Rovyn's Viator links. |
 | `GYG_PARTNER_ID` | [partner.getyourguide.com](https://partner.getyourguide.com) → affiliate signup → partner ID | ~8% commission on GetYourGuide bookings. |

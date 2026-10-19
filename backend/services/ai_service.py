@@ -709,13 +709,12 @@ def _pad_with_estimates(live: list[dict], estimates: list[dict], prefs: dict, ni
     return live + extras
 
 
-def _live_source_label(options: list[dict]) -> str:
-    """The `*_source` provenance field the board UI reads: "liteapi" when any
-    LiteAPI live option is present, else the supplier that is."""
+def _live_source_label(options: list[dict], default: str) -> str:
+    """The `*_source` provenance field the board UI reads: the supplier of
+    the live options present — one per category ("duffel" for flights,
+    "liteapi" for stays), `default` when none is."""
     suppliers = ranking.summarize_suppliers([o for o in options if isinstance(o, dict) and o.get("live_price")])
-    if "liteapi" in suppliers or not suppliers:
-        return "liteapi"
-    return suppliers[0]
+    return suppliers[0] if suppliers else default
 
 
 def generate_trip_options(destination: str, responses: list[dict], trip_name: str = "",
@@ -795,7 +794,7 @@ def generate_trip_options(destination: str, responses: list[dict], trip_name: st
         if flights_live:
             all_flights = [o for opts in options["flights"].values() for o in opts]
             live_flights = [o for o in all_flights if o.get("live_price")]
-            options["flights_source"] = _live_source_label(all_flights)
+            options["flights_source"] = _live_source_label(all_flights, "duffel")
             options["flights_all_live"] = all(o.get("live_price") for o in all_flights)
             options["flights_sandbox"] = any(o.get("sandbox") for o in live_flights)
         if transport_future:
@@ -846,7 +845,7 @@ def generate_trip_options(destination: str, responses: list[dict], trip_name: st
                     options["stay"].extend(ranking.annotate_stays(
                         _sample_city_stays(c, prefs), city_prefs(nights), nights, "sample"))
             if any_live:
-                options["stay_source"] = _live_source_label(options["stay"])
+                options["stay_source"] = _live_source_label(options["stay"], "liteapi")
                 options["stay_all_live"] = all(o.get("live_price") for o in options["stay"])
         else:
             options["trip_mode"] = "single"
@@ -870,7 +869,7 @@ def generate_trip_options(destination: str, responses: list[dict], trip_name: st
         if live_stays:
             floor = max(4, stay_options_target() // 3)
             options["stay"] = _pad_with_estimates(live_stays, estimates, prefs, duration, floor)
-            options["stay_source"] = _live_source_label(options["stay"])
+            options["stay_source"] = _live_source_label(options["stay"], "liteapi")
             options["stay_all_live"] = all(o.get("live_price") for o in options["stay"])
         else:
             options["stay"] = ranking.annotate_stays(estimates, prefs, duration, _estimate_supplier())
@@ -946,7 +945,7 @@ def _attach_images(options: dict, destination: str) -> dict:
 
 
 def _flight_options(destination: str, prefs: dict, route: dict | None = None) -> tuple[dict, bool]:
-    """Per-city flight menus, live-first: LiteAPI fares when the key is set,
+    """Per-city flight menus, live-first: Duffel fares when the token is set,
     the AI menu for any city the live search couldn't cover, samples last.
     Returns (flights by city, whether any city got live fares)."""
     cities = prefs["departure_cities"] or ["Your city"]
@@ -954,9 +953,9 @@ def _flight_options(destination: str, prefs: dict, route: dict | None = None) ->
     pace = prefs.get("group_pace")
     arrive_town = (route["cities"][0]["town"] if route else destination.split(",")[0].strip())
 
-    # Live fares (LiteAPI, plus Duffel when a token is set — airports resolve
-    # through LiteAPI, so a Duffel token alone searches nothing), one search
-    # per departure city, in parallel — the LiteAPI pacer spaces the calls.
+    # Live fares from Duffel (the supplier every flight is booked through),
+    # one search per departure city, three at a time — well inside Duffel's
+    # 60 requests a minute, with one retry on a 429.
     live: dict[str, list] = {}
     if flights_available() and dates.get("start") and dates.get("end"):
         arrive_city = route["cities"][0]["city"] if route else destination
@@ -1991,10 +1990,10 @@ def _detach_heavy(plan: dict) -> tuple[dict, list]:
     def take(obj: dict, cat: str, ident):
         # URLs must never round-trip through the model: token-heavy AND the
         # model must not be able to rewrite where travelers click. The same
-        # goes for the board's computed reasons, a Duffel stay's detail
-        # sheet and a live flight's segments — facts, not prose to revise.
+        # goes for the board's computed reasons and a live flight's
+        # segments — facts, not prose to revise.
         for key in ("image", "links", "link", "booking_links", "official_website",
-                    "reasons", "duffel_details", "segments"):
+                    "reasons", "segments"):
             if isinstance(obj, dict) and key in obj:
                 heavy.append((cat, ident, key, obj.pop(key)))
 

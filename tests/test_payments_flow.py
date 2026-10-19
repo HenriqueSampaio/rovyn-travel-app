@@ -7,7 +7,9 @@ Runs with plain python (no pytest needed):
 Everything is isolated: a temp SQLite DB, settlements run inline, and a fake
 urllib layer standing in for Stripe, LiteAPI (search + booking hosts) and
 Duffel. The fake RECORDS every call and raises on any URL it does not know,
-and every scenario asserts that nothing unexpected went out.
+and every scenario asserts that nothing unexpected went out — in particular no
+LiteAPI flight endpoint and no Duffel stays endpoint, ever: flights are booked
+through Duffel alone and stays through LiteAPI alone.
 """
 import base64
 import io
@@ -44,7 +46,7 @@ db.init_db()
 
 from fastapi.testclient import TestClient  # noqa: E402
 import backend.main  # noqa: E402
-from backend.services import booking_service, payment_service, duffel_booking, reconciler  # noqa: E402
+from backend.services import booking_service, payment_service, duffel_booking, flight_service, reconciler  # noqa: E402
 from backend.services.checklist import trip_is_locked  # noqa: E402
 
 client = TestClient(backend.main.app)
@@ -64,7 +66,11 @@ LITE: dict = {"prebook_unclean_once": False, "book_timeout_once": False, "book_f
 DUFFEL: dict = {"orders": {}, "pay_fail": None, "pay_timeout_once": False, "offer_price": "612.00",
                 "currency": "USD", "required_by_hours": 72, "instant": False, "reverify_price": None, "n": 0,
                 "live_mode": False, "guarantee_null": False, "offer_ttl_hours": 0.5, "order_timeout_once": False,
-                "order_404": set()}
+                "order_404": set(), "board": False}
+# Flights are Duffel's alone and stays LiteAPI's alone: these must never be called
+FORBIDDEN = ("https://api.liteapi.travel/v3.0/flights/", "https://api.liteapi.travel/v3.0/data/flights/",
+             "https://api.duffel.com/stays/")
+EVER_FORBIDDEN: list = []  # never reset: checked once at the end of the run
 
 
 class _Resp(io.BytesIO):
@@ -301,11 +307,35 @@ def _offer(offer_id: str, passengers: int, price: str | None = None) -> dict:
     }
 
 
+def _board_offers(n: int) -> dict:
+    """The recorded-shape board fixture (tests/fixtures/duffel_offers.json),
+    re-priced for the n passengers asked and stamped with the scenario's
+    mode and hold terms — what the planning board's search and the lock's
+    re-search both see when DUFFEL["board"] is on."""
+    payload = json.loads((FIX / "duffel_offers.json").read_text())
+    pax = [{"id": f"pas_{i}", "type": "adult"} for i in range(n)]
+    payload["data"].update({"live_mode": DUFFEL["live_mode"], "passengers": pax})
+    for o in payload["data"]["offers"]:
+        per_person = float(o["total_amount"]) / len(o["passengers"])
+        o.update({"total_amount": f"{per_person * n:.2f}", "passengers": pax, "live_mode": DUFFEL["live_mode"],
+                  "expires_at": _iso(DUFFEL["offer_ttl_hours"]), "conditions": {"refund_before_departure": {"allowed": False}},
+                  "payment_requirements": {"requires_instant_payment": DUFFEL["instant"],
+                                           "price_guarantee_expires_at": _iso(DUFFEL["required_by_hours"]),
+                                           "payment_required_by": _iso(DUFFEL["required_by_hours"])}})
+    return payload
+
+
 def _duffel(req, url):
     parsed = urllib.parse.urlparse(url)
     path, method = parsed.path, req.get_method()
     assert req.get_header("Duffel-version") == "v2" and req.get_header("Authorization") == "Bearer duffel_test_fake"
     body = json.loads(req.data.decode())["data"] if req.data else None
+    if path == "/places/suggestions" and DUFFEL["board"]:
+        query = urllib.parse.parse_qs(parsed.query).get("query", [""])[0].casefold()
+        return _json(json.loads((FIX / "duffel_places.json").read_text()).get(query, {"data": []}))
+    if path == "/air/offer_requests" and DUFFEL["board"]:
+        DUFFEL["requests"].append(body)
+        return _json(_board_offers(len(body["passengers"])))
     if path == "/air/offer_requests":
         DUFFEL["n"] += 1
         n = len(body["passengers"])
@@ -369,6 +399,10 @@ def fake_urlopen(req, timeout=None, context=None):
     url = req.full_url if hasattr(req, "full_url") else req
     host = urllib.parse.urlparse(url).netloc
     CALLS["log"].append((req.get_method() if hasattr(req, "get_method") else "GET", url.split("?")[0]))
+    if url.startswith(FORBIDDEN):
+        EVER_FORBIDDEN.append(url)
+        CALLS["unexpected"].append(url)
+        raise AssertionError(f"forbidden outbound URL in test: {url}")
     try:
         if host == "api.stripe.com":
             return _stripe(req, url)
@@ -481,7 +515,8 @@ def reset_fakes():
                  "cancel_hook": None, "cancel_timeout_once": False})
     DUFFEL.update({"orders": {}, "pay_fail": None, "pay_timeout_once": False, "offer_price": "612.00", "currency": "USD",
                    "required_by_hours": 72, "instant": False, "reverify_price": None, "n": 0, "live_mode": False,
-                   "guarantee_null": False, "offer_ttl_hours": 0.5, "order_timeout_once": False, "order_404": set()})
+                   "guarantee_null": False, "offer_ttl_hours": 0.5, "order_timeout_once": False, "order_404": set(),
+                   "board": False, "requests": []})
 
 
 def paths():
@@ -1857,5 +1892,59 @@ status = client.get(f"/trips/{TRIP}", headers=ana["H"]).json()
 ok("so can the third, and the trip reaches booked", res.status_code == 200 and res.json()["all_paid"] is True
    and status["status"] == "booked" and status["all_paid"] is True, res.text)
 ok("no unexpected outbound calls", not CALLS["unexpected"], CALLS["unexpected"])
+
+# ===========================================================================
+# 24. A live board flight (Duffel search) is the flight Rovyn locks and holds
+# ===========================================================================
+print("board flights are bookable through duffel:")
+set_mode(flights=True); reset_fakes(); DUFFEL["board"] = True
+board = flight_service.real_flight_options("New York", "Rome, Italy", "2026-11-20", "2026-11-25", travelers=2)
+pick = next(f for f in board if f["lane"] == "Cheapest")
+ok("the board's flights come from Duffel alone, each with its offer id",
+   len(board) == 8 and all(f["supplier"] == "duffel" and f["duffel_offer_id"] for f in board)
+   and pick["duffel_offer_id"] == "off_j01" and pick["est_price_per_person"] == 378, [(f["lane"], f["duffel_offer_id"]) for f in board])
+plan = make_plan()
+plan["flights"] = {"New York": pick, "Boston": dict(FLIGHT_BOS)}
+DUFFEL["requests"].clear()
+TRIP, (ana, bruno, carla) = make_trip(plan=plan)
+for u in (ana, bruno, carla):
+    profile(u)
+client.post(f"/trips/{TRIP}/checkout/lock", headers=ana["H"])
+item = next(i for i in checkout(ana)["settlement"]["items"] if i["item_key"] == "flight:New York")
+ref = next(i for i in json.loads(settlement_row()["lock"])["items"] if i["item_key"] == "flight:New York")["ref"]
+ok("the lock re-searches the board's exact airports and dates for the two New York travelers",
+   DUFFEL["requests"] and DUFFEL["requests"][0]["slices"] == [
+       {"origin": "JFK", "destination": "FCO", "departure_date": "2026-11-20"},
+       {"origin": "FCO", "destination": "JFK", "departure_date": "2026-11-25"}]
+   and len(DUFFEL["requests"][0]["passengers"]) == 2, DUFFEL["requests"][:1])
+ok("the same itinerary is charged by Duffel at the board's fare and held for the group",
+   item["provider"] == "duffel" and item["charge"] is True and ref["offer_id"] == "off_j01"
+   and ref["signature"] == booking_service._board_signature(pick)
+   and item["per_person_cents"] == 37800 and item["hold_until"] and len(DUFFEL["orders"]) == 1, (item, ref))
+called = [u for _, u in CALLS["log"]]
+ok("only Duffel was asked about the flight — no LiteAPI flight or Duffel stays call",
+   not any("/flights/" in u or "/stays/" in u for u in called)
+   and {urllib.parse.urlparse(u).netloc for u in called} == {"api.duffel.com"}, called)
+ok("no unexpected outbound calls", not CALLS["unexpected"], CALLS["unexpected"])
+
+# An open jaw the board priced as two one-way Duffel tickets is never re-searched as one ticket
+pair = dict(pick, duffel_offer_id="", duffel_offer_ids=["off_out_ow", "off_home_ow"], separate_tickets=True,
+            why=flight_service.PAIR_NOTE)
+unflagged = {k: v for k, v in pair.items() if k != "separate_tickets"}  # stored before the flag existed
+for label, flight in (("flagged", pair), ("recognised by its two offer ids alone", unflagged)):
+    reset_fakes(); DUFFEL["board"] = True
+    plan = make_plan()
+    plan["flights"] = {"New York": flight, "Boston": dict(FLIGHT_BOS)}
+    TRIP, (ana, bruno, carla) = make_trip(plan=plan)
+    for u in (ana, bruno, carla):
+        profile(u)
+    client.post(f"/trips/{TRIP}/checkout/lock", headers=ana["H"])
+    item = next(i for i in checkout(ana)["settlement"]["items"] if i["item_key"] == "flight:New York")
+    ok(f"a one-way pair ({label}) is self-book with an honest reason — no offer request, no hold, nothing charged",
+       item["provider"] == "self" and item["charge"] is False and "two separate one-way tickets" in (item["note"] or "")
+       and "no longer on sale" not in (item["note"] or "") and DUFFEL["requests"] == [] and not DUFFEL["orders"],
+       (item, DUFFEL["requests"][:1]))
+ok("no unexpected outbound calls", not CALLS["unexpected"], CALLS["unexpected"])
+ok("not one LiteAPI flight or Duffel stays call in the whole run", not EVER_FORBIDDEN, EVER_FORBIDDEN)
 
 print(f"\nall {passed} checks passed")

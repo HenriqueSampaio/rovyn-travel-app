@@ -1,0 +1,864 @@
+{
+ "data": {
+  "id": "orq_home",
+  "live_mode": false,
+  "passengers": [
+   {
+    "id": "pas_1",
+    "type": "adult"
+   },
+   {
+    "id": "pas_2",
+    "type": "adult"
+   },
+   {
+    "id": "pas_3",
+    "type": "adult"
+   },
+   {
+    "id": "pas_4",
+    "type": "adult"
+   }
+  ],
+  "offers": [
+   {
+    "id": "off_h01",
+    "live_mode": false,
+    "total_amount": "840.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "AF",
+     "name": "Air France"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_off_h01_1",
+      "duration": "PT10H",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "FLR",
+       "name": "Florence Airport",
+       "city_name": "Florence",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_h01_00",
+        "origin": {
+         "iata_code": "FLR",
+         "name": "Florence Airport",
+         "city_name": "Florence",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "CDG",
+         "name": "Paris Charles de Gaulle Airport",
+         "city_name": "Paris",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T07:00:00",
+        "arriving_at": "2026-11-25T09:00:00",
+        "duration": "PT2H",
+        "marketing_carrier": {
+         "iata_code": "AF",
+         "name": "Air France"
+        },
+        "operating_carrier": {
+         "iata_code": "AF",
+         "name": "Air France"
+        },
+        "marketing_carrier_flight_number": "1067",
+        "operating_carrier_flight_number": "1067",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_h01_01",
+        "origin": {
+         "iata_code": "CDG",
+         "name": "Paris Charles de Gaulle Airport",
+         "city_name": "Paris",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T10:30:00",
+        "arriving_at": "2026-11-25T13:30:00",
+        "duration": "PT8H",
+        "marketing_carrier": {
+         "iata_code": "AF",
+         "name": "Air France"
+        },
+        "operating_carrier": {
+         "iata_code": "AF",
+         "name": "Air France"
+        },
+        "marketing_carrier_flight_number": "8",
+        "operating_carrier_flight_number": "8",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   },
+   {
+    "id": "off_h02",
+    "live_mode": false,
+    "total_amount": "1040.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "LH",
+     "name": "Lufthansa"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_off_h02_1",
+      "duration": "PT10H40M",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "FLR",
+       "name": "Florence Airport",
+       "city_name": "Florence",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_h02_00",
+        "origin": {
+         "iata_code": "FLR",
+         "name": "Florence Airport",
+         "city_name": "Florence",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "FRA",
+         "name": "Frankfurt Airport",
+         "city_name": "Frankfurt",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T17:30:00",
+        "arriving_at": "2026-11-25T19:30:00",
+        "duration": "PT2H",
+        "marketing_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "operating_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "marketing_carrier_flight_number": "313",
+        "operating_carrier_flight_number": "313",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_h02_01",
+        "origin": {
+         "iata_code": "FRA",
+         "name": "Frankfurt Airport",
+         "city_name": "Frankfurt",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T21:00:00",
+        "arriving_at": "2026-11-26T00:10:00",
+        "duration": "PT9H10M",
+        "marketing_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "operating_carrier": {
+         "iata_code": "LH",
+         "name": "Lufthansa"
+        },
+        "marketing_carrier_flight_number": "400",
+        "operating_carrier_flight_number": "400",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   },
+   {
+    "id": "off_h03",
+    "live_mode": false,
+    "total_amount": "960.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "KL",
+     "name": "KLM"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_off_h03_1",
+      "duration": "PT10H30M",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "FLR",
+       "name": "Florence Airport",
+       "city_name": "Florence",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_h03_00",
+        "origin": {
+         "iata_code": "FLR",
+         "name": "Florence Airport",
+         "city_name": "Florence",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "AMS",
+         "name": "Amsterdam Schiphol Airport",
+         "city_name": "Amsterdam",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T11:20:00",
+        "arriving_at": "2026-11-25T13:40:00",
+        "duration": "PT2H20M",
+        "marketing_carrier": {
+         "iata_code": "KL",
+         "name": "KLM"
+        },
+        "operating_carrier": {
+         "iata_code": "KL",
+         "name": "KLM"
+        },
+        "marketing_carrier_flight_number": "1636",
+        "operating_carrier_flight_number": "1636",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_h03_01",
+        "origin": {
+         "iata_code": "AMS",
+         "name": "Amsterdam Schiphol Airport",
+         "city_name": "Amsterdam",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T15:00:00",
+        "arriving_at": "2026-11-25T17:50:00",
+        "duration": "PT8H50M",
+        "marketing_carrier": {
+         "iata_code": "KL",
+         "name": "KLM"
+        },
+        "operating_carrier": {
+         "iata_code": "KL",
+         "name": "KLM"
+        },
+        "marketing_carrier_flight_number": "641",
+        "operating_carrier_flight_number": "641",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   },
+   {
+    "id": "off_h04",
+    "live_mode": false,
+    "total_amount": "1320.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "DL",
+     "name": "Delta Air Lines"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_off_h04_1",
+      "duration": "PT10H15M",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "FLR",
+       "name": "Florence Airport",
+       "city_name": "Florence",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_h04_00",
+        "origin": {
+         "iata_code": "FLR",
+         "name": "Florence Airport",
+         "city_name": "Florence",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T10:00:00",
+        "arriving_at": "2026-11-25T14:15:00",
+        "duration": "PT10H15M",
+        "marketing_carrier": {
+         "iata_code": "DL",
+         "name": "Delta Air Lines"
+        },
+        "operating_carrier": {
+         "iata_code": "DL",
+         "name": "Delta Air Lines"
+        },
+        "marketing_carrier_flight_number": "9120",
+        "operating_carrier_flight_number": "9120",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   },
+   {
+    "id": "off_h05",
+    "live_mode": false,
+    "total_amount": "900.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "TP",
+     "name": "TAP Air Portugal"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_off_h05_1",
+      "duration": "PT12H25M",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "FLR",
+       "name": "Florence Airport",
+       "city_name": "Florence",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_h05_00",
+        "origin": {
+         "iata_code": "FLR",
+         "name": "Florence Airport",
+         "city_name": "Florence",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "LIS",
+         "name": "Lisbon Humberto Delgado Airport",
+         "city_name": "Lisbon",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T15:50:00",
+        "arriving_at": "2026-11-25T17:40:00",
+        "duration": "PT2H50M",
+        "marketing_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "operating_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "marketing_carrier_flight_number": "1849",
+        "operating_carrier_flight_number": "1849",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_h05_01",
+        "origin": {
+         "iata_code": "LIS",
+         "name": "Lisbon Humberto Delgado Airport",
+         "city_name": "Lisbon",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T19:00:00",
+        "arriving_at": "2026-11-25T22:15:00",
+        "duration": "PT8H15M",
+        "marketing_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "operating_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "marketing_carrier_flight_number": "209",
+        "operating_carrier_flight_number": "209",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 0
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   },
+   {
+    "id": "off_h06",
+    "live_mode": false,
+    "total_amount": "1160.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "BA",
+     "name": "British Airways"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_off_h06_1",
+      "duration": "PT10H50M",
+      "fare_brand_name": "Economy",
+      "origin": {
+       "iata_code": "FLR",
+       "name": "Florence Airport",
+       "city_name": "Florence",
+       "type": "airport"
+      },
+      "destination": {
+       "iata_code": "JFK",
+       "name": "John F. Kennedy International Airport",
+       "city_name": "New York",
+       "type": "airport"
+      },
+      "segments": [
+       {
+        "id": "seg_off_h06_00",
+        "origin": {
+         "iata_code": "FLR",
+         "name": "Florence Airport",
+         "city_name": "Florence",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "LHR",
+         "name": "London Heathrow Airport",
+         "city_name": "London",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T09:10:00",
+        "arriving_at": "2026-11-25T11:00:00",
+        "duration": "PT2H50M",
+        "marketing_carrier": {
+         "iata_code": "BA",
+         "name": "British Airways"
+        },
+        "operating_carrier": {
+         "iata_code": "BA",
+         "name": "British Airways"
+        },
+        "marketing_carrier_flight_number": "2607",
+        "operating_carrier_flight_number": "2607",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_off_h06_01",
+        "origin": {
+         "iata_code": "LHR",
+         "name": "London Heathrow Airport",
+         "city_name": "London",
+         "type": "airport"
+        },
+        "destination": {
+         "iata_code": "JFK",
+         "name": "John F. Kennedy International Airport",
+         "city_name": "New York",
+         "type": "airport"
+        },
+        "departing_at": "2026-11-25T13:00:00",
+        "arriving_at": "2026-11-25T16:00:00",
+        "duration": "PT8H",
+        "marketing_carrier": {
+         "iata_code": "BA",
+         "name": "British Airways"
+        },
+        "operating_carrier": {
+         "iata_code": "BA",
+         "name": "British Airways"
+        },
+        "marketing_carrier_flight_number": "117",
+        "operating_carrier_flight_number": "117",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   }
+  ]
+ }
+}

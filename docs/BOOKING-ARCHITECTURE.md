@@ -40,7 +40,7 @@ get there in **three phases**, each shippable and each honest.
 | Option | Verdict | Facts |
 |---|---|---|
 | **LiteAPI (Nuitée)** | ✅ **The path** | Self-serve, free signup, **booking endpoints are free** (look-to-book ratio applies). 3M+ properties incl. apartments/villas. Two modes: (a) **Nuitée as merchant** — their payment SDK collects the traveler's card in our UI, we set a `margin` % as our commission, weekly payouts; (b) **we as merchant** — net rates, we collect via Stripe and pay from a funded wallet. Booking returns `hotelConfirmationCode` — the hotel's own reference, honored at the front desk. Full hotel identity pre-booking (name, address, photos, rating). |
-| **Duffel Stays** | ✅ strong 2nd | Same account as flights; commission profit-share (split unpublished); prepaid Balance; returns front-desk `reference`. |
+| **Duffel Stays** | ✅ strong 2nd — *not integrated* (2026-10-19: stays are LiteAPI-only) | Same account as flights; commission profit-share (split unpublished); prepaid Balance; returns front-desk `reference`. |
 | Expedia Rapid | 🔶 later | Case-by-case application ("Startup" is an accepted business type but turnover is asked). Prize: 900k+ vacation rentals incl. 650k **Vrbo** homes (extra approval; virtual-card payment required — Stripe Issuing). This is the eventual Airbnb-alternative endgame. |
 | Booking.com Demand API | ❌ | Managed-partner contract only; Booking.com culled small affiliates in June 2025. |
 | RateHawk, Hotelbeds | ❌ for now | Require a registered company + signed agreement / certification. Revisit at volume. |

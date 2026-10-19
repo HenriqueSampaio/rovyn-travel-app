@@ -8,7 +8,9 @@ Isolated like tests/test_maps_and_links.py: env pinned before backend
 imports, a temp SQLite + map cache, and a fake urllib layer that RECORDS every
 outbound call and raises on anything unstubbed — the services' catch-alls
 would otherwise turn an unstubbed call into [] silently, so every scenario
-also asserts CALLS["unexpected"] is empty. Fixtures come from
+also asserts CALLS["unexpected"] is empty — and that no LiteAPI flight
+endpoint and no Duffel stays endpoint is ever called: flights are Duffel's
+alone, stays LiteAPI's alone. Fixtures come from
 tests/fixtures/*.json; every number asserted below is a documented formula
 over those fixture fields. Hung fakes wait on an Event the scenario releases,
 never on a fixed sleep.
@@ -42,7 +44,6 @@ os.environ.update({
     "PEXELS_API_KEY": "",
     "LITEAPI_API_KEY": "sand_test_key",
     "DUFFEL_ACCESS_TOKEN": "duffel_test_token",
-    "DUFFEL_STAYS": "",
     "GOOGLE_PLACES_API_KEY": "test-key",
     "GOOGLE_MAPS_EMBED_KEY": "",
     "LITEAPI_RATE_PER_S": "1000",
@@ -60,7 +61,8 @@ db.init_db()
 
 from fastapi.testclient import TestClient  # noqa: E402
 import backend.main  # noqa: E402
-from backend.services import ai_service, duffel_service, flight_service, hotel_service, option_ranking as ranking  # noqa: E402
+from backend.services import ai_service, booking_service, duffel_booking, duffel_service, flight_service  # noqa: E402
+from backend.services import hotel_service, option_ranking as ranking  # noqa: E402
 from backend.services.flight_service import live_flight_details, real_flight_options  # noqa: E402
 from backend.services.hotel_service import real_stay_options  # noqa: E402
 
@@ -75,25 +77,29 @@ LIST = load("liteapi_hotels_list.json")
 VILLAS = load("liteapi_hotels_villas.json")
 FACILITIES = load("liteapi_facilities.json")
 RATES = load("liteapi_rates_wide.json")
-FLIGHTS = load("liteapi_flights_rates.json")
-HOME = load("liteapi_flights_home.json")
-AIRPORTS = load("liteapi_airports.json")
-DUFFEL_OFFERS = load("duffel_offers.json")
-DUFFEL_STAYS = load("duffel_stays.json")
+DUFFEL_OFFERS = load("duffel_offers.json")       # NYC <-> ROM round trips, 16 offers for a party of four
+DUFFEL_HOME = load("duffel_offers_home.json")    # FLR -> NYC one-ways (the open jaw's way home)
+# The multi-city board flies home from Venice: the same six one-ways, leaving VCE
+HOME_BY_CODE = {"FLR": DUFFEL_HOME, "VCE": json.loads(json.dumps(DUFFEL_HOME).replace('"FLR"', '"VCE"'))}
+PLACES = load("duffel_places.json")              # /places/suggestions answers by query, documented shape
+PLACES["venice"] = {"data": [{"id": "arp_vce_it", "type": "airport", "iata_code": "VCE", "iata_city_code": None,
+                              "iata_country_code": "IT", "name": "Venice Marco Polo Airport", "city_name": "Venice",
+                              "city": None, "airports": None, "time_zone": "Europe/Rome"}]}
 ALL_HOTELS = {h["id"]: h for h in LIST["data"] + VILLAS["data"]}
 CENTER = (41.8933, 12.4829)
 GEOCODES = {"rome, italy": CENTER, "florence, italy": (43.7700, 11.2577), "venice, italy": (45.4404, 12.3160)}
 
 # ---------------------------------------------------------------------------
-# Fake network: LiteAPI, Duffel and Google, every call recorded
+# Fake network: LiteAPI (stays), Duffel (flights) and Google, every call recorded
 # ---------------------------------------------------------------------------
 
 MODES = {
     "city": "normal",           # normal | empty (204) | thin (two hotels) | 429 (one throttle, then normal)
     "batch": "normal",          # normal | boom (400 on the lp-boom batch) | hang | thin
-    "flights": "normal",        # normal | hang | empty — the round-trip LiteAPI search
-    "duffel": "normal",         # normal | hang | 429 (one throttle, then normal)
+    "duffel": "normal",         # normal | hang | empty | 429 (one throttle, then normal)
     "duffel_currency": "USD",   # one currency for every offer, or {offer id: currency}
+    "duffel_live": False,       # offers answer live_mode=true (a live token)
+    "open_jaw": "none",         # none (no airline sells it as one ticket) | sold
     "gallery_429": False,
     "rates_hang_ids": set(),    # hotelIds whose rates call hangs (the option page's re-quote)
     "hang": threading.Event(),  # hung fakes wait on this, bounded by HANG_SECONDS
@@ -101,12 +107,12 @@ MODES = {
 }
 HANG_SECONDS = 6.0
 CALLS: dict[str, list] = {}
+EVER_FORBIDDEN: list[str] = []  # never reset: the whole run's LiteAPI-flight / Duffel-stays calls
 
 
 def reset_calls():
-    for key in ("lite_list", "lite_rates", "lite_facilities", "flights", "airports", "verify",
-                "duffel_offers", "duffel_offer_get", "duffel_stays", "geocode", "places",
-                "gallery", "reviews", "routes", "unexpected"):
+    for key in ("lite_list", "lite_rates", "lite_facilities", "duffel_places", "duffel_offers",
+                "duffel_offer_get", "geocode", "places", "gallery", "reviews", "routes", "forbidden", "unexpected"):
         CALLS[key] = []
 
 
@@ -160,20 +166,52 @@ def _rates_response(ids):
             "hotels": [RATES["hotels_block"][hid] for hid in ids if hid in RATES["hotels_block"]]}
 
 
-def _one_way_out():
-    """The outbound halves of the round trips, priced at 55 % — what the
-    open-jaw fallback's one-way search answers."""
+def _offers(payload, offers=None):
+    """A fresh copy of an offer-request answer, its offers in the scenario's
+    currency and mode."""
+    payload = json.loads(json.dumps(payload))
+    if offers is not None:
+        payload["data"]["offers"] = offers
+    for o in payload["data"]["offers"]:
+        cur = MODES["duffel_currency"]
+        o["total_currency"] = cur if isinstance(cur, str) else cur.get(o["id"], "USD")
+        o["live_mode"] = MODES["duffel_live"]
+    return payload
+
+
+def _one_way(slice_):
+    """A one-slice request: home from Florence answers the FLR fixture; the
+    outbound answers the round trips' outbound slices, priced at 55 %."""
+    if slice_["origin"] in HOME_BY_CODE:
+        return _offers(HOME_BY_CODE[slice_["origin"]])
     out = []
-    for j in FLIGHTS["data"][0]["journeys"]:
-        jj = json.loads(json.dumps(j))
-        jj["segments"] = [s for s in j["segments"] if s["direction"] == "OUTBOUND"]
-        jj["legDurations"] = j["legDurations"][:1]
-        rt = j["cheapestOffer"]["pricing"]["display"]["perPassenger"]["adult"]["total"]
-        jj["cheapestOffer"]["pricing"] = {"display": {"currency": "USD",
-                                                      "perPassenger": {"adult": {"total": round(rt * 0.55)}}}}
-        jj["journeyKey"] = j["journeyKey"] + "-ow"
-        out.append(jj)
-    return {"data": [{"journeys": out}]}
+    for o in DUFFEL_OFFERS["data"]["offers"]:
+        oo = json.loads(json.dumps(o))
+        oo["id"] = o["id"] + "_ow"
+        oo["slices"] = o["slices"][:1]
+        oo["total_amount"] = f"{round(float(o['total_amount']) / 4 * 0.55) * 4:.2f}"
+        out.append(oo)
+    return _offers(DUFFEL_OFFERS, out)
+
+
+def _open_jaw(home="FLR"):
+    """NYC -> ROM out, FLR (or VCE) -> NYC home as one ticket: the first six
+    round trips' outbound slices sold with the six returns."""
+    if MODES["open_jaw"] != "sold":
+        return _offers(DUFFEL_OFFERS, [])
+    sold = []
+    for o, h in zip(DUFFEL_OFFERS["data"]["offers"], HOME_BY_CODE[home]["data"]["offers"]):
+        oo = json.loads(json.dumps(o))
+        oo["id"] = f"{o['id']}_{h['id'][4:]}"
+        oo["slices"] = [o["slices"][0], h["slices"][0]]
+        oo["total_amount"] = f"{round(float(o['total_amount']) * 0.55 + float(h['total_amount'])):.2f}"
+        sold.append(oo)
+    return _offers(DUFFEL_OFFERS, sold)
+
+
+# Flights are Duffel's alone and stays LiteAPI's alone: these must never be called
+FORBIDDEN = ("https://api.liteapi.travel/v3.0/flights/", "https://api.liteapi.travel/v3.0/data/flights/",
+             "https://api.duffel.com/stays/")
 
 
 def fake_urlopen(req, timeout=None, context=None):
@@ -223,24 +261,10 @@ def fake_urlopen(req, timeout=None, context=None):
         if MODES["city"] == "thin":
             ids = ids[:2]
         return _json(_rates_response(ids))
-    if url.startswith("https://api.liteapi.travel/v3.0/data/flights/airports"):
-        CALLS["airports"].append(qs.get("q"))
-        return _json(AIRPORTS.get((qs.get("q") or "").lower(), {"data": []}))
-    if url.startswith("https://api.liteapi.travel/v3.0/flights/rates"):
-        CALLS["flights"].append(body)
-        legs = body.get("legs") or []
-        if len(legs) == 1 and legs[0]["origin"] == "FLR":
-            return _json(HOME)
-        if len(legs) == 1:
-            return _json(_one_way_out())
-        if MODES["flights"] == "hang":
-            hang()
-        if MODES["flights"] == "empty":
-            return _json({"data": []})
-        return _json(FLIGHTS)
-    if url.startswith("https://api.liteapi.travel/v3.0/flights/verify"):
-        CALLS["verify"].append(body)
-        return _json({"data": {"pricing": {"display": {"perPassenger": {"adult": {"total": 377}}}}}})
+    if url.startswith(FORBIDDEN):
+        CALLS["forbidden"].append(url)
+        EVER_FORBIDDEN.append(url)
+        raise AssertionError(f"forbidden outbound URL in test: {url}")
     if url.startswith("https://api.liteapi.travel/v3.0/data/reviews"):
         CALLS["reviews"].append(qs)
         return _json({"data": []})
@@ -251,6 +275,9 @@ def fake_urlopen(req, timeout=None, context=None):
         return _json({"data": {"hotelImages": [{"url": f"https://img.example/{qs.get('hotelId')}-1.jpg",
                                                 "defaultImage": True, "order": 1}],
                                "rating": 8.5, "reviewCount": 100}})
+    if url.startswith("https://api.duffel.com/places/suggestions"):
+        CALLS["duffel_places"].append(qs.get("query"))
+        return _json(PLACES.get((qs.get("query") or "").casefold(), {"data": []}))
     if url.startswith("https://api.duffel.com/air/offer_requests"):
         CALLS["duffel_offers"].append(body)
         if MODES["duffel"] == "hang":
@@ -260,19 +287,19 @@ def fake_urlopen(req, timeout=None, context=None):
             now = datetime.now(timezone.utc).replace(microsecond=0)
             raise _http_error(url, 429, b'{"errors":[{"code":"rate_limit_exceeded"}]}',
                               {"date": format_datetime(now), "ratelimit-reset": format_datetime(now + timedelta(seconds=1))})
-        payload = json.loads(json.dumps(DUFFEL_OFFERS))
-        for o in payload["data"]["offers"]:
-            cur = MODES["duffel_currency"]
-            o["total_currency"] = cur if isinstance(cur, str) else cur.get(o["id"], "USD")
-        return _json(payload)
+        slices = body["data"]["slices"]
+        if MODES["duffel"] == "empty":
+            return _json(_offers(DUFFEL_OFFERS, []))
+        if len(slices) == 1:
+            return _json(_one_way(slices[0]))
+        if slices[1]["origin"] in HOME_BY_CODE:
+            return _json(_open_jaw(slices[1]["origin"]))
+        return _json(_offers(DUFFEL_OFFERS))
     if url.startswith("https://api.duffel.com/air/offers/"):
         CALLS["duffel_offer_get"].append(url)
         return _json({"data": {"id": url.rsplit("/", 1)[1], "total_amount": "1488.00", "total_currency": "USD",
                                "passengers": [{"id": f"pas_{i}"} for i in range(1, 5)],
                                "expires_at": "2099-01-01T00:00:00Z"}})
-    if url.startswith("https://api.duffel.com/stays/search"):
-        CALLS["duffel_stays"].append(body)
-        return _json(DUFFEL_STAYS)
     if url.startswith("https://maps.googleapis.com/maps/api/geocode/json"):
         CALLS["geocode"].append(qs.get("address"))
         addr = (qs.get("address") or "").casefold()
@@ -304,6 +331,7 @@ def ok(label, cond, extra=""):
 
 def no_surprises(label=""):
     ok(f"no unexpected outbound calls {label}".strip(), not CALLS["unexpected"], CALLS["unexpected"])
+    ok(f"no LiteAPI flight or Duffel stays call {label}".strip(), not CALLS["forbidden"], CALLS["forbidden"])
 
 
 def prefs_for(votes, budget=(300, 900), vibes=("relaxation", "food"), group=4, nights=3, pace="moderately"):
@@ -432,7 +460,7 @@ ok("the wide pass is one rates call by city with the documented knobs",
        and c.get("timeout") == 10 and c.get("limit") == 150 for c in CALLS["lite_rates"]))
 ok("the search report says what it saw",
    report["listed"] == 30 and report["priced"] >= 27 and report["batches_failed"] == 0
-   and report["truncated"] is False and report["mode"] == "city" and report["duffel"] == 0, report)
+   and report["truncated"] is False and report["mode"] == "city" and "duffel" not in report, report)
 ok("no official-website lookups at board time", CALLS["places"] == [])
 ok("the facilities catalog was fetched once", len(CALLS["lite_facilities"]) == 1)
 
@@ -597,8 +625,8 @@ ok("the board carries the schema version, prefs and band for the UI",
 ok("the search report is keyed by town on a single-base trip too",
    list(board["stay_search"]) == ["Rome"] and board["stay_search"]["Rome"]["priced"] == 2, board["stay_search"])
 ok("provenance names the suppliers actually on the board",
-   board["stay_source"] == "liteapi" and board["flights_source"] == "liteapi"
-   and set(board["flight_suppliers"]) == {"liteapi", "duffel"} and board["stay_suppliers"] == ["liteapi", "sample"],
+   board["stay_source"] == "liteapi" and board["flights_source"] == "duffel"
+   and board["flight_suppliers"] == ["duffel"] and board["stay_suppliers"] == ["liteapi", "sample"],
    (board["stay_source"], board["flights_source"], board["flight_suppliers"], board["stay_suppliers"]))
 
 live_one = [{"name": "Hotel Forum Roma", "live_price": True, "supplier": "liteapi", "lane": "Best match",
@@ -721,10 +749,8 @@ ok("a $0 floor is never printed — the verdict is phrased against the ceiling",
 ok("a guest house is not a whole-group home; a country house or villa is",
    not ranking.is_home_type(None, "guest house") and not ranking.is_home_type(None, "Bed & Breakfast")
    and ranking.is_home_type(None, "country house") and ranking.is_home_type(None, "villa") and not ranking.is_home_type(None, "hotel"))
-ok("a type label from a name: a hotel's own suites stay a hotel",
-   ranking.label_from_name("Hotel Palazzo Suites") == "hotel" and ranking.label_from_name("Trastevere Loft Apartments") == "apartment"
-   and ranking.label_from_name("Embassy Suites") == "hotel" and ranking.star_label("hotel", 4) == "4-star hotel"
-   and ranking.star_label("villa", 4) == "villa")
+ok("a star rating names a hotel's class, never a villa's",
+   ranking.star_label("hotel", 4) == "4-star hotel" and ranking.star_label("villa", 4) == "villa")
 ok("every accommodation vote has a fixed chip form, whatever its casing",
    {v: ranking.short_label(v) for v in ranking.VOTE_TYPE_IDS}
    == {"hostel": "Hostel", "boutique hotel": "Boutique hotel", "4-star hotel": "4-star hotel",
@@ -770,13 +796,6 @@ r = roles([fact("A", 300, 900), fact("B", 320, 620), fact("C", 500, 600)])
 ok("Best balance never goes to an itinerary both pricier and slower than a pick",
    r == {"A": "cheapest", "C": "fastest", "B": "balanced"}, r)
 
-rec = duffel_service._result_to_record({
-    "id": "srr_x", "cheapest_rate_total_amount": "500.00", "cheapest_rate_currency": "USD",
-    "accommodation": {"id": "acc_x", "name": "Hotel Palazzo Suites", "review_score": 4.6, "review_count": 30, "rating": 4,
-                      "location": {}, "photos": [], "amenities": []}})
-ok("Duffel review scores are already out of 10 — 4.6 stays 4.6, and the suites are a 4-star hotel",
-   rec["rating10"] == 4.6 and rec["type_label"] == "4-star hotel", (rec["rating10"], rec["type_label"]))
-
 # ---------------------------------------------------------------------------
 # 9. The LiteAPI pacer: a rate with a one-token burst, never a concurrency cap
 # ---------------------------------------------------------------------------
@@ -815,37 +834,45 @@ os.environ["LITEAPI_RATE_PER_S"] = saved_rate
 hotel_service._bucket["rate"] = 0.0
 
 # ---------------------------------------------------------------------------
-# 10. Flights: roles, LiteAPI + Duffel merged, pace-aware, re-verified, bounded
+# 10. Flights: Duffel only — places, roles, pace-aware, re-verified, bounded
 # ---------------------------------------------------------------------------
 print("flights:")
 reset_calls()
+flight_service._airport_lookup.cache_clear()
 flights = fly(pace="moderately")
 no_surprises("(flights)")
 lanes = [f["lane"] for f in flights]
 ok("eight itineraries, eight distinct lanes", len(flights) == 8 and len(set(lanes)) == 8, lanes)
-ok("both suppliers were searched, once each",
-   len(CALLS["flights"]) == 1 and len(CALLS["duffel_offers"]) == 1, (len(CALLS["flights"]), len(CALLS["duffel_offers"])))
-ok("Duffel was asked for the same slices and party",
-   CALLS["duffel_offers"][0]["data"]["slices"][0] == {"origin": "NYC", "destination": "FCO", "departure_date": "2026-11-20"}
-   and len(CALLS["duffel_offers"][0]["data"]["passengers"]) == 4, CALLS["duffel_offers"][0])
-lite_pp = {j["journeyKey"]: j["cheapestOffer"]["pricing"]["display"]["perPassenger"]["adult"]["total"]
-           for j in FLIGHTS["data"][0]["journeys"]}
+ok("places resolve through Duffel's suggestions, one per city",
+   CALLS["duffel_places"] == ["New York", "Rome"], CALLS["duffel_places"])
+ok("one Duffel offer request: the metro codes both ways and the party of four",
+   len(CALLS["duffel_offers"]) == 1
+   and CALLS["duffel_offers"][0]["data"]["slices"] == [
+       {"origin": "NYC", "destination": "ROM", "departure_date": "2026-11-20"},
+       {"origin": "ROM", "destination": "NYC", "departure_date": "2026-11-25"}]
+   and len(CALLS["duffel_offers"][0]["data"]["passengers"]) == 4, CALLS["duffel_offers"])
+ok("'Rome, Italy' resolves to the Italian metro, never the namesake in New York state",
+   flight_service._resolve("Rome, Italy") == ("ROM", ("ROM", "FCO", "CIA")), flight_service._resolve("Rome, Italy"))
+ok("a metro's airports all count as that city", set(flight_service._resolve("New York")[1]) == {"NYC", "JFK", "EWR", "LGA"},
+   flight_service._resolve("New York"))
+ok("a city without a metro code resolves to its airport", flight_service._resolve("Florence, Italy") == ("FLR", ("FLR",)),
+   flight_service._resolve("Florence, Italy"))
+ok("the lookups are cached per process", CALLS["duffel_places"] == ["New York", "Rome", "Florence"], CALLS["duffel_places"])
 duffel_pp = {o["id"]: float(o["total_amount"]) / len(o["passengers"]) for o in DUFFEL_OFFERS["data"]["offers"]}
 ok("Duffel offers are priced for the whole party of four; the board divides by the passengers",
-   all(len(o["passengers"]) == 4 for o in DUFFEL_OFFERS["data"]["offers"]) and duffel_pp["off_dup_j01"] == 378)
-merged_pool = [p for k, p in lite_pp.items() if k != "j01"] + list(duffel_pp.values())  # j01's cheaper Duffel copy wins
-ok("fixture pool: 14 LiteAPI + 3 Duffel − 1 duplicate", len(merged_pool) == 16, len(merged_pool))
-median = statistics.median(merged_pool)
+   all(len(o["passengers"]) == 4 for o in DUFFEL_OFFERS["data"]["offers"]) and duffel_pp["off_j01"] == 378)
+ok("fixture pool: 16 Duffel offers", len(duffel_pp) == 16, len(duffel_pp))
+median = statistics.median(duffel_pp.values())
 cheapest = next(f for f in flights if f["lane"] == "Cheapest")
-ok("the identical itinerary from both suppliers appears once — the cheaper Duffel copy",
+ok("the cheapest card is the cheapest offer, carrying its Duffel offer id",
    cheapest["est_price_per_person"] == 378 and cheapest["supplier"] == "duffel"
-   and cheapest["duffel_offer_id"] == "off_dup_j01" and cheapest["offer_ids"] == [], cheapest)
-ok("the cheapest reason = median gap over the merged pool",
+   and cheapest["duffel_offer_id"] == "off_j01" and "offer_ids" not in cheapest, cheapest)
+ok("the cheapest reason = median gap over the pool",
    cheapest["reasons"][0]["text"] == f"Cheapest live fare — ${int(median - 378)} under the median option",
    cheapest["reasons"])
 ok("why = the lane reason only; bags live in reasons",
    cheapest["why"] == cheapest["reasons"][0]["text"] and any(r["kind"] == "bags" for r in cheapest["reasons"]))
-ok("every option: reasons[0] is its lane reason, sandbox is flagged, currency is set",
+ok("every option: reasons[0] is its lane reason, sandbox is flagged (a test token), currency is set",
    all(f["reasons"][0]["kind"] == "lane" and f["sandbox"] is True and f["currency"] == "USD" for f in flights))
 LANE_RE = {
     "Cheapest": ("Cheapest live fare",), "Nonstop": ("Nonstop both ways",), "Fastest": ("Fastest routing",),
@@ -872,9 +899,16 @@ ok("early arrival = the earliest local landing, with its date",
 ok("the price gap reason is relative to the cheapest fare",
    all(f"${f['est_price_per_person'] - 378} more than the cheapest fare" in [r["text"] for r in f["reasons"]]
        for f in flights if f["lane"] != "Cheapest"))
-ok("near-duplicates never earn a slot", all(f["journey_key"] != "j02" for f in flights))
+ok("near-duplicates never earn a slot", all(f["duffel_offer_id"] != "off_j02" for f in flights))
 ok("match scores and roles are present", all(0 < f["match_score"] <= 100 and f["role"] for f in flights))
-ok("with LiteAPI fares present the board's flight source is liteapi", ai_service._live_source_label(flights) == "liteapi")
+ok("the board's flight source is duffel", ai_service._live_source_label(flights, "duffel") == "duffel"
+   and ranking.summarize_suppliers(flights) == ["duffel"])
+offers_by_id = {o["id"]: o for o in DUFFEL_OFFERS["data"]["offers"]}
+ok("every card is bookable: it carries its offer id, and the booking engine re-finds the same itinerary from it",
+   all(f["duffel_offer_id"] in offers_by_id and f["duffel_offer_ids"] == [f["duffel_offer_id"]]
+       and booking_service._board_signature(f) == duffel_booking.itinerary_signature(offers_by_id[f["duffel_offer_id"]])
+       and [sl["departure_date"] for sl in booking_service._slices_from_flight(f)] == ["2026-11-20", "2026-11-25"]
+       for f in flights), [(f["lane"], f["duffel_offer_id"]) for f in flights])
 
 reset_calls()
 busy = fly(pace="very")
@@ -885,33 +919,28 @@ ok("a relaxed group sees No early start claimed second", [f["lane"] for f in rel
    [f["lane"] for f in relaxed])
 
 reset_calls()
-MODES["duffel_currency"] = {"off_dup_j01": "GBP"}
+MODES["duffel_currency"] = {"off_j01": "GBP"}
 gbp = fly()
 MODES["duffel_currency"] = "USD"
 no_surprises("(gbp)")
 gbp_cheapest = next(f for f in gbp if f["lane"] == "Cheapest")
-ok("a GBP Duffel copy never replaces the USD LiteAPI fare",
-   len(CALLS["duffel_offers"]) == 1 and gbp_cheapest["supplier"] == "liteapi" and gbp_cheapest["est_price_per_person"] == 380, gbp_cheapest)
-ok("only the non-USD offer is left off the board; Duffel's USD offers still merge",
-   any(f["duffel_offer_id"] == "off_zz_nonstop" for f in gbp) and all(f["duffel_offer_id"] != "off_dup_j01" for f in gbp),
-   [(f["lane"], f["supplier"]) for f in gbp])
+ok("an offer in another currency is left off the board — no silent FX; the USD offers still rank",
+   len(CALLS["duffel_offers"]) == 1 and all(f["duffel_offer_id"] != "off_j01" for f in gbp)
+   and gbp_cheapest["duffel_offer_id"] == "off_j02" and gbp_cheapest["est_price_per_person"] == 386, gbp_cheapest)
 
 reset_calls()
-os.environ["LITEAPI_API_KEY"] = "prod_key"
-prod = fly()
-os.environ["LITEAPI_API_KEY"] = "sand_test_key"
-ok("production LiteAPI fares are never mixed with Duffel test offers: Duffel searched, then dropped",
-   len(CALLS["duffel_offers"]) == 1 and len(prod) >= 7 and all(f["supplier"] == "liteapi" and f["sandbox"] is False for f in prod),
-   [(f["supplier"], f["sandbox"]) for f in prod])
+os.environ["DUFFEL_ACCESS_TOKEN"], MODES["duffel_live"] = "duffel_live_token", True
+live = fly()
+os.environ["DUFFEL_ACCESS_TOKEN"], MODES["duffel_live"] = "duffel_test_token", False
+ok("live-mode offers are not flagged as test inventory", len(live) == 8 and all(f["sandbox"] is False for f in live),
+   [f["sandbox"] for f in live])
 
 reset_calls()
-MODES["flights"] = "empty"
-duffel_board = fly()
-MODES["flights"] = "normal"
-ok("when LiteAPI answers nothing the board is Duffel's and says so",
-   len(duffel_board) == 3 and all(f["supplier"] == "duffel" for f in duffel_board)
-   and ai_service._live_source_label(duffel_board) == "duffel" and ranking.summarize_suppliers(duffel_board) == ["duffel"],
-   [(f["lane"], f["supplier"]) for f in duffel_board])
+MODES["duffel"] = "empty"
+empty = fly()
+MODES["duffel"] = "normal"
+ok("when Duffel answers nothing there are no live flights (the AI menu takes the city)",
+   empty == [] and len(CALLS["duffel_offers"]) == 1, empty)
 
 reset_calls()
 MODES["duffel"] = "429"
@@ -919,7 +948,7 @@ MODES["throttled"].discard("duffel")
 retried = fly()
 MODES["duffel"] = "normal"
 ok("a Duffel 429 is retried once after ratelimit-reset",
-   len(CALLS["duffel_offers"]) == 2 and any(f["supplier"] == "duffel" for f in retried), len(CALLS["duffel_offers"]))
+   len(CALLS["duffel_offers"]) == 2 and len(retried) == 8, len(CALLS["duffel_offers"]))
 
 reset_calls()
 arm_hang()
@@ -931,115 +960,167 @@ elapsed = time.monotonic() - started
 flight_service._DUFFEL_TIMEOUT = duffel_service.FLIGHT_HTTP_TIMEOUT
 MODES["duffel"] = "normal"
 release_hang()
-ok("a Duffel search that trickles past its bound is abandoned; LiteAPI alone makes the board",
-   elapsed < 1.5 and len(bounded) >= 7 and all(f["supplier"] == "liteapi" for f in bounded), (round(elapsed, 2), len(bounded)))
+ok("a Duffel search that trickles past its bound is abandoned; the city falls back to the AI menu",
+   elapsed < 1.5 and bounded == [], (round(elapsed, 2), len(bounded)))
 
 reset_calls()
 fresh = live_flight_details(cheapest)
-ok("a Duffel option re-verifies through Duffel, not LiteAPI, per person over four passengers",
+ok("a live option re-verifies through Duffel, per person over four passengers",
    fresh["source"] == "duffel" and fresh["price_fresh"] is True and fresh["price_per_person"] == 372
-   and len(CALLS["duffel_offer_get"]) == 1 and CALLS["verify"] == [], fresh)
-lite_opt = next(f for f in flights if f["supplier"] == "liteapi")
+   and len(CALLS["duffel_offer_get"]) == 1 and CALLS["duffel_offer_get"][0].endswith("/off_j01"), fresh)
 reset_calls()
-fresh = live_flight_details(lite_opt)
-ok("a LiteAPI option re-verifies through /flights/verify",
-   fresh["source"] == "liteapi" and fresh["price_fresh"] is True and len(CALLS["verify"]) == len(lite_opt["offer_ids"]), fresh)
+naive = live_flight_details(dict(cheapest, expires_at="2099-01-01T00:00:00"))
+ok("a naive expires_at is read as UTC, not a crash", naive["price_fresh"] is True and len(CALLS["duffel_offer_get"]) == 1, naive)
+odd = live_flight_details(dict(cheapest, expires_at="not a date"))
+ok("an unparseable expiry still renders the stored facts", odd["source"] == "duffel" and odd["price_fresh"] is False and odd["segments"], odd)
 reset_calls()
-naive = live_flight_details(dict(lite_opt, expires_at="2099-01-01T00:00:00"))
-ok("a naive expires_at is read as UTC, not a crash", naive["price_fresh"] is True and len(CALLS["verify"]) == len(lite_opt["offer_ids"]), naive)
-odd = live_flight_details(dict(lite_opt, expires_at="not a date"))
-ok("an unparseable expiry still renders the stored facts", odd["source"] == "liteapi" and odd["price_fresh"] is False and odd["segments"], odd)
+legacy = live_flight_details(dict(cheapest, supplier="liteapi", duffel_offer_id="", duffel_offer_ids=[]))
+ok("a live fare an older board stored from another supplier shows the board's facts, re-verified nowhere",
+   legacy == {"kind": "live", "source": "board"} and CALLS["duffel_offer_get"] == [], legacy)
+no_surprises("(flight details)")
 
 # ---------------------------------------------------------------------------
-# 11. Pacing is a rate, not a concurrency cap: hung flight searches never starve stays
+# 11. Hung flight searches never starve a stay search
 # ---------------------------------------------------------------------------
-print("pacing under load:")
+print("flights under load:")
 reset_calls()
 arm_hang()
-MODES["flights"] = "hang"
+MODES["duffel"] = "hang"
 flyers = [threading.Thread(target=fly, daemon=True) for _ in range(3)]
 for t in flyers:
     t.start()
-time.sleep(0.3)  # the three LiteAPI flight searches are now hanging inside the fake
+time.sleep(0.3)  # the three Duffel flight searches are now hanging inside the fake
 os.environ["STAY_SEARCH_DEADLINE_S"] = "2"
 started = time.monotonic()
 r11 = {}
 under_load = search_rome(VOTES, PREFS, report=r11)
 elapsed = time.monotonic() - started
 os.environ["STAY_SEARCH_DEADLINE_S"] = "20"
-MODES["flights"] = "normal"
+MODES["duffel"] = "normal"
 release_hang()
 for t in flyers:
-    t.join(timeout=10)
+    t.join(timeout=20)
 ok("three hung flight searches do not hold up a stay search",
    len(under_load) == 12 and r11["truncated"] is False and elapsed < 2.0, (len(under_load), r11, round(elapsed, 2)))
-no_surprises("(pacing)")
+no_surprises("(under load)")
 
 # ---------------------------------------------------------------------------
-# 12. Open-jaw: paired one-ways earn their lanes
+# 12. Open-jaw: one multi-slice request; paired one-ways only when needed
 # ---------------------------------------------------------------------------
 print("open-jaw:")
 reset_calls()
 jaw = fly(return_from_city="Florence, Italy", pace="moderately")
 no_surprises("(open-jaw)")
-ok("the provider ignored the open jaw -> two one-way searches", len(CALLS["flights"]) == 3, len(CALLS["flights"]))
+ok("the open jaw is asked as one Duffel request: into Rome, home from Florence",
+   CALLS["duffel_offers"][0]["data"]["slices"] == [
+       {"origin": "NYC", "destination": "ROM", "departure_date": "2026-11-20"},
+       {"origin": "FLR", "destination": "NYC", "departure_date": "2026-11-25"}], CALLS["duffel_offers"][:1])
+ok("no airline sold it as one ticket -> two Duffel one-way searches",
+   len(CALLS["duffel_offers"]) == 3 and [len(c["data"]["slices"]) for c in CALLS["duffel_offers"][1:]] == [1, 1],
+   len(CALLS["duffel_offers"]))
 ok("at least six distinct lanes from the pairing", len(jaw) >= 6 and len({f["lane"] for f in jaw}) == len(jaw),
    [f["lane"] for f in jaw])
-ok("every pair says it is two one-way fares and flies home from Florence",
-   all("Priced as two one-way fares" in f["why"] and f["return_route"].startswith("FLR") for f in jaw))
+ok("every pair says it is two one-way tickets the travelers book themselves, home from Florence",
+   all(flight_service.PAIR_NOTE in f["why"] and "you book these yourself" in f["why"]
+       and f["return_route"].startswith("FLR") for f in jaw), [f["why"] for f in jaw])
+ok("every pair carries both legs' Duffel offer ids and is flagged as separate tickets",
+   all(len(f["duffel_offer_ids"]) == 2 and f["duffel_offer_id"] == "" and f["supplier"] == "duffel"
+       and f["separate_tickets"] is True for f in jaw),
+   [f["duffel_offer_ids"] for f in jaw])
 late = next((f for f in jaw if f["lane"] == "Late return"), None)
 ok("the late-return pair really leaves Florence after 15:00", late is not None and late["return"] >= "2026-11-25 15:00", late)
+reset_calls()
+fresh = live_flight_details(jaw[0])
+ok("a pair re-verifies both legs and quotes their sum", fresh["price_fresh"] is True
+   and fresh["price_per_person"] == 744 and len(CALLS["duffel_offer_get"]) == 2, fresh)
+
+reset_calls()
+MODES["open_jaw"] = "sold"
+sold = fly(return_from_city="Florence, Italy", pace="moderately")
+MODES["open_jaw"] = "none"
+no_surprises("(open-jaw sold)")
+ok("an open jaw sold as one ticket is used as is — no one-way searches",
+   len(CALLS["duffel_offers"]) == 1 and sold and all(
+       f["return_route"].startswith("FLR") and "two one-way" not in f["why"] and f["duffel_offer_id"]
+       and f["separate_tickets"] is False for f in sold),
+   [(f["lane"], f["return_route"]) for f in sold])
+
+reset_calls()
+arm_hang()
+MODES["duffel"] = "hang"
+flight_service._DUFFEL_TIMEOUT = 0.5
+timed_out = fly(return_from_city="Florence, Italy", pace="moderately")
+flight_service._DUFFEL_TIMEOUT = duffel_service.FLIGHT_HTTP_TIMEOUT
+MODES["duffel"] = "normal"
+release_hang()
+ok("an open-jaw search that never answered is not swapped for one-way pairs — the AI menu covers it",
+   timed_out == [] and len(CALLS["duffel_offers"]) == 1, (len(timed_out), len(CALLS["duffel_offers"])))
+
+reset_calls()
+nowhere = fly(return_from_city="Positano, Italy", pace="moderately")
+ok("a return city with no airport match prices nothing — never a plain round trip passed off as the open jaw",
+   nowhere == [] and CALLS["duffel_offers"] == [] and "Positano" in CALLS["duffel_places"], (len(nowhere), CALLS["duffel_places"]))
+reset_calls()
+lost_home = fly(return_to_city="Atlantis")
+ok("a home city that doesn't resolve prices nothing either — never a return to the wrong home",
+   lost_home == [] and CALLS["duffel_offers"] == [], len(lost_home))
+no_surprises("(open-jaw guards)")
+
+# Boards saved before flights went Duffel-only still hold LiteAPI fares
+from backend.routers.trips import _retire_legacy_flights  # noqa: E402
+old_board = {"flights_sandbox": True, "flights_source": "liteapi", "flights_all_live": True, "flights": {
+    "New York": [dict(cheapest, supplier="liteapi", airline="Nuitee Air", sandbox=True, duffel_offer_id="",
+                      duffel_offer_ids=[]),
+                 dict(cheapest, id="f-old2", airline="Nuitee Air", sandbox=True, duffel_offer_id="",
+                      duffel_offer_ids=[], supplier=None)],
+    "Boston": [{"airline": "Delta", "live_price": False, "est_price_per_person": 500}]}}
+shown = _retire_legacy_flights(old_board)
+ny = shown["flights"]["New York"]
+ok("a stored LiteAPI fare (Nuitee Air) loses LIVE PRICE and the test-carrier flag; the board says it is legacy",
+   shown["flights_legacy"] is True and shown["flights_sandbox"] is False and shown["flights_all_live"] is False
+   and "flights_source" not in shown
+   and all(o["live_price"] is False and o["sandbox"] is False and o["earlier_search"] == "liteapi"
+           and o["segments"]["out"] for o in ny), (shown.get("flights_source"), ny[0].get("earlier_search")))
+ok("the relabel is response-only — the stored board is untouched",
+   old_board["flights"]["New York"][0]["live_price"] is True and old_board["flights_source"] == "liteapi")
+mixed = _retire_legacy_flights({"flights": {"New York": [ny[0] | {"live_price": True, "supplier": "liteapi"}, cheapest]}})
+ok("a Duffel fare on the same board stays live and keeps the board's Duffel provenance",
+   mixed["flights"]["New York"][1] is cheapest and mixed["flights_source"] == "duffel"
+   and mixed["flights_sandbox"] is True and mixed["flights_legacy"] is True)
+fresh_board = {"flights": {"New York": [cheapest]}, "flights_source": "duffel"}
+ok("a Duffel-only board passes through unchanged", _retire_legacy_flights(fresh_board) is fresh_board)
 
 # ---------------------------------------------------------------------------
 # 13. No keys, no calls
 # ---------------------------------------------------------------------------
 print("no keys:")
 reset_calls()
+flight_service._airport_lookup.cache_clear()
 os.environ["LITEAPI_API_KEY"], os.environ["DUFFEL_ACCESS_TOKEN"] = "", ""
 ok("no LiteAPI key -> no stays, no calls",
    search_rome(VOTES, PREFS) == [] and CALLS["lite_list"] == [] and CALLS["lite_rates"] == [])
-ok("no keys -> no flights, no calls", fly() == [] and CALLS["flights"] == [] and CALLS["duffel_offers"] == [])
-os.environ["DUFFEL_ACCESS_TOKEN"] = "duffel_test_token"
-ok("a Duffel token without the LiteAPI key searches nothing — airports resolve through LiteAPI",
-   fly() == [] and CALLS["airports"] == [] and CALLS["flights"] == [] and CALLS["duffel_offers"] == [])
+ok("no keys -> no flights, no calls", fly() == [] and CALLS["duffel_places"] == [] and CALLS["duffel_offers"] == [])
 os.environ["LITEAPI_API_KEY"] = "sand_test_key"
-os.environ["DUFFEL_ACCESS_TOKEN"] = ""
-reset_calls()
-only_lite = fly()
-ok("no Duffel token -> LiteAPI alone, no Duffel call",
-   len(only_lite) >= 7 and CALLS["duffel_offers"] == [] and all(f["supplier"] == "liteapi" for f in only_lite))
+ok("a LiteAPI key alone searches no flights at all", not flight_service.flights_available() and fly() == []
+   and CALLS["duffel_places"] == [] and CALLS["duffel_offers"] == [] and CALLS["forbidden"] == [])
 os.environ["DUFFEL_ACCESS_TOKEN"] = "duffel_test_token"
+no_surprises("(no keys)")
 
 # ---------------------------------------------------------------------------
-# 14. Duffel stays: mapped and deduped, wired only behind DUFFEL_STAYS=1
+# 14. Stays are LiteAPI's alone — no env var brings Duffel stays back
 # ---------------------------------------------------------------------------
-print("duffel stays:")
+print("stays are liteapi-only:")
 reset_calls()
-recs = duffel_service.search_stays(CENTER[0], CENTER[1], "2026-11-20", "2026-11-23", 2, 4)
-ok("search maps USD results and drops the EUR one",
-   [r["name"] for r in recs] == ["Hotel Forum Rome", "Trastevere Loft Apartments"], [r["name"] for r in recs])
-loft = recs[1]
-ok("a Duffel record carries price, score, facilities and its own detail sheet",
-   loft["price_total"] == 960.0 and loft["rating10"] == 8.6 and loft["facilities"] == ["Free WiFi", "Washer"]
-   and loft["type_label"] == "apartment" and loft["details"]["source"] == "duffel" and len(loft["details"]["photos"]) == 2, loft)
-reset_calls()
-not_wired = search_rome(VOTES, PREFS)
-ok("without DUFFEL_STAYS the board never calls Duffel stays",
-   CALLS["duffel_stays"] == [] and all(o["supplier"] == "liteapi" for o in not_wired))
-os.environ["DUFFEL_STAYS"] = "1"
-reset_calls()
+os.environ["DUFFEL_STAYS"] = "1"  # the retired flag: must change nothing
 r14 = {}
-wired = search_rome(VOTES, PREFS, target=40, report=r14)
-os.environ["DUFFEL_STAYS"] = ""
-no_surprises("(duffel stays)")
-duffel_opts = [o for o in wired if o["supplier"] == "duffel"]
-ok("with the flag, the unique Duffel apartment joins the pool, unbookable and detailed",
-   len(CALLS["duffel_stays"]) == 1 and r14["duffel"] == 1 and [o["name"] for o in duffel_opts] == ["Trastevere Loft Apartments"]
-   and duffel_opts[0]["bookable"] is False and "liteapi_hotel_id" not in duffel_opts[0]
-   and duffel_opts[0]["duffel_details"]["source"] == "duffel" and duffel_opts[0]["live_price"] is True, duffel_opts)
-ok("the Duffel copy of a LiteAPI hotel is dropped (name + 150 m)", all(o["name"] != "Hotel Forum Rome" for o in wired))
-ok("the Duffel stay's option page comes from its own payload",
-   hotel_service.real_option_details("stay", duffel_opts[0], {"destination": "Rome, Italy"})["source"] == "duffel")
+lite_only = search_rome(VOTES, PREFS, target=40, report=r14)
+os.environ.pop("DUFFEL_STAYS")
+no_surprises("(liteapi-only stays)")
+ok("with a Duffel token set (and the old flag), every stay is a bookable LiteAPI hotel",
+   lite_only and all(o["supplier"] == "liteapi" and o["liteapi_hotel_id"] for o in lite_only)
+   and "duffel" not in r14, (ranking.summarize_suppliers(lite_only), r14))
+ok("no Duffel stays search exists to wire", not hasattr(duffel_service, "search_stays")
+   and not hasattr(hotel_service, "duffel_search_stays"))
 
 # ---------------------------------------------------------------------------
 # 15. Multi-city board end to end (sample mode): per-city sets, provenance
@@ -1064,11 +1145,14 @@ ok("city budget reasons use the city's nights",
    all(" for 2 nights — " in r["text"] for opts in per_city.values() for o in opts for r in o["reasons"] if r["kind"] == "budget"))
 ok("the search report is per town", set(board["stay_search"]) == set(towns), board["stay_search"].keys())
 ok("provenance: suppliers listed, sources named, sandbox flights flagged",
-   board["stay_suppliers"] == ["liteapi"] and set(board["flight_suppliers"]) == {"liteapi", "duffel"}
-   and board["stay_source"] == "liteapi" and board["flights_source"] == "liteapi"
-   and board["flights_sandbox"] is True and board["stay_all_live"] is True, (board["stay_suppliers"], board["flight_suppliers"]))
-ok("flights per departure city: eight, laned, with the pace order",
-   len(board["flights"]["New York"]) == 8 and board["flights"]["New York"][1]["lane"] == "Early arrival")
+   board["stay_suppliers"] == ["liteapi"] and board["flight_suppliers"] == ["duffel"]
+   and board["stay_source"] == "liteapi" and board["flights_source"] == "duffel"
+   and board["flights_sandbox"] is True and board["stay_all_live"] is True, (board["stay_suppliers"], board["flight_suppliers"], towns, CALLS["duffel_places"], [c["data"]["slices"] for c in CALLS["duffel_offers"]]))
+ny_flights = board["flights"]["New York"]
+ok("flights per departure city: laned, with the pace order, flying home from the route's last city (Venice)",
+   len(ny_flights) >= 6 and ny_flights[1]["lane"] == "Early arrival"
+   and all(f["return_route"].startswith("VCE") for f in ny_flights),
+   [(f["lane"], f["return_route"]) for f in ny_flights])
 ok("option ids are assigned after ranking", all(o["id"].startswith("stay-") for o in board["stay"]))
 ok("three travelers from New York: the city's flight link searches three adults",
    all("passengers=adults:3&" in f["link"] for f in board["flights"]["New York"]), board["flights"]["New York"][0]["link"])
@@ -1169,4 +1253,5 @@ ok("the property page reuses the gallery's memoized /data/hotel fetch",
    CALLS["gallery"] == [] and page["source"] == "liteapi" and page.get("room_offers"), (CALLS["gallery"], page.get("source")))
 no_surprises("(api)")
 
+ok("not one LiteAPI flight or Duffel stays call in the whole run", not EVER_FORBIDDEN, EVER_FORBIDDEN)
 print(f"\nall {passed} checks passed")

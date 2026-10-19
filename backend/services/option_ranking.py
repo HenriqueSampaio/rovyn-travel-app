@@ -117,8 +117,8 @@ VOTE_TYPE_IDS = {
         {201, 207, 213, 219, 220, 222, 223, 228, 229, 230, 232}, {208, 216}),
 }
 
-# The same votes matched by words in a type label — AI, sample and Duffel
-# stays carry labels ("boutique hotel", "villa"), not LiteAPI type ids.
+# The same votes matched by words in a type label — AI and sample stays
+# carry labels ("boutique hotel", "villa"), not LiteAPI type ids.
 VOTE_LABEL_WORDS = {
     "hostel": (("hostel", "capsule"),
                ("guest house", "guesthouse", "bed & breakfast", "b&b", "homestay", "inn")),
@@ -157,36 +157,14 @@ _HOME_PHRASES = ("apartment", "villa", "holiday home", "cottage", "condo", "chal
                  "residence", "aparthotel", "country house", "loft", "house", "rental")
 _NOT_HOME_PHRASES = ("guest house", "guesthouse", "b&b", "bed & breakfast", "car rental")
 
-# A property-type label from a NAME — for suppliers that carry no type field
-# (Duffel) and for the home-type test on labels. Word order matters: the
-# first phrase found wins, and a hotel's own suites stay a hotel.
-_NAME_LABEL_WORDS = (
-    ("hostel", "hostel"), ("apartments", "apartment"), ("apartment", "apartment"),
-    ("villa", "villa"), ("resort", "resort"), ("b&b", "bed & breakfast"),
-    ("bed & breakfast", "bed & breakfast"), ("bed and breakfast", "bed & breakfast"),
-    ("guest house", "guest house"), ("guesthouse", "guest house"), ("aparthotel", "aparthotel"),
-    ("residence", "residence"), ("loft", "apartment"), ("inn", "inn"), ("riad", "riad"),
-    ("hotel", "hotel"), ("palace", "hotel"),
-)
-
 
 def _phrase_re(phrase: str) -> re.Pattern:
     """Whole-word/phrase matcher — 'spa' must not fire inside 'spacious'."""
     return re.compile(r"(?<![a-z0-9])" + re.escape(phrase) + r"(?![a-z0-9])")
 
 
-_NAME_LABEL_RES = tuple((_phrase_re(word), label) for word, label in _NAME_LABEL_WORDS)
 _HOME_RES = tuple(_phrase_re(p) for p in _HOME_PHRASES)
 _NOT_HOME_RES = tuple(_phrase_re(p) for p in _NOT_HOME_PHRASES)
-
-
-def label_from_name(name: str) -> str:
-    """'Trastevere Loft Apartments' -> 'apartment'; 'Embassy Suites' -> 'hotel'."""
-    low = (name or "").casefold()
-    for pattern, label in _NAME_LABEL_RES:
-        if pattern.search(low):
-            return label
-    return "hotel"
 
 
 def star_label(label: str, stars) -> str:
