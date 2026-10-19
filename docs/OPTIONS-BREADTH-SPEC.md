@@ -79,10 +79,14 @@ fallback. Occupancy stays the `⌈group/2⌉` doubles heuristic (the rooming wor
 ### Throttle — `hotel_service._lite_request`
 
 One process-wide pacer for **every** LiteAPI call (board searches, flight searches, galleries,
-reviews, details): at most three calls in flight and a token bucket at `LITEAPI_RATE_PER_S`
-(default 8/s; 4/s on a sandbox key, whose limit is 5/s shared by hotels and flights). A 429 on a
-rates call is retried once after `Retry-After` when the deadline allows. Multi-city boards now
-search their cities concurrently under this throttle instead of serially.
+reviews, details): a token bucket at `LITEAPI_RATE_PER_S` (default 8/s; 4/s on a sandbox key,
+whose limit is 5/s shared by hotels and flights) holding at most one token, so no one-second
+window sees more than rate + 1 calls. It is a rate, not a concurrency cap — a 45 s flight search
+never queues a stay search behind it. Calls made under a search deadline are not sent once it
+has passed. A 429 on a rates call is retried once after `Retry-After` when the deadline allows;
+dropped keep-alives, resets and truncated bodies retry like a 503. Multi-city boards search
+their cities concurrently under this pacer instead of serially. `/data/hotel` is memoized per
+hotel for an hour, so the gallery and the option page share one fetch.
 
 ### Configuration (all optional, defaults in code)
 
@@ -93,7 +97,7 @@ FLIGHT_OPTIONS_PER_CITY=8   # itineraries per departure city
 STAY_CANDIDATES=150         # properties priced before choosing (capped at 60 per route city)
 STAY_SEARCH_DEADLINE_S=25   # wall-time budget for one city's whole stay search
 LITEAPI_RATE_PER_S=         # pacing; default 8, 4 on a sandbox key
-DUFFEL_ACCESS_TOKEN=        # second flight supplier (test tokens are free and self-serve)
+DUFFEL_ACCESS_TOKEN=        # second flight supplier (test tokens are free and self-serve; airports resolve through LiteAPI)
 DUFFEL_STAYS=               # 1 = Duffel accommodations on the Stay tab (live Stays access only)
 ```
 
@@ -134,9 +138,11 @@ DUFFEL_STAYS=               # 1 = Duffel accommodations on the Stay tab (live St
 
 Board-level additions: `schema_version`, `generated_at`, `group_prefs` (`accommodation_votes`,
 `budget_range`, `top_vibes`, `group_size`, `group_pace` — so the UI can print what the group
-asked for), `lodging_band` (null when unknown), `stay_search` (`listed`, `priced`,
-`batches_failed`, `truncated`, `top_ups`, `mode`, `duffel`; per town on a route),
-`stay_suppliers`, `flight_suppliers`, `flights_sandbox` (= any sandbox itinerary).
+asked for), `lodging_band` (null when unknown), `stay_search` — `{town: {listed, priced,
+batches_failed, truncated, top_ups, mode, duffel}}` in EVERY mode (a single-base trip has one
+town, the anchor), `stay_suppliers`, `flight_suppliers`, `flights_sandbox` (= any sandbox
+itinerary). `flights_source` / `stay_source` name the supplier actually present (`liteapi`
+when any LiteAPI live option is on the board, else the other supplier).
 
 ### Data contract — fields added to every flight option
 
@@ -165,22 +171,25 @@ only (plus the existing open-jaw note); bags live in `reasons`, so nothing print
 |---|---|---|---|---|
 | style | 0.35 | the group voted | vote-share-weighted `style_affinity` (core 1.0 / partial 0.5; the old `_affinity` rules, now matching LiteAPI type ids **or** label words for AI/sample/Duffel stays) | core: `"{Type label} — the style k of n of you voted for"`; partial: `"Close to the {vote} style you asked for"` |
 | budget | 0.25 | a band exists | per-person total for THIS stay's nights vs the band for the same nights: 1.0 inside, 0.85 under, linear to 0 at 1.6× the ceiling | `"$410 per person for 5 nights — inside your $300–$900 stay budget"` / `under your …` / `$14 over your $436 stay ceiling` (≤1.3×) / `$214 per person over the group's ceiling` (>1.3×) |
-| rating | 0.20 | a guest score exists | `rating/10 × confidence`, confidence `min(1, log10(reviews+1)/3)` (0.6 without a count) | `"8.9/10 from 1,204 guest reviews"` (≥8.0 & ≥20 reviews); `"Top-rated: 9.4/10 …"` (≥9) |
-| vibe | 0.10 | facilities or a description exist | word hits on **facility names** (LiteAPI `facilityIds` joined to `/data/facilities`) and the description for the top two vibes — never the hotel's name; central vibes also accept ≤1.5 km | `"Spa & Pool — matches the group's relaxation vibe"`, `"Central — close to the nightlife you voted for"` |
+| rating | 0.20 | a guest score exists | `rating/10 × confidence`, confidence `min(1, log10(reviews+1)/3)`; a missing or zero count gets 0.4 (≈15 reviews' worth — never more than a real sample) | printed only with ≥20 reviews: `"8.9/10 from 1,204 guest reviews"` (≥8.0); `"Top-rated: 9.4/10 from …"` (≥9) |
+| vibe | 0.10 | facilities or a description exist | **whole-word/phrase** regex hits (never substrings — "spa" in "spacious" is not a spa) on the **facility names** first (LiteAPI `facilityIds` joined to `/data/facilities`), the description second, for the top two vibes — never the hotel's name; central vibes also accept ≤1.5 km | `"Spa & Pool — matches the group's relaxation vibe"`, `"Central — close to the nightlife you voted for"` |
 | location | 0.10 | coordinates and a city center exist | haversine to the center: ≤1.5 km 1.0, ≤4 km 0.6, else 0.3 (0.6 when beach/nature/relaxation are top vibes) | `"Right in the center"` (<250 m), `"9 min walk from the center"` (≤2 km at 80 m/min), `"3.2 km from the center"` (≤4 km) |
 
 `rank_score` = the weighted mean over the **known** dimensions (always computed, for ordering);
 `match_score` = that number when ≥3 dimensions are known and the supplier is live. A group of
-four or more also earns `"Sleeps the whole group under one roof"` on home-type properties.
+four or more also earns `"Sleeps the whole group under one roof"` on home-type properties
+(by type id, or by whole-word label — a guest house never qualifies).
 Ties between a vibe hit and a location hit go to the vibe (the more personal line).
 
 **Lodging band** (`option_ranking.lodging_band(members, nights)`): members who left the ceiling
 blank are ignored; `low = max(0, maxmin − 50·nights − 80) × 0.45`, `high = max(0, minmax − 50·nights
-− 80) × 0.65` (the same meals/transport constants the final check uses — exported from
-`ai_service` as `MEALS_PER_DAY` / `LOCAL_TRANSPORT_FLAT`); non-overlapping ranges fall back to
+− 80) × 0.65` (the same meals/transport constants the final check uses — `option_ranking`
+owns `MEALS_PER_DAY` / `LOCAL_TRANSPORT_FLAT` and `compute_costs` reads them from there);
+non-overlapping ranges fall back to
 the full span; `None` when nobody gave a ceiling, there are no nights, or the ceiling is under
 $25 per person per night (too small to mean anything — then no budget reasons and no Splurge
-lane sized by price). Route cities get the band scaled by their share of nights.
+lane at all). Route cities get the band scaled by their share of nights. A floor of $0 is
+never printed: the verdict is phrased against the ceiling alone ("inside your $436 stay budget").
 
 ### Lanes — `option_ranking.pick_stay_lanes`
 
@@ -192,11 +201,16 @@ Claim order (a hotel is never claimed twice; display order = claim order; `targe
 4. **Top rated** — highest score with ≥20 reviews.
 5. **Best match** — the next `k−1` by rank (k = 4 when target ≥10, else 2).
 6. **Closest to the center** — only when ≥50 % of candidates have a distance.
-7. **Splurge** — with a band: the priciest place rated ≥8.5 between the ceiling and 2× the
-   ceiling, leading with `"$x per person over the group's ceiling"`; without a band: the priciest
-   place rated ≥8.5.
-8. **Budget pick** — the cheapest, full stop.
+7. **Splurge** — only a place rated ≥8.5 that is pricier than everything already on the board
+   AND than the set's median price; with a band it must also sit between the ceiling and 2× the
+   ceiling and leads with `"$x per person over the group's ceiling"` (for AI/sample menus too,
+   prefixed `est.`); skipped entirely when the budget was too small to form a band.
+8. **Budget pick** — only when it really is the cheapest thing on the board; otherwise skipped
+   (the lane that already took the cheapest hotel satisfies criterion 3).
 9. **Also fits** — next-best ranks until `target`.
+
+Lanes are truthful: a lane whose claim would not hold against the board so far is skipped,
+never stretched onto the next-best record.
 
 Per-city target = `max(STAY_OPTIONS_PER_CITY, voted styles + 3)`. Thin live pricing (fewer than
 `max(4, target // 3)` real stays after the re-price) is padded by the board with the AI/sample
@@ -220,8 +234,8 @@ itineraries and takes the **first that is not a near-duplicate** of one already 
 |---|---|---|
 | cheapest | lowest price | `"Cheapest live fare — $270 under the median option"` |
 | nonstop | 0 stops both ways, cheapest | `"Nonstop both ways — 18h 05m door to door"` |
-| fastest | fewest door-to-door minutes | `"Fastest routing on these dates"` |
-| balanced | min `price/floor + minutes/floor` | `"Within $142 of the cheapest and 17h faster"` |
+| fastest | fewest door-to-door minutes — only an itinerary within 20 min of the pool's fastest AND no slower than anything already on the board; otherwise the role is skipped | `"Fastest routing on these dates"` |
+| balanced | min `price/floor + minutes/floor` among itineraries not dominated (pricier AND slower) by an existing pick | `"Within $142 of the cheapest and 17h faster"` / `"Same price as the cheapest, 2h faster"` |
 | bags | checked bag included, cheapest | `"Checked bag included — no surprise fees"` |
 | early_arrival | earliest **morning** landing (05:00–14:00 local), the date stated | `"Lands 06:30 on Nov 21 — most of day one in Rome"` |
 | no_early_start | departs ≥09:00, lands 06:00–22:00, cheapest | `"Departs 16:20 — no dawn alarm"` |
@@ -231,8 +245,9 @@ itineraries and takes the **first that is not a near-duplicate** of one already 
 Then the price gap to the cheapest (`"$38 more than the cheapest fare"`) and bags.
 `match_score = 100 × (0.6 × floor/price + 0.4 × floor_minutes/minutes)`.
 
-**Open jaw.** When the supplier ignores the open-jaw return, two one-way searches are paired per
-role: outbound-driven roles (early arrival, no early start) take their outbound pick plus the
+**Open jaw.** When the suppliers ignore the open-jaw return (Duffel's true open-jaw offers
+already took part in the primary search), two LiteAPI one-way searches are paired per role:
+outbound-driven roles (early arrival, no early start) take their outbound pick plus the
 cheapest return; late return takes the cheapest outbound plus its return pick; one airline needs
 the same carrier on both legs; bags needs both; nonstop needs both; price/time roles pair
 role-for-role. Reasons are judged on the combined trip against the other pairs.
@@ -263,6 +278,9 @@ enter scoring and lanes like any other record.
   treats `kind` in (`live`, `cached`) as already warmed.
 - `stay_media_for_options` fetches three stays at a time and returns `(media, complete)`;
   `read_stay_media` serves a throttled (429) answer but does **not** freeze it on the trip.
+- The option page's room-rate re-quote is one quick attempt behind a bounded wait (about 5 s);
+  a slow or failed re-quote leaves the cached sheet unchanged — the page never blocks on a
+  fresh price.
 
 ## Project structure
 
@@ -318,7 +336,8 @@ API (detail stubs, throttled media not frozen). `tests/test_maps_and_links.py` s
    a route city shows at least voted styles + 3.
 3. The cheapest and the best-rated **priced** hotels are always on the board.
 4. Flights show up to 8 distinct itineraries per city, lanes never lost to look-alikes; with
-   `DUFFEL_ACCESS_TOKEN` set Duffel offers merge and dedupe; without it no Duffel call is made.
+   `DUFFEL_ACCESS_TOKEN` set Duffel offers merge and dedupe; without it no Duffel call is made,
+   and a Duffel token without the LiteAPI key makes no call to either supplier.
 5. A city's stay search returns within `STAY_SEARCH_DEADLINE_S` even when a supplier hangs.
 6. `tests/test_options_breadth.py` and `tests/test_maps_and_links.py` pass; `npm run build`
    is clean.
