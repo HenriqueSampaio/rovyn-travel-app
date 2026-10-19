@@ -161,7 +161,12 @@ def abandon_checkout(trip_id: str, user: dict = Depends(get_current_user)):
 @router.post("/{trip_id}/checkout/retry")
 def retry_checkout(trip_id: str, user: dict = Depends(get_current_user)):
     with get_conn(readonly=True) as conn:
-        _leader_only(conn, trip_id, user)
+        trip = _leader_only(conn, trip_id, user)
+        # Same gate as lock and session: once a traveler has chosen to book it
+        # themselves, the group books item by item and no new round may open.
+        ok, reason = booking_service.availability(conn, trip)
+    if not ok:
+        raise HTTPException(status_code=400, detail=reason)
     try:
         return booking_service.retry(trip_id, user)
     except booking_service.BookingError as exc:

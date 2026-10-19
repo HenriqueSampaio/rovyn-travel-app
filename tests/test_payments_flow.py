@@ -1843,6 +1843,10 @@ ok("the first traveler books it themselves", res.status_code == 200 and res.json
 state = checkout(carla)
 ok("the group checkout is off for everyone else, with the reason the page leads with",
    state["available"] is False and state["self_book_chosen"] is True and state["settlement"] is None and "item by item" in state["reason"])
+res = client.post(f"/trips/{TRIP}/checkout/retry", headers=ana["H"])
+ok("a leader retry cannot reopen the group checkout once someone books it themselves",
+   res.status_code == 400 and "item by item" in res.json()["detail"]
+   and not rows("SELECT 1 FROM settlements WHERE trip_id = ?", TRIP), res.text)
 res = client.post(f"/trips/{TRIP}/checkout/lock", headers=carla["H"])
 ok("no round can start once someone books it themselves", res.status_code == 400)
 res = client.post(f"/trips/{TRIP}/pay", headers=carla["H"], json={"mode": "self_book"})
