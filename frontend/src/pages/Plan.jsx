@@ -444,7 +444,7 @@ export default function Plan() {
     detailsPrefetched.current = true;
     const ids = ['stay', 'visits', 'events']
       .flatMap(cat => board.options[cat] || [])
-      .filter(o => o.details?.kind !== 'live')
+      .filter(o => !['live', 'cached'].includes(o.details?.kind))
       .map(o => o.id);
     const next = () => {
       const id = ids.shift();
