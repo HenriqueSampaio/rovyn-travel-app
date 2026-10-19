@@ -143,6 +143,14 @@ VOTE_LABELS = {  # how a vote reads in a sentence
     "airbnb/vacation rental": "apartment or villa",
 }
 
+VOTE_SHORT_LABELS = {  # how a vote reads on a reason chip (AI and sample stays carry votes as types)
+    "hostel": "Hostel",
+    "boutique hotel": "Boutique hotel",
+    "4-star hotel": "4-star hotel",
+    "luxury resort": "Luxury resort",
+    "airbnb/vacation rental": "Vacation rental",
+}
+
 # Property types that put a whole group under one roof
 HOME_TYPE_IDS = {201, 207, 213, 219, 220, 223, 228, 229, 230, 232}
 _HOME_PHRASES = ("apartment", "villa", "holiday home", "cottage", "condo", "chalet",
@@ -262,6 +270,40 @@ def is_home_type(type_id=None, label: str = "") -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Reason chips — the short label every reason carries
+# ---------------------------------------------------------------------------
+
+SHORT_LABEL_MAX = 18             # the board prints two chips on one line
+_CHIP_BREAKS = " /"              # a label may be cut between words or at a slash
+_CHIP_TRAILERS = " /&+,;:·-–—"   # connectors a cut must not leave dangling ("Mountain view &")
+
+
+def short_label(text: str, fallback: str = "") -> str:
+    """A reason's chip label: at most SHORT_LABEL_MAX characters, never cut
+    inside a word.
+
+    An accommodation vote has a fixed chip form ("airbnb/vacation rental" ->
+    "Vacation rental"). Anything else that is too long is cut back to its
+    last whole word, dangling connectors dropped, and marked "…" — the full
+    sentence sits beside the chip, so nothing is lost, while a hard cut
+    ("Airbnb/vacation re") reads as a typo. "…" is added only when something
+    was cut. A label whose first word alone overflows has no honest short
+    form: `fallback`, shortened the same way, stands in — or "", since no
+    chip beats a broken word."""
+    label = " ".join(str(text or "").split())
+    if label.casefold() in VOTE_SHORT_LABELS:
+        return VOTE_SHORT_LABELS[label.casefold()]
+    if len(label) <= SHORT_LABEL_MAX:
+        return label
+    # The last break that still leaves room for the "…"
+    cut = max((i for i in range(1, SHORT_LABEL_MAX) if label[i] in _CHIP_BREAKS), default=0)
+    head = label[:cut].rstrip(_CHIP_TRAILERS)
+    if head:
+        return f"{head}…"
+    return short_label(fallback) if fallback else ""
+
+
+# ---------------------------------------------------------------------------
 # Vibes — facilities and location that match what the group asked for
 # ---------------------------------------------------------------------------
 
@@ -312,7 +354,7 @@ def _vibe(record: dict, top_vibes: list[str]) -> tuple[float | None, dict | None
         if hits:
             shown = " & ".join(h.capitalize() for h in dict.fromkeys(hits[:2]))
             return strength, {"kind": "vibe", "text": f"{shown} — {_VIBE_PHRASE[vibe]}",
-                              "short": shown[:18]}
+                              "short": short_label(shown)}
         if vibe in _CENTRAL_VIBES and distance is not None and distance <= 1.5:
             return strength, {"kind": "vibe", "text": f"Central — {_VIBE_PHRASE[vibe]}",
                               "short": "Central"}
@@ -343,6 +385,11 @@ MAX_REASONS = 4
 MIN_KNOWN_DIMENSIONS = 3   # fewer and a match score would be mostly guesswork
 MIN_REVIEWS_TO_QUOTE = 20  # a printed guest score needs a real sample behind it
 ESTIMATED_SUPPLIERS = ("ai", "sample")
+# The reason kinds whose numbers come from the menu itself — on an AI or
+# sample menu, from the estimate: a price, a guest score, a distance, and the
+# fares, times and durations a flight's lane line quotes. A style reason's
+# numbers are the group's own vote tally, and vibe and group lines print none.
+ESTIMATED_KINDS = ("budget", "price", "rating", "location", "lane")
 _NO_COUNT_CONFIDENCE = 0.4  # ≈ 15 reviews' worth — never more than a real sample earns
 
 
@@ -427,8 +474,10 @@ def _location(distance, top_vibes: list[str]) -> tuple[float | None, dict | None
 
 def _estimated(reason: dict | None, supplier: str) -> dict | None:
     """AI and sample menus carry invented numbers — say so on every reason
-    that prints one."""
-    if not reason or supplier not in ESTIMATED_SUPPLIERS:
+    that prints one. Only the kinds in ESTIMATED_KINDS are marked: "the style
+    2 of 3 of you voted for" counts real votes whoever wrote the menu, and an
+    "est." in front of it reads as if the votes were guessed."""
+    if not reason or supplier not in ESTIMATED_SUPPLIERS or reason.get("kind") not in ESTIMATED_KINDS:
         return reason
     if any(ch.isdigit() for ch in reason["text"]) and not reason["text"].startswith("est. "):
         return dict(reason, text=f"est. {reason['text']}")
@@ -468,7 +517,7 @@ def score_stay(record: dict, prefs: dict | None, supplier: str = "liteapi") -> d
                 text = f"{shown} — the style {style['votes']} of {style['total']} of you voted for"
         else:
             text = f"Close to the {VOTE_LABELS[style['vote']]} style you asked for"
-        style_reason = {"kind": "style", "text": text, "short": shown[:18]}
+        style_reason = {"kind": "style", "text": text, "short": short_label(shown, fallback=style["vote"])}
 
     budget_s, budget_reason = _budget(record.get("per_person_total"), nights, prefs.get("lodging_band"))
     rating_s, rating_reason = _rating(record.get("rating10"), record.get("review_count"))
@@ -775,7 +824,7 @@ def flight_reasons(role: str | None, f: dict, floor_price: float, cheapest_minut
         carrier = f.get("carrier") or "One airline"
         text, short = f"{carrier} both ways — one check-in, one app", "One airline"
     if text:
-        reasons.append({"kind": "lane", "text": text, "short": short[:18]})
+        reasons.append({"kind": "lane", "text": text, "short": short_label(short)})
     if role != "cheapest" and price > floor_price + 0.5:
         gap = int(round(price - floor_price))
         reasons.append({"kind": "price", "text": f"${gap} more than the cheapest fare", "short": f"${gap} more"})

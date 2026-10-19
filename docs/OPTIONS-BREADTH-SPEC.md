@@ -124,13 +124,17 @@ DUFFEL_STAYS=               # 1 = Duffel accommodations on the Stay tab (live St
   Splurge · Budget pick · Also fits`.
 - `supplier` ∈ `liteapi · duffel · ai · sample` (per option; `source` stays the board-level
   and details-level field it already is).
-- `reasons[].short` is a ≤18-character chip label; `why` is the lane plus the strongest reason
-  (the reason alone when that would pass ~88 characters). `reasons` is capped at 4; a budget
-  verdict is never squeezed out by softer signals.
+- `reasons[].short` is a ≤18-character chip label, never cut inside a word: an accommodation
+  vote has a fixed short form ("airbnb/vacation rental" → "Vacation rental"); anything longer
+  is cut back to its last whole word and ends in "…". `why` is the lane plus the strongest
+  reason (the reason alone when that would pass ~88 characters). `reasons` is capped at 4; a
+  budget verdict is never squeezed out by softer signals.
 - `rating10` is the guest score out of 10; AI/sample ratings arrive out of 5 and are
   normalized (`rating_scale` records the origin). `rating` keeps its old meaning for old UI.
 - `match_score` is emitted only when at least three dimensions carry real data and never for
-  AI/sample menus; every number-bearing reason on an estimate is prefixed `est.`.
+  AI/sample menus. On an estimate, every reason whose number comes from the menu (`budget`,
+  `price`, `rating`, `location`, a flight's `lane` line) is prefixed `est.`; a `style` reason's
+  "2 of 3 of you voted for" is the group's real tally and stays bare.
 - Duffel stays additionally carry `bookable: false`, `duffel_accommodation_id`,
   `duffel_search_result_id` and `duffel_details` (their option page is the search payload).
   They never carry `liteapi_hotel_id`, so rooming and booking paths ignore them.
@@ -309,12 +313,14 @@ documented rates knobs, no official-website lookups, the report); votes driving 
 per-city target with three voted styles; the 204 → id-batch fallback, a failing batch, a hung
 batch against a 1.5 s deadline; thin pricing (one re-price, then board padding with estimates,
 `stay_all_live` false); a tiny budget (no budget reasons, no splurge in the cheapest third);
-sample menus (8 stays, /5 ratings normalized, `est.` prefixes); flights (8 distinct lanes, both
-suppliers called once, the duplicate itinerary collapsed to the cheaper USD copy, the median
-formula, pace orders, GBP copy rejected, supplier-aware re-verify); open jaw (≥6 lanes, flies home
-from Florence); no keys → no calls; Duffel stays mapped, deduped and gated; the multi-city board
-end to end (6 per city, all three styles per city, city-night budget reasons, provenance); the
-API (detail stubs, throttled media not frozen). `tests/test_maps_and_links.py` stays green.
+sample menus (8 stays, /5 ratings normalized, `est.` on estimated numbers but never on vote
+tallies, chips never cut mid-word); flights (8 distinct lanes, both suppliers called once, the
+duplicate itinerary collapsed to the cheaper USD copy, the median formula, pace orders, GBP copy
+rejected, supplier-aware re-verify); open jaw (≥6 lanes, flies home from Florence); no keys → no
+calls; Duffel stays mapped, deduped and gated; the multi-city board end to end (6 per city, all
+three styles per city, city-night budget reasons, provenance, each departure city's flight link
+sized to its own travelers); the API (detail stubs, throttled media not frozen).
+`tests/test_maps_and_links.py` stays green.
 
 ## Boundaries
 
