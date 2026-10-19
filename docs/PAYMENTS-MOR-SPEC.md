@@ -116,26 +116,38 @@ status = approved
              price guarantee, total) → any rise > $1/person or lost guarantee → reconfirm (all released)
 [BOOK]       pre-capture-safe hotels (all-or-nothing) — LiteAPI /rates/book with ACC_CREDIT_CARD and
              the attempt_ref as clientReference; a timeout is resolved by re-POSTing the SAME reference
-[CAPTURE]    every PaymentIntent, idempotency key capture:{pi}; an explicit refusal unwinds (hotels
-             cancelled, captured shares refunded, holds released → failed); an unknown outcome re-reads the PI
+[CAPTURE]    every PaymentIntent, idempotency key capture:{pi}. A transport failure re-reads the PI:
+             succeeded → continue; requires_capture → the same capture again (same key, up to 3×);
+             canceled → treated as a refusal; anything else → needs_attention. Only an EXPLICIT refusal
+             unwinds, and the round moves to `unwinding` BEFORE the first refund (hotels cancelled,
+             captured shares refunded, holds released → failed) — a crash resumes the unwind, never a capture.
+             Travelers who owe nothing (`nothing_due`) are settled at $0 without any provider.
 [PAY]        the remaining hotels, then POST /air/payments per held order (price_changed ≤ $1/person
-             absorbed, more → refund the item's share, item failed); a timeout re-reads the order
-[CONFIRM]    booked | partially_booked; trips.status = booked; receipts emailed; hotel confirmation
-             code arrives by webhook (/webhooks/liteapi) or poll
+             absorbed, more → the item is persisted as failed FIRST, then its share refunded); a timeout
+             re-reads the order
+[CONFIRM]    only when no refund row is pending/failed; booked | partially_booked; trips.status = booked;
+             receipts emailed; hotel confirmation code arrives by webhook (/webhooks/liteapi) or poll
 ```
+
+Refunds are rows first: every refund for an item is planned in ONE write transaction (each
+traveler capped at captured − refunded − already-pending), then POSTed with the row id as the
+Idempotency-Key. A refund Stripe did not confirm stays `pending` with the cursor on the refund
+step and parks the round in `needs_attention`; the reconciler re-POSTs it with the same key. An
+explicit refusal marks the row `failed` for a person. A partial refund updates the stored
+receipt's lines (`refunded`, `refunded_total`, `partially_refunded`) instead of wiping it.
 
 ## Data model (SQLite `_SCHEMA` + `_COLUMN_MIGRATIONS` **and** `supabase/migrations/20261018170000_payments_prototype.sql`; canary `bookings.cancelled_at`)
 
 | Table | Purpose |
 |---|---|
-| `settlements` | one row per round: `id`, `trip_id`, `round`, `status`, `money_mode`, `lock` (JSON), `plan_hash`, `cursor` (the provider call in flight), `deadline`. Partial unique index: one active (not cancelled/failed/resolved) per trip. |
+| `settlements` | one row per round: `id`, `trip_id`, `round`, `status` (collecting · reconfirm · verifying · booking · capturing · unwinding · paying · reconciling · booked · partially_booked · needs_attention · failed · cancelled · resolved), `money_mode`, `lock` (JSON), `plan_hash`, `cursor` (the provider call in flight; a parked round also carries `resume_to`), `deadline`. Partial unique index: one active (not cancelled/failed/resolved) per trip. |
 | `settlement_events` | append-only audit: `step`, `item_key`, `level`, `message`, `data_redacted`. |
-| `payment_attempts` | append-only per traveler and round: `checkout_session_id` / `payment_intent_id` (unique), `status` pending → authorized → captured → refunded (or releasing/released/failed/expired), amounts. Partial unique index: one active per trip and user. |
-| `refunds` | persisted BEFORE Stripe is called; the row id is the Idempotency-Key. |
+| `payment_attempts` | append-only per traveler and round: `checkout_session_id` / `payment_intent_id` (unique), `status` pending → authorized → captured → refunded (or `nothing_due` for a $0 share, releasing/released/failed/expired), amounts. Partial unique index: one pending/authorized/nothing_due/releasing/captured row per **settlement** and user, so a traveler refunded in one round can pay in the next. `releasing` is only left once Stripe confirms the cancel; until then no new attempt can start for that traveler (409). |
+| `refunds` | persisted BEFORE Stripe is called; the row id is the Idempotency-Key; `pending` rows are re-POSTed by the reconciler, `failed` ones wait for a person. |
 | `webhook_events` | provider event id as PK, `INSERT … ON CONFLICT DO NOTHING`; `processed_at NULL` = dead letter. |
 | `traveler_profiles` | given/family name, date of birth, gender, title, E.164 phone — only what airlines and hotels need. |
 | `payments` (existing) | the one-row-per-member summary everything else reads: `status` (`paid` for self-book rows, else mirrors the attempt), `provider`, `current_attempt_id`, captured/refunded cents. `paid` in the API means `status IN ('paid','captured')`; an authorized hold is reported as `payment_status: authorized` and never as paid. |
-| `bookings` (existing) | gains `payer_id`, `amount_cents`, `provider_booking_id`, `documents`, `raw` (redacted), `cancelled_at`; statuses `pending_confirmation`, `failed` next to `to_book`/`booked`. |
+| `bookings` (existing) | gains `payer_id` (the one traveler a single-passenger flight was bought for; NULL for group items), `amount_cents`, `provider_booking_id`, `documents`, `raw` (redacted), `cancelled_at`; statuses `pending_confirmation`, `cancelling` (claimed by a cancellation in flight), `failed` next to `to_book`/`booked`. |
 
 The checklist (`services/checklist.py`, moved out of the bookings router) is the bookings
 ledger: `settle()` syncs it first and only ever UPDATEs rows by `(trip_id, item_key)`. Rows
@@ -182,17 +194,40 @@ departure while collecting restarts the round with a fresh lock.
 | `POST /trips/{id}/checkout/lock` | member | verify-and-lock without paying, so the share is visible first. |
 | `POST /trips/{id}/checkout/profile` | member | upsert traveler details (validated). |
 | `POST /trips/{id}/checkout/session` | member | needs `approved`, no self-book row, a complete profile (names for everyone; airline fields for travelers on a Duffel item), the non-refundable acknowledgment when the lock needs it. Places pending airline holds, inserts the pending attempt (409 on a concurrent start), then creates the Stripe session; reuses an open session with > 10 min left; a completed-but-unconfirmed one is recorded as authorized on the spot. Simulated mode authorizes immediately. |
-| `POST /trips/{id}/checkout/confirm` | member | looks the attempt up by session id (must be this trip and this caller), re-reads Stripe, records `authorized`; a completed session that matches no active attempt gets its hold cancelled. |
-| `POST /trips/{id}/checkout/release` | member (own) | CAS authorized→releasing, cancel at Stripe, released; only while collecting/reconfirm (409 otherwise). |
+| `POST /trips/{id}/checkout/confirm` | member | looks the attempt up by session id (must be this trip and this caller), re-reads Stripe, records `authorized`. The hold the attempt already owns is never touched (the webhook may have recorded it first; the page may be reloaded); only a hold on an expired/failed/released attempt, outside a settling round, is cancelled as a stray. |
+| `POST /trips/{id}/checkout/release` | member (own) | CAS authorized→releasing, cancel at Stripe, then released — only once Stripe confirmed; otherwise the row stays `releasing` for the reconciler. Only while collecting/reconfirm (409 otherwise). |
 | `POST /trips/{id}/checkout/abandon` | leader | CAS to cancelled, every authorization released, holds cancelled, summaries dropped. |
 | `POST /trips/{id}/checkout/retry` | leader | a new round (new settlement, fresh prices and holds) after `failed`. |
-| `POST /trips/{id}/bookings/{key}/cancel` | leader or the row's payer | cancels at the provider, refunds from the ledger (floor of each traveler's share, remainder to the lowest user ids, fee pro rata, capped at captured − refunded), restores the checklist item, emails the group; `CANCELLED_WITH_CHARGES` is recorded as a Rovyn loss event. |
-| `POST /webhooks/stripe` | Stripe | signature-verified; routed by session/PI/attempt id against `payment_attempts`; events for non-current attempts are logged only; unroutable events are dead-lettered (200); handler failures return 500 so Stripe retries. |
-| `POST /webhooks/liteapi` | LiteAPI | 401 without a configured token or on a mismatch (constant-time compare); the envelope's `sandbox` must match the settlement's money mode; the handler re-GETs `/bookings/{id}` with our key and acts only on that, for bookings we made. |
+| `POST /trips/{id}/bookings/{key}/cancel` | leader, the row's payer, or any traveler on that flight (`can_cancel` in the read model) | claims the row (booked → `cancelling`, rowcount-checked) and persists a `cancel_booking` cursor BEFORE the supplier call, so a double click or a second canceller gets 409 and a crash is resumed by the reconciler (it reads the booking back); then cancels at the provider (a lost answer is read back, a refusal restores the row), persists the cancellation, plans the refunds from the ledger (floor of each traveler's share, remainder to the lowest user ids, fee pro rata, capped at captured − refunded − pending) and issues them; `CANCELLED_WITH_CHARGES` is recorded as a Rovyn loss event. |
+| `POST /webhooks/stripe` | Stripe | signature-verified; routed by session/PI/attempt id against `payment_attempts`; a hold already recorded is a no-op; a hold on an expired/replaced link is cancelled as a stray; other events for non-current attempts are logged only; unroutable events are dead-lettered (200); handler failures return 500 so Stripe retries (the redelivery is processed, not deduped). |
+| `POST /webhooks/liteapi` | LiteAPI | 401 without a configured token or on a mismatch (constant-time compare); the envelope's `sandbox` must match the settlement's money mode; its `request`/`response` JSON strings are parsed before the audit copy is redacted (holder, guests, phone, email never stored); the handler re-GETs `/bookings/{id}` with our key and acts only on that, for bookings we made. |
 | `POST /trips/{id}/pay` | member | unchanged for `self_book` (409 while a settlement is active); `mode=full` → 409 pointing at the checkout. |
 
-Deadlines are enforced on the write paths (`expire_if_due` in lock/session/confirm, the
-webhooks and the reconciler), never from the polled read.
+Deadlines are enforced on the write paths (`expire_if_due` in lock/session/confirm) and by the
+reconciler's sweep of open rounds past their deadline, never from the polled read; the read
+model carries `deadline_passed` so the UI stops showing a dead deadline as pending.
+
+`POST /trips/{id}/checkout/profile` refuses (409) to blank a field the booking needs once the
+traveler's share is in; `DELETE /trips/{id}` refuses (400) while any attempt is pending,
+authorized, captured or releasing, otherwise closes an idle round, releases its holds and
+cascades refunds → settlement_events → payment_attempts → settlements before the trip row
+(`webhook_events` and `traveler_profiles` are not trip-scoped and stay); leaving a trip closes
+the member's pending Checkout Session at Stripe through the same release path and rebuilds the
+lock BEFORE the round moves to reconfirm (if the new group cannot be priced the round fails
+cleanly rather than keeping a lock that lists the old members).
+
+### Reconciler (`services/reconciler.py`)
+
+One pass at boot (no staleness — nothing can still be running from the previous process) and
+every 5 minutes: (1) open rounds past their deadline are released; (2) `releasing` attempts
+Stripe never confirmed are finished by reading the PaymentIntent (canceled → released; still
+held → cancel again with the same key; captured → a person); (3) stuck settlements — in-flight
+phases quiet for 10 minutes, finished rounds with a cancellation/refund cursor, and
+`needs_attention` rounds whose cursor carries `resume_to` — are resolved by READING the provider
+(same client reference / order id / refund key), then resumed at `resume_to`. A round is
+resumed at most 3 times (`MAX_RECONCILE_ATTEMPTS`); after that it waits for an operator. The
+settle thread is non-daemon with an exception boundary (an unexpected error records an event
+and parks the round) and FastAPI's shutdown joins live settlements for up to 130 s.
 
 ## Services
 
@@ -245,10 +280,13 @@ ROVYN_SETTLE_INLINE=          # 1 runs settlements inline instead of on a thread
 
 ### Operator tool
 
-`needs_attention` is terminal for automation (no capture, cancel or refund is issued on a guess).
-`.venv/bin/python -m backend.scripts.settle_resolve <trip_id>` prints the settlement, its items,
-attempts and events; after reconciling money by hand against the Stripe, LiteAPI and Duffel
-dashboards, `… --resolve` marks the round resolved so the group can start a fresh checkout.
+`needs_attention` means the reconciler could not finish by reading the providers (it keeps
+trying while the cursor carries `resume_to`, up to 3 times); no capture, cancel or refund is
+ever issued on a guess. `.venv/bin/python -m backend.scripts.settle_resolve <trip_id>` prints
+the settlement, its items, attempts, refunds and events; after reconciling money by hand against
+the Stripe, LiteAPI and Duffel dashboards, `… --resolve` marks the round resolved so the group
+can start a fresh checkout, or `… --resolve --to booked|partially_booked` when the bookings
+stand and only the money needed a hand (so the trip's bookings can still be cancelled in-app).
 
 ## Frontend
 
@@ -259,7 +297,7 @@ prices"), *traveler details*, *the check* (charged lines flagged live price / es
 provider, "what you'll pay on the spot" behind a toggle, cancellation deadlines and airline hold
 times, the non-refundable acknowledgment), *awaiting others* (member pills, deadline, release),
 *reconfirm* (previous vs new price), *transient* (timeline), *booked / partially booked*
-(confirmations, cancel for leader or payer, receipt, Bookings tab), *failed* (retry for the
+(confirmations, cancel where `can_cancel`, receipt, Bookings tab), *failed* (retry for the
 leader), *needs attention*. Simulated and test modes are labeled. Return from Stripe lands on
 `/trips/{id}/final?tab=money&checkout=success&session_id=…`, which confirms and cleans the URL.
 The Bookings checklist shows Rovyn-made rows as "Booked by Rovyn" (pending hotel code when the
@@ -303,6 +341,17 @@ through to the Bookings tab, plus release and leader abandon.
   unknown outcomes park.
 - Simulated flights are simulated whether or not the option carried a Duffel hint, so the
   no-keys demo books every flight; with a Duffel token, flights without a hint are self-book.
+- A traveler whose share is $0 commits as `nothing_due` (no card, no provider, in every money
+  mode) and is marked captured at $0 when the group is charged, so the trip reads as fully paid.
+- A hold whose creation call timed out is looked up by the attempt reference in the account's
+  recent orders and adopted; when it is not found the flight is parked (`hold_pending`, "the
+  airline did not answer") and retried on the next checkout — never self-booked on a guess.
+- A pending hold is re-searched (same itinerary, fresh offer) when its offer expired before
+  the hold could be placed; a per-person rise above $1 after others paid restarts the round.
+- Flight shares are the higher equal split of the Duffel total (Rovyn may over-collect by up
+  to n − 1 cents, never under); the item total stays share × n so the ledger check holds.
+- `webhook_events` and `traveler_profiles` are not deleted with a trip: neither is trip-scoped,
+  the former holds only redacted audit, the latter belongs to the user across trips.
 
 ## Boundaries
 

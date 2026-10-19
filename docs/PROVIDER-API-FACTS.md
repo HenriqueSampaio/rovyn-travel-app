@@ -221,6 +221,12 @@ PAGINATION: ?limit=1..200 (default 50), ?after=<meta.after>.
   passengers[]{id,type,age,…}
   conditions{refund_before_departure{allowed,penalty_amount,penalty_currency}|null, change_before_departure{…}|null}
   payment_requirements{requires_instant_payment (bool), price_guarantee_expires_at|null, payment_required_by|null}
+  A null price_guarantee_expires_at means the airline gave NO guarantee (the fare is re-read at payment),
+  not that it expired — booking_service treats null as "no information" and relies on payment_required_by
+  plus the total comparison. booking_service.list_recent_orders() calls GET /air/orders?limit=200&sort=-created_at
+  to find a hold whose creation call timed out (matched on metadata.rovyn_attempt); the `sort` parameter on
+  the orders list is assumed from the offers list and has NOT been verified in test mode — if it is rejected,
+  drop it and page with `after` instead.
   available_services[] (only on GET single offer with return_available_services=true), passenger_identity_documents_required, supported_passenger_identity_document_types[], partial
   RULE: re-GET the offer right before checkout; if now > expires_at, re-search. Typical lifetime ~30 min.
 
