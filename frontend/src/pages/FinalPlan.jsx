@@ -566,7 +566,8 @@ export default function FinalPlan() {
   const myCheck = checks.find(c => c.user_id === me?.id);
   const iApproved = trip?.me?.approved;
   const iPaid = trip?.me?.paid;
-  const iAuthorized = trip?.me?.payment_status === 'authorized' || trip?.me?.payment_status === 'pending';
+  const iAuthorized = trip?.me?.payment_status === 'authorized' || trip?.me?.payment_status === 'nothing_due';
+  const iPending = trip?.me?.payment_status === 'pending';
   const selfBooked = trip?.me?.booking_mode === 'self_book' || receipt?.mode === 'self_book';
   const days = plan.itinerary?.days || [];
   const canBook = ['approved', 'booked'].includes(status);
@@ -677,7 +678,7 @@ export default function FinalPlan() {
       statusText = <span className="muted">{committed} of {trip.total_members} locked in</span>;
       action = !iPaid && !iAuthorized ? (
         <button className="btn clay" onClick={() => goTab('money')} disabled={busy}>
-          <Wallet size={15} /> Choose how to book — ${myCheck?.total.toLocaleString()}
+          <Wallet size={15} /> {iPending ? 'Finish paying' : 'Choose how to book'} — ${myCheck?.total.toLocaleString()}
         </button>
       ) : (
         <span className="serif muted" style={{ fontStyle: 'italic', fontSize: 15 }}>
@@ -1093,12 +1094,12 @@ export default function FinalPlan() {
                 {checks.map(c => (
                   <span key={c.user_id} style={{
                     display: 'inline-flex', alignItems: 'center', gap: 7, padding: '7px 14px',
-                    border: '1px solid', borderColor: c.paid || c.payment_status === 'authorized' ? 'var(--pine)' : 'var(--line)',
+                    border: '1px solid', borderColor: c.paid || ['authorized', 'nothing_due'].includes(c.payment_status) ? 'var(--pine)' : 'var(--line)',
                     borderRadius: 999, fontSize: 13, fontWeight: 600,
-                    color: c.paid || c.payment_status === 'authorized' ? 'var(--pine)' : 'var(--muted)',
+                    color: c.paid || ['authorized', 'nothing_due'].includes(c.payment_status) ? 'var(--pine)' : 'var(--muted)',
                   }}>
-                    {c.paid || c.payment_status === 'authorized' ? <CheckCircle2 size={13} /> : <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--line)' }} />}
-                    {c.name} · ${c.total.toLocaleString()}{c.payment_status === 'authorized' ? ' · authorized' : ''}
+                    {c.paid || ['authorized', 'nothing_due'].includes(c.payment_status) ? <CheckCircle2 size={13} /> : <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--line)' }} />}
+                    {c.name} · ${c.total.toLocaleString()}{c.payment_status === 'authorized' ? ' · authorized' : c.payment_status === 'nothing_due' ? ' · nothing due' : ''}
                   </span>
                 ))}
               </div>

@@ -17,6 +17,7 @@ const STATUS_COPY = {
   verifying: 'Re-checking prices with the suppliers…',
   booking: 'Booking the stay…',
   capturing: 'Charging everyone\'s cards…',
+  unwinding: 'A card was declined — refunding the others…',
   paying: 'Paying the airlines…',
   reconciling: 'Checking in with the suppliers…',
   booked: 'Booked — every reservation is in the Bookings tab',
@@ -25,7 +26,7 @@ const STATUS_COPY = {
   failed: 'This round didn\'t complete',
   cancelled: 'Checkout abandoned',
 };
-const TRANSIENT = new Set(['verifying', 'booking', 'capturing', 'paying', 'reconciling']);
+const TRANSIENT = new Set(['verifying', 'booking', 'capturing', 'unwinding', 'paying', 'reconciling']);
 const ITEM_LABEL = { liteapi: 'hotel', duffel: 'airline', simulated: 'simulated', self: 'you book it', rovyn: 'fee' };
 
 const money = c => `$${(Math.round(c || 0) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -82,11 +83,11 @@ function ProfileForm({ tripId, profile, needs, onSaved }) {
 }
 
 function Members({ members, meId }) {
-  const label = { none: 'not yet', pending: 'paying…', authorized: 'authorized', releasing: 'releasing…', captured: 'charged', refunded: 'refunded', released: 'released', failed: 'failed', expired: 'link expired' };
+  const label = { none: 'not yet', pending: 'paying…', authorized: 'authorized', nothing_due: 'nothing due', releasing: 'releasing…', captured: 'charged', refunded: 'refunded', released: 'released', failed: 'failed', expired: 'link expired' };
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
       {members.map(m => {
-        const done = ['authorized', 'captured', 'refunded'].includes(m.state);
+        const done = ['authorized', 'nothing_due', 'captured', 'refunded'].includes(m.state);
         return (
           <span key={m.user_id} style={{
             display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 999, fontSize: 13,
@@ -163,9 +164,14 @@ export default function Checkout({ tripId, trip, summary, onChanged, goTab, onSe
         {settlement ? STATUS_COPY[status] || status : 'Pay in Rovyn — one checkout, every reservation in the app'}
       </p>
       {modeNote && <p className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>{modeNote}</p>}
-      {settlement?.deadline && open && (
+      {settlement?.deadline && open && !settlement.deadline_passed && (
         <p className="muted" style={{ fontSize: 13, marginTop: 4 }}>
           <Lock size={11} style={{ verticalAlign: -1 }} /> Everyone must pay by <strong>{when(settlement.deadline)}</strong> — after that every authorization is released.
+        </p>
+      )}
+      {settlement?.deadline_passed && open && (
+        <p style={{ fontSize: 13, marginTop: 4, color: 'var(--clay)' }}>
+          <Lock size={11} style={{ verticalAlign: -1 }} /> The group's deadline ({when(settlement.deadline)}) has passed — the authorizations are being released and the checkout restarts.
         </p>
       )}
     </div>
@@ -202,7 +208,7 @@ export default function Checkout({ tripId, trip, summary, onChanged, goTab, onSe
                     {c.provider === 'simulated' ? ' · simulated' : ''}
                   </p>
                 </div>
-                {['booked', 'pending_confirmation'].includes(c.status) && (isLeader || c.payer_id === me?.id) && (
+                {c.can_cancel && (
                   <button className="btn-quiet" disabled={busy} style={{ fontSize: 13, color: 'var(--clay)' }}
                           onClick={() => window.confirm(`Cancel ${c.title}? Refunds follow the rate's cancellation policy.`) && act(() => api.cancelRovynBooking(tripId, c.item_key), 'reload')}>
                     <Undo2 size={13} /> cancel
@@ -237,7 +243,8 @@ export default function Checkout({ tripId, trip, summary, onChanged, goTab, onSe
   }
 
   // ---- open: profile → check → pay / waiting --------------------------------
-  const authorized = myPayment && ['authorized', 'captured'].includes(myPayment.status);
+  const authorized = myPayment && ['authorized', 'nothing_due', 'captured'].includes(myPayment.status);
+  const anyoneCommitted = Boolean(settlement && settlement.members.some(m => ['authorized', 'nothing_due', 'captured'].includes(m.state)));
   const pending = myPayment && myPayment.status === 'pending';
   return (
     <div>
@@ -313,7 +320,7 @@ export default function Checkout({ tripId, trip, summary, onChanged, goTab, onSe
       {authorized && (
         <div style={{ marginTop: 18 }}>
           <p style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--pine)', fontWeight: 700 }}>
-            <CheckCircle2 size={17} /> Your share is authorized — waiting on the others
+            <CheckCircle2 size={17} /> {myPayment.status === 'nothing_due' ? 'Nothing to charge you — waiting on the others' : 'Your share is authorized — waiting on the others'}
           </p>
           <button className="btn-quiet" disabled={busy} style={{ fontSize: 13, marginTop: 6 }}
                   onClick={() => act(() => api.releaseAuthorization(tripId), 'reload')}>
@@ -329,10 +336,15 @@ export default function Checkout({ tripId, trip, summary, onChanged, goTab, onSe
             <XCircle size={13} /> Abandon the group checkout
           </button>
         )}
-        {onSelfBook && !state.self_book_chosen && !(settlement && settlement.members.some(m => ['authorized', 'captured'].includes(m.state))) && (
+        {onSelfBook && !state.self_book_chosen && !settlement && (
           <button className="btn-quiet" disabled={busy || parentBusy} onClick={onSelfBook}>
             <ClipboardCheck size={14} /> I'll book everything myself instead <ArrowRight size={13} />
           </button>
+        )}
+        {onSelfBook && !state.self_book_chosen && settlement && !anyoneCommitted && (
+          <span className="muted" style={{ fontSize: 13 }}>
+            To book everything yourself instead, {isLeader ? 'abandon the group checkout first.' : 'ask the leader to abandon the group checkout first.'}
+          </span>
         )}
       </div>
       {error && <p style={{ color: 'var(--clay)', fontSize: 13.5, marginTop: 10 }}>{error}</p>}
