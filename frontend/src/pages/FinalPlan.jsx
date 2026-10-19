@@ -61,6 +61,8 @@ function BookingsChecklist({ bookings, busy, onConfirm, onUnbook }) {
 
   if (!bookings) return <Loading text="Preparing your booking checklist…" />;
   const { items, total, booked } = bookings;
+  // Items the open group checkout is buying: recording one by hand would book it twice
+  const charged = new Set(bookings.charged_keys || []);
 
   async function submit(itemKey) {
     const ok = await onConfirm(itemKey, code.trim(), note.trim());
@@ -128,7 +130,7 @@ function BookingsChecklist({ bookings, busy, onConfirm, onUnbook }) {
                     )}
                   </div>
                   <span style={{ display: 'inline-flex', gap: 12, alignItems: 'center', flexShrink: 0 }}>
-                    {item.link && item.provider === 'self' && (
+                    {item.link && item.provider === 'self' && !charged.has(item.item_key) && (
                       <a className="ext-link" href={item.link} target="_blank" rel="noreferrer" style={{ padding: '8px 16px', fontSize: 13 }}>
                         <ExternalLink size={13} /> Book on {sellerLabel(item.link)}
                       </a>
@@ -139,6 +141,8 @@ function BookingsChecklist({ bookings, busy, onConfirm, onUnbook }) {
                       <button className="btn-quiet" disabled={busy} onClick={() => onUnbook(item.item_key)} title="Mark as not booked">
                         <Undo2 size={13} /> undo
                       </button>
+                    ) : charged.has(item.item_key) ? (
+                      <span className="muted" style={{ fontSize: 12.5 }}>Rovyn is booking this in the group checkout</span>
                     ) : (
                       <button className="btn-quiet" disabled={busy}
                               onClick={() => { setOpenKey(openKey === item.item_key ? null : item.item_key); setCode(''); setNote(''); }}>
@@ -147,7 +151,7 @@ function BookingsChecklist({ bookings, busy, onConfirm, onUnbook }) {
                     )}
                   </span>
                 </div>
-                {openKey === item.item_key && item.status !== 'booked' && (
+                {openKey === item.item_key && item.status !== 'booked' && !charged.has(item.item_key) && (
                   <div style={{ marginTop: 12, maxWidth: 480 }}>
                     <input
                       placeholder="Confirmation code (PNR, booking number, voucher #…)"
@@ -561,8 +565,13 @@ export default function FinalPlan() {
 
   const { plan, checks, trip } = data;
   const status = data.status;
+  // The server's own lock (an open group checkout, or any payment in motion) —
+  // a pending or authorized share never reads as "paid", so guessing from the
+  // checks left edit controls up that every edit endpoint refused. Older
+  // backends don't send it: fall back to "someone has paid".
   const anyPaid = checks.some(c => c.paid);
-  const editable = !anyPaid && ['final_review', 'approved'].includes(status);
+  const planLocked = data.plan_locked === undefined ? anyPaid : data.plan_locked;
+  const editable = !planLocked && ['final_review', 'approved'].includes(status);
   const myCheck = checks.find(c => c.user_id === me?.id);
   const iApproved = trip?.me?.approved;
   const iPaid = trip?.me?.paid;

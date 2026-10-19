@@ -154,14 +154,19 @@ export default function Checkout({ tripId, trip, summary, onChanged, goTab, onSe
   const selfItems = items.filter(i => !i.charge && i.category !== 'estimate');
   const confirmations = state.confirmations || [];
   const simulated = state.simulated;
-  const modeNote = simulated ? 'Simulated — no money moves and confirmations are test codes.'
+  // Once any traveler books the trip themselves the group checkout is off for
+  // everyone (it needs every traveler), so booking your own part is the only
+  // way left to lock in — it becomes the main action, not a footnote.
+  const itemByItem = !state.available && state.self_book_chosen;
+  const modeNote = itemByItem ? null
+    : simulated ? 'Simulated — no money moves and confirmations are test codes.'
     : state.money_mode === 'test' ? 'Stripe test mode — use test cards; nothing real is charged.' : null;
 
   const headline = (
     <div style={{ marginBottom: 14 }}>
       <p style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 15, color: status === 'failed' || status === 'needs_attention' ? 'var(--clay)' : 'var(--pine)' }}>
-        {transient ? <Loader2 className="spin" size={15} /> : status === 'booked' ? <CheckCircle2 size={16} /> : status === 'failed' ? <XCircle size={16} /> : <CreditCard size={16} />}
-        {settlement ? STATUS_COPY[status] || status : 'Pay in Rovyn — one checkout, every reservation in the app'}
+        {transient ? <Loader2 className="spin" size={15} /> : status === 'booked' ? <CheckCircle2 size={16} /> : status === 'failed' ? <XCircle size={16} /> : itemByItem ? <ClipboardCheck size={16} /> : <CreditCard size={16} />}
+        {settlement ? STATUS_COPY[status] || status : itemByItem ? state.reason : 'Pay in Rovyn — one checkout, every reservation in the app'}
       </p>
       {modeNote && <p className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>{modeNote}</p>}
       {settlement?.deadline && open && !settlement.deadline_passed && (
@@ -249,7 +254,7 @@ export default function Checkout({ tripId, trip, summary, onChanged, goTab, onSe
   return (
     <div>
       {headline}
-      {!state.available && <p style={{ color: 'var(--clay)', fontSize: 14 }}>{state.reason}</p>}
+      {!state.available && !itemByItem && <p style={{ color: 'var(--clay)', fontSize: 14 }}>{state.reason}</p>}
       {state.available && needs.missing.length > 0 && !authorized && (
         <ProfileForm tripId={tripId} profile={state.me.profile} needs={needs} onSaved={refresh} />
       )}
@@ -336,17 +341,29 @@ export default function Checkout({ tripId, trip, summary, onChanged, goTab, onSe
             <XCircle size={13} /> Abandon the group checkout
           </button>
         )}
-        {onSelfBook && !state.self_book_chosen && !settlement && (
+        {/* self_book_chosen is trip-wide and never coexists with a round (lock and
+            session refuse a self-booked trip; /pay refuses while a round is
+            active), so it must not hide this: every later traveler needs it */}
+        {onSelfBook && !settlement && (itemByItem ? (
+          <button className="btn" disabled={busy || parentBusy} onClick={onSelfBook}>
+            <ClipboardCheck size={16} /> The group is booking item by item — I'll book my part myself
+          </button>
+        ) : (
           <button className="btn-quiet" disabled={busy || parentBusy} onClick={onSelfBook}>
             <ClipboardCheck size={14} /> I'll book everything myself instead <ArrowRight size={13} />
           </button>
-        )}
+        ))}
         {onSelfBook && !state.self_book_chosen && settlement && !anyoneCommitted && (
           <span className="muted" style={{ fontSize: 13 }}>
             To book everything yourself instead, {isLeader ? 'abandon the group checkout first.' : 'ask the leader to abandon the group checkout first.'}
           </span>
         )}
       </div>
+      {onSelfBook && itemByItem && (
+        <p className="muted" style={{ fontSize: 13, marginTop: 7, maxWidth: 480 }}>
+          Nothing is charged in Rovyn — book your part with the sellers, then record each confirmation on the checklist so the group sees what's done.
+        </p>
+      )}
       {error && <p style={{ color: 'var(--clay)', fontSize: 13.5, marginTop: 10 }}>{error}</p>}
     </div>
   );
