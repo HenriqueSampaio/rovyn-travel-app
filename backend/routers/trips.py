@@ -773,6 +773,7 @@ def read_options(trip_id: str, user: dict = Depends(get_current_user)):
     if options:
         from backend.services.ai_service import _duration_days
         recommended = recommended_picks(_duration_days(options.get("dates", {})), my_pace)
+        options = _lighten_details(options)
 
     return {
         "options": options,
@@ -787,6 +788,26 @@ def read_options(trip_id: str, user: dict = Depends(get_current_user)):
         "my_pace": my_pace,
         "recommended": recommended,
     }
+
+
+def _lighten_details(options: dict) -> dict:
+    """The board payload without each option's cached detail sheet.
+
+    Cached sheets (hotel pages, Places facts) make the board JSON hundreds of
+    KB, and the board polls it every few seconds; the option page always
+    fetches /option-details, so the board only needs to know a sheet exists.
+    Storage is untouched — this is the RESPONSE only. Flights and transport
+    carry no cached sheet and are left alone."""
+    light = dict(options)
+    for cat in ("stay", "visits", "events"):
+        items = []
+        for o in options.get(cat) or []:
+            d = o.get("details") if isinstance(o, dict) else None
+            if isinstance(d, dict) and d.get("kind") == "live":
+                o = {**o, "details": {"kind": "cached", "source": d.get("source"), "cached": True}}
+            items.append(o)
+        light[cat] = items
+    return light
 
 
 @router.get("/{trip_id}/stay-media")
@@ -806,12 +827,15 @@ def read_stay_media(trip_id: str, user: dict = Depends(get_current_user)):
         destination = options.get("destination") or _decided_destination(trip) or ""
 
     # Network fetches happen outside the connection — they can take seconds
-    media = stay_media_for_options(options.get("stay") or [], destination)
+    media, complete = stay_media_for_options(options.get("stay") or [], destination)
 
-    with get_conn() as conn:
-        conn.execute("UPDATE trips SET stay_media = ? WHERE id = ?",
-                     (json.dumps(media), trip_id))
-    return {"media": media}
+    # A fetch that LiteAPI throttled is not the answer — serve what came back
+    # but don't freeze it on the trip; the next open tries again
+    if complete:
+        with get_conn() as conn:
+            conn.execute("UPDATE trips SET stay_media = ? WHERE id = ?",
+                         (json.dumps(media), trip_id))
+    return {"media": media, "complete": complete}
 
 
 def _valid_option_ids(options: dict, category: str) -> set[str]:

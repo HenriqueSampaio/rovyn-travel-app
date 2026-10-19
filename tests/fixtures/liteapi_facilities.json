@@ -1,0 +1,64 @@
+{
+ "data": [
+  {
+   "facility_id": 1,
+   "facility": "Free WiFi",
+   "sort": 1,
+   "translation": []
+  },
+  {
+   "facility_id": 2,
+   "facility": "Swimming pool",
+   "sort": 2,
+   "translation": []
+  },
+  {
+   "facility_id": 3,
+   "facility": "Spa",
+   "sort": 3,
+   "translation": []
+  },
+  {
+   "facility_id": 4,
+   "facility": "Restaurant",
+   "sort": 4,
+   "translation": []
+  },
+  {
+   "facility_id": 5,
+   "facility": "Bar",
+   "sort": 5,
+   "translation": []
+  },
+  {
+   "facility_id": 6,
+   "facility": "Garden",
+   "sort": 6,
+   "translation": []
+  },
+  {
+   "facility_id": 7,
+   "facility": "Kitchen",
+   "sort": 7,
+   "translation": []
+  },
+  {
+   "facility_id": 8,
+   "facility": "Beachfront",
+   "sort": 8,
+   "translation": []
+  },
+  {
+   "facility_id": 9,
+   "facility": "Rooftop terrace",
+   "sort": 9,
+   "translation": []
+  },
+  {
+   "facility_id": 10,
+   "facility": "Fitness centre",
+   "sort": 10,
+   "translation": []
+  }
+ ]
+}

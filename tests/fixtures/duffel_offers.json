@@ -1,0 +1,668 @@
+{
+ "data": {
+  "id": "orq_test",
+  "live_mode": false,
+  "passengers": [
+   {
+    "id": "pas_1",
+    "type": "adult"
+   },
+   {
+    "id": "pas_2",
+    "type": "adult"
+   },
+   {
+    "id": "pas_3",
+    "type": "adult"
+   },
+   {
+    "id": "pas_4",
+    "type": "adult"
+   }
+  ],
+  "offers": [
+   {
+    "id": "off_dup_j01",
+    "live_mode": false,
+    "total_amount": "1512.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "TP",
+     "name": "TAP Air Portugal"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_1",
+      "duration": "PT20H25M",
+      "fare_brand_name": "Basic",
+      "segments": [
+       {
+        "id": "seg_204",
+        "origin": {
+         "iata_code": "JFK",
+         "name": "JFK",
+         "city_name": "JFK"
+        },
+        "destination": {
+         "iata_code": "LIS",
+         "name": "LIS",
+         "city_name": "LIS"
+        },
+        "departing_at": "2026-11-20T20:30:00",
+        "arriving_at": "2026-11-21T08:40:00",
+        "duration": "PT7H10M",
+        "marketing_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "operating_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "marketing_carrier_flight_number": "204",
+        "operating_carrier_flight_number": "204",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_1016",
+        "origin": {
+         "iata_code": "LIS",
+         "name": "LIS",
+         "city_name": "LIS"
+        },
+        "destination": {
+         "iata_code": "MAD",
+         "name": "MAD",
+         "city_name": "MAD"
+        },
+        "departing_at": "2026-11-21T10:30:00",
+        "arriving_at": "2026-11-21T12:55:00",
+        "duration": "PT1H25M",
+        "marketing_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "operating_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "marketing_carrier_flight_number": "1016",
+        "operating_carrier_flight_number": "1016",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_3230",
+        "origin": {
+         "iata_code": "MAD",
+         "name": "MAD",
+         "city_name": "MAD"
+        },
+        "destination": {
+         "iata_code": "FCO",
+         "name": "FCO",
+         "city_name": "FCO"
+        },
+        "departing_at": "2026-11-21T14:40:00",
+        "arriving_at": "2026-11-21T16:55:00",
+        "duration": "PT2H15M",
+        "marketing_carrier": {
+         "iata_code": "IB",
+         "name": "Iberia"
+        },
+        "operating_carrier": {
+         "iata_code": "IB",
+         "name": "Iberia"
+        },
+        "marketing_carrier_flight_number": "3230",
+        "operating_carrier_flight_number": "3230",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "sli_2",
+      "duration": "PT21H40M",
+      "fare_brand_name": "Basic",
+      "segments": [
+       {
+        "id": "seg_3233",
+        "origin": {
+         "iata_code": "FCO",
+         "name": "FCO",
+         "city_name": "FCO"
+        },
+        "destination": {
+         "iata_code": "MAD",
+         "name": "MAD",
+         "city_name": "MAD"
+        },
+        "departing_at": "2026-11-25T18:30:00",
+        "arriving_at": "2026-11-25T20:50:00",
+        "duration": "PT2H20M",
+        "marketing_carrier": {
+         "iata_code": "IB",
+         "name": "Iberia"
+        },
+        "operating_carrier": {
+         "iata_code": "IB",
+         "name": "Iberia"
+        },
+        "marketing_carrier_flight_number": "3233",
+        "operating_carrier_flight_number": "3233",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_1021",
+        "origin": {
+         "iata_code": "MAD",
+         "name": "MAD",
+         "city_name": "MAD"
+        },
+        "destination": {
+         "iata_code": "LIS",
+         "name": "LIS",
+         "city_name": "LIS"
+        },
+        "departing_at": "2026-11-25T22:10:00",
+        "arriving_at": "2026-11-25T22:30:00",
+        "duration": "PT1H20M",
+        "marketing_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "operating_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "marketing_carrier_flight_number": "1021",
+        "operating_carrier_flight_number": "1021",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_203",
+        "origin": {
+         "iata_code": "LIS",
+         "name": "LIS",
+         "city_name": "LIS"
+        },
+        "destination": {
+         "iata_code": "JFK",
+         "name": "JFK",
+         "city_name": "JFK"
+        },
+        "departing_at": "2026-11-26T09:00:00",
+        "arriving_at": "2026-11-26T12:15:00",
+        "duration": "PT8H15M",
+        "marketing_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "operating_carrier": {
+         "iata_code": "TP",
+         "name": "TAP Air Portugal"
+        },
+        "marketing_carrier_flight_number": "203",
+        "operating_carrier_flight_number": "203",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   },
+   {
+    "id": "off_zz_nonstop",
+    "live_mode": false,
+    "total_amount": "3480.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "ZZ",
+     "name": "Duffel Airways"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_1",
+      "duration": "PT8H",
+      "fare_brand_name": "Basic",
+      "segments": [
+       {
+        "id": "seg_101",
+        "origin": {
+         "iata_code": "JFK",
+         "name": "JFK",
+         "city_name": "JFK"
+        },
+        "destination": {
+         "iata_code": "FCO",
+         "name": "FCO",
+         "city_name": "FCO"
+        },
+        "departing_at": "2026-11-20T18:00:00",
+        "arriving_at": "2026-11-21T08:00:00",
+        "duration": "PT8H",
+        "marketing_carrier": {
+         "iata_code": "ZZ",
+         "name": "Duffel Airways"
+        },
+        "operating_carrier": {
+         "iata_code": "ZZ",
+         "name": "Duffel Airways"
+        },
+        "marketing_carrier_flight_number": "101",
+        "operating_carrier_flight_number": "101",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "sli_2",
+      "duration": "PT9H30M",
+      "fare_brand_name": "Basic",
+      "segments": [
+       {
+        "id": "seg_102",
+        "origin": {
+         "iata_code": "FCO",
+         "name": "FCO",
+         "city_name": "FCO"
+        },
+        "destination": {
+         "iata_code": "JFK",
+         "name": "JFK",
+         "city_name": "JFK"
+        },
+        "departing_at": "2026-11-25T12:00:00",
+        "arriving_at": "2026-11-25T15:30:00",
+        "duration": "PT9H30M",
+        "marketing_carrier": {
+         "iata_code": "ZZ",
+         "name": "Duffel Airways"
+        },
+        "operating_carrier": {
+         "iata_code": "ZZ",
+         "name": "Duffel Airways"
+        },
+        "marketing_carrier_flight_number": "102",
+        "operating_carrier_flight_number": "102",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   },
+   {
+    "id": "off_dl_ams",
+    "live_mode": false,
+    "total_amount": "2820.00",
+    "total_currency": "USD",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "owner": {
+     "iata_code": "DL",
+     "name": "Delta Air Lines"
+    },
+    "passengers": [
+     {
+      "id": "pas_1",
+      "type": "adult"
+     },
+     {
+      "id": "pas_2",
+      "type": "adult"
+     },
+     {
+      "id": "pas_3",
+      "type": "adult"
+     },
+     {
+      "id": "pas_4",
+      "type": "adult"
+     }
+    ],
+    "slices": [
+     {
+      "id": "sli_1",
+      "duration": "PT21H5M",
+      "fare_brand_name": "Basic",
+      "segments": [
+       {
+        "id": "seg_48",
+        "origin": {
+         "iata_code": "JFK",
+         "name": "JFK",
+         "city_name": "JFK"
+        },
+        "destination": {
+         "iata_code": "AMS",
+         "name": "AMS",
+         "city_name": "AMS"
+        },
+        "departing_at": "2026-11-20T18:10:00",
+        "arriving_at": "2026-11-21T07:45:00",
+        "duration": "PT7H35M",
+        "marketing_carrier": {
+         "iata_code": "DL",
+         "name": "Delta Air Lines"
+        },
+        "operating_carrier": {
+         "iata_code": "DL",
+         "name": "Delta Air Lines"
+        },
+        "marketing_carrier_flight_number": "48",
+        "operating_carrier_flight_number": "48",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_1599",
+        "origin": {
+         "iata_code": "AMS",
+         "name": "AMS",
+         "city_name": "AMS"
+        },
+        "destination": {
+         "iata_code": "FCO",
+         "name": "FCO",
+         "city_name": "FCO"
+        },
+        "departing_at": "2026-11-21T09:20:00",
+        "arriving_at": "2026-11-21T11:35:00",
+        "duration": "PT2H15M",
+        "marketing_carrier": {
+         "iata_code": "KL",
+         "name": "KLM"
+        },
+        "operating_carrier": {
+         "iata_code": "KL",
+         "name": "KLM"
+        },
+        "marketing_carrier_flight_number": "1599",
+        "operating_carrier_flight_number": "1599",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "sli_2",
+      "duration": "PT24H55M",
+      "fare_brand_name": "Basic",
+      "segments": [
+       {
+        "id": "seg_1602",
+        "origin": {
+         "iata_code": "FCO",
+         "name": "FCO",
+         "city_name": "FCO"
+        },
+        "destination": {
+         "iata_code": "AMS",
+         "name": "AMS",
+         "city_name": "AMS"
+        },
+        "departing_at": "2026-11-25T18:50:00",
+        "arriving_at": "2026-11-25T21:20:00",
+        "duration": "PT2H30M",
+        "marketing_carrier": {
+         "iata_code": "KL",
+         "name": "KLM"
+        },
+        "operating_carrier": {
+         "iata_code": "KL",
+         "name": "KLM"
+        },
+        "marketing_carrier_flight_number": "1602",
+        "operating_carrier_flight_number": "1602",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "seg_49",
+        "origin": {
+         "iata_code": "AMS",
+         "name": "AMS",
+         "city_name": "AMS"
+        },
+        "destination": {
+         "iata_code": "JFK",
+         "name": "JFK",
+         "city_name": "JFK"
+        },
+        "departing_at": "2026-11-26T10:00:00",
+        "arriving_at": "2026-11-26T12:45:00",
+        "duration": "PT8H45M",
+        "marketing_carrier": {
+         "iata_code": "DL",
+         "name": "Delta Air Lines"
+        },
+        "operating_carrier": {
+         "iata_code": "DL",
+         "name": "Delta Air Lines"
+        },
+        "marketing_carrier_flight_number": "49",
+        "operating_carrier_flight_number": "49",
+        "passengers": [
+         {
+          "passenger_id": "pas_1",
+          "cabin_class": "economy",
+          "baggages": [
+           {
+            "type": "carry_on",
+            "quantity": 1
+           },
+           {
+            "type": "checked",
+            "quantity": 1
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "conditions": {
+     "refund_before_departure": null,
+     "change_before_departure": null
+    },
+    "payment_requirements": {
+     "requires_instant_payment": true,
+     "price_guarantee_expires_at": null,
+     "payment_required_by": null
+    }
+   }
+  ]
+ }
+}
