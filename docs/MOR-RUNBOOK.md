@@ -61,10 +61,19 @@ traveler). Record the decision in `docs/BOOKING-ARCHITECTURE.md`. Cost $0.
 - Activate the account with business KYC. Describe Rovyn accurately as a **travel booking
   platform / travel agency** — never as an airline or cruise operator ("Commercial airlines and
   cruises" are on Stripe's **prohibited** list; "Travel reservation services and clubs" is on the
-  **restricted** list, last updated 2026-09-22). Stripe's support FAQ goes further: "Stripe or
-  our financial partners deem the following travel industries high risk and, therefore, don't
-  support them: travel reservation services and clubs, commercial airlines or cross-border
-  charter air travel, cruises, and timeshares." Treat approval as uncertain, not a formality.
+  **restricted** list, last updated 2026-09-22, at https://stripe.com/legal/restricted-businesses).
+  Restricted means Stripe must do "additional due diligence" and "might not be able to grant
+  approval"; an approval is "specific to each service offer" and can be "modified or revoked by
+  Stripe at any time". Stripe's help-center FAQs for businesses that join through another
+  company's platform go further (re-checked 2026-10-19,
+  https://support.stripe.com/express/questions/prohibited-and-restricted-businesses-list-faqs
+  and https://support.stripe.com/embedded-connect/questions/restricted-business-list-faqs):
+  "Stripe and/or their financial partners deem the following travel industries high risk and,
+  therefore, they are unsupported: travel reservation services and clubs; airlines; cruises;
+  timeshares", while adding that listed businesses "may be eligible for processing with
+  explicit prior approval from Stripe". Rovyn would open its own account, where the legal list
+  governs, so approval is possible but discretionary and revocable. Treat it as uncertain, not
+  a formality, and keep the backup processor below moving in parallel.
 - Before launch, write to Stripe sales/compliance and get in writing: (i) approval for the
   restricted category, (ii) reserve terms (travel often carries a fixed or rolling reserve
   because delivery is weeks after payment), (iii) access to **extended authorizations** —
