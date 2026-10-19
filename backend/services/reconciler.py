@@ -26,10 +26,23 @@ def enabled() -> bool:
     return (os.environ.get("ROVYN_RECONCILER") or "1").strip() != "0"
 
 
-def reconcile_all() -> list[dict]:
-    """One pass over every stuck settlement. Safe to call any time."""
+def reconcile_all(stale_after_seconds: int = STALE_AFTER_SECONDS) -> list[dict]:
+    """One pass: open rounds past their group deadline are released, releases
+    Stripe never confirmed are finished, then every stuck settlement is
+    resolved. Safe to call any time."""
     results = []
-    for settlement_id in booking_service.stuck_settlement_ids(STALE_AFTER_SECONDS):
+    for trip_id in booking_service.overdue_open_trip_ids():
+        try:
+            if booking_service.expire_if_due(trip_id):
+                results.append({"trip_id": trip_id, "expired": True})
+        except Exception as exc:
+            results.append({"trip_id": trip_id, "error": str(exc)})
+    for attempt_id in booking_service.releasing_attempt_ids(stale_after_seconds):
+        try:
+            results.append(booking_service.resolve_releasing(attempt_id))
+        except Exception as exc:
+            results.append({"attempt_id": attempt_id, "error": str(exc)})
+    for settlement_id in booking_service.stuck_settlement_ids(stale_after_seconds):
         try:
             results.append(booking_service.reconcile(settlement_id))
         except Exception as exc:  # one bad settlement must not stop the sweep
@@ -46,12 +59,14 @@ def _loop() -> None:
 
 
 def start() -> None:
-    """Start the background sweep once per process (no-op when disabled)."""
+    """Start the background sweep once per process (no-op when disabled).
+    The boot pass uses no staleness: nothing can still be running from the
+    previous process, so an interrupted round resumes right away."""
     global _thread
     if not enabled() or (_thread is not None and _thread.is_alive()):
         return
     try:
-        reconcile_all()
+        reconcile_all(stale_after_seconds=0)
     except Exception:
         pass
     _stop.clear()

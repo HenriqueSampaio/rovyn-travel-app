@@ -29,6 +29,7 @@ import os
 import secrets
 import ssl
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -49,10 +50,13 @@ _LITE_SEARCH = "https://api.liteapi.travel/v3.0"
 _LITE_BOOK = "https://book.liteapi.travel/v3.0"
 
 OPEN_STATUSES = ("collecting", "reconfirm")
-SETTLING_STATUSES = ("verifying", "booking", "capturing", "paying", "reconciling")
+SETTLING_STATUSES = ("verifying", "booking", "capturing", "unwinding", "paying", "reconciling")
 DONE_STATUSES = ("booked", "partially_booked")
 TERMINAL_STATUSES = ("cancelled", "failed", "resolved")
-ACTIVE_ATTEMPT_STATUSES = ("pending", "authorized", "releasing", "captured", "refunded")
+ACTIVE_ATTEMPT_STATUSES = ("pending", "authorized", "nothing_due", "releasing", "captured", "refunded")
+COMMITTED_STATUSES = ("authorized", "nothing_due")   # counts toward "everyone has paid"
+MAX_RECONCILE_ATTEMPTS = 3         # after this many automatic resumes a person takes over
+CAPTURE_RETRIES = 3                # re-reads of a capture whose outcome Stripe did not confirm
 PRICE_RISE_TOLERANCE_CENTS = 100   # above this per person the group must re-pay
 ABSORB_CENTS_PER_PERSON = 100      # below this Rovyn absorbs a post-capture airline increase
 HOLD_MIN_WINDOW_HOURS = 12         # a hold that would leave the group less than this is not worth taking
@@ -70,6 +74,11 @@ class BookingError(Exception):
     def __init__(self, message: str, code=None, status: int | None = None):
         super().__init__(message)
         self.code, self.status = code, status
+
+
+class RefundUnresolved(Exception):
+    """A refund could not be confirmed with Stripe; the settlement is parked in
+    needs_attention with its refund cursor and the reconciler retries it."""
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +321,14 @@ def hotel_cancel(booking_id: str) -> dict:
             "fee_cents": cents(body.get("cancellation_fee")), "sandbox": data.get("sandbox")}
 
 
+def _assert_usd(*quotes: dict) -> None:
+    """Travelers are charged in USD cents; a rate quoted in anything else is never locked."""
+    for q in quotes:
+        cur = (q.get("currency") or "USD").upper()
+        if cur != "USD":
+            raise BookingError(f"this rate is priced in {cur}, not USD", "currency")
+
+
 def _assert_sandbox_flag(payload: dict, money_mode: str, what: str) -> None:
     flag = payload.get("sandbox") if isinstance(payload, dict) else None
     if flag is None:
@@ -390,31 +407,33 @@ def _touch(conn, settlement_id: str) -> None:
 
 
 def _attempts(conn, settlement_id: str) -> dict:
+    marks = ",".join("?" for _ in ACTIVE_ATTEMPT_STATUSES)
     return {r["user_id"]: dict(r) for r in conn.execute(
-        "SELECT * FROM payment_attempts WHERE settlement_id = ? AND status IN ('pending', 'authorized', 'releasing', 'captured', 'refunded')",
-        (settlement_id,)).fetchall()}
+        f"SELECT * FROM payment_attempts WHERE settlement_id = ? AND status IN ({marks})",
+        (settlement_id, *ACTIVE_ATTEMPT_STATUSES)).fetchall()}
 
 
 def _sync_summary(conn, attempt: dict, receipt: dict | None = None) -> None:
-    """``payments`` is the one-row-per-member summary everything else reads."""
+    """``payments`` is the one-row-per-member summary everything else reads.
+    ``receipt=None`` keeps whatever receipt the row already holds."""
     status = attempt["status"]
     if status in ("released", "failed", "expired"):
         conn.execute("DELETE FROM payments WHERE trip_id = ? AND user_id = ? AND mode = 'full'",
                      (attempt["trip_id"], attempt["user_id"]))
         return
+    receipt_json = json.dumps(receipt) if receipt is not None else None
     conn.execute(
         """INSERT INTO payments (trip_id, user_id, amount_cents, currency, mode, receipt, email_status, paid_at,
                                  status, provider, current_attempt_id, captured_at, captured_cents, refunded_cents)
-           VALUES (?, ?, ?, 'USD', 'full', ?, 'none', ?, ?, ?, ?, ?, ?, ?)
+           VALUES (?, ?, ?, 'USD', 'full', COALESCE(?, '{}'), 'none', ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(trip_id, user_id) DO UPDATE SET
-             amount_cents = excluded.amount_cents, receipt = excluded.receipt, paid_at = excluded.paid_at,
+             amount_cents = excluded.amount_cents, receipt = COALESCE(?, payments.receipt), paid_at = excluded.paid_at,
              status = excluded.status, provider = excluded.provider, current_attempt_id = excluded.current_attempt_id,
              captured_at = excluded.captured_at, captured_cents = excluded.captured_cents,
              refunded_cents = excluded.refunded_cents""",
-        (attempt["trip_id"], attempt["user_id"], attempt["amount_cents"],
-         json.dumps(receipt) if receipt is not None else "{}", attempt["updated_at"], status,
+        (attempt["trip_id"], attempt["user_id"], attempt["amount_cents"], receipt_json, attempt["updated_at"], status,
          attempt["provider"], attempt["id"], attempt["updated_at"] if status in ("captured", "refunded") else None,
-         attempt.get("captured_cents"), attempt.get("refunded_cents") or 0))
+         attempt.get("captured_cents"), attempt.get("refunded_cents") or 0, receipt_json))
 
 
 def _update_attempt(conn, attempt_id: str, **fields) -> dict:
@@ -429,8 +448,8 @@ def _receipt(ctx: dict, member: dict, check: dict, status: str, captured_cents: 
     return {
         "receipt_no": f"RV-{trip['id'][:8].upper()}-{member['id'][:4].upper()}",
         "trip_name": trip["name"], "destination": plan.get("destination", ""), "dates": plan.get("dates", {}),
-        "items": [{"label": l["label"], "amount": round(l["cents"] / 100, 2), "charged": l["charged"],
-                   "estimate": l["estimate"]} for l in check["lines"]],
+        "items": [{"item_key": l["item_key"], "label": l["label"], "amount": round(l["cents"] / 100, 2),
+                   "charged": l["charged"], "estimate": l["estimate"]} for l in check["lines"]],
         "total": round((captured_cents if captured_cents is not None else check["charged_cents"]) / 100, 2),
         "estimate_total": round(check["estimate_cents"] / 100, 2),
         "currency": "USD", "mode": "full", "status": status, "paid_at": _now(),
@@ -524,8 +543,10 @@ def _lock_flight(f: dict, travelers: list[str], money_mode: str, lock_time: date
         hours = max(1, int((required_by - lock_time).total_seconds() // 3600))
         return {"self": f"This airline only holds fares for {hours} hours — book it yourself"}
     pax = {uid: p.get("id") for uid, p in zip(travelers, offer.get("passengers") or [])}
+    # The higher of the equal shares: Rovyn may over-collect by (n − 1) cents, never under.
+    per_person = split_cents(cents(offer.get("total_amount")), max(1, len(travelers)))[0]
     return {
-        "offer": offer, "per_person_cents": cents(duffel.per_person_amount(offer)),
+        "offer": offer, "per_person_cents": per_person,
         "currency": "USD", "signature": duffel.itinerary_signature(offer),
         "ref": {"offer_id": offer.get("id"), "offer_request_id": request.get("id"), "passenger_ids": pax,
                 "signature": duffel.itinerary_signature(offer), "expires_at": offer.get("expires_at"),
@@ -598,6 +619,7 @@ def build_lock(ctx: dict, settlement_id: str, money_mode: str, prior: dict | Non
                     if not pre["clean"]:
                         raise BookingError("The hotel's price keeps changing between search and prebook.", "unstable")
                 _assert_sandbox_flag(pre, money_mode, "LiteAPI prebook")
+                _assert_usd(pre, offer)
                 total = pre["total_cents"] or offer["total_cents"]
                 deadline_dt = _parse_dt(offer["cancel_deadline"])
                 safe = bool(offer["refundable"]) and (
@@ -694,33 +716,102 @@ def _passengers_complete(ctx: dict, item: dict) -> bool:
     return all(p.get(f) for p in passengers for f in ("given_name", "family_name", "born_on", "gender", "title", "email", "phone_number"))
 
 
+def _self_book(item: dict, note: str) -> None:
+    item.update({"provider": "self", "mode": None, "charge": False, "estimate": True,
+                 "per_person_cents": item["estimate_cents"], "total_cents": item["estimate_cents"] * len(item["travelers"]),
+                 "note": note})
+    item["ref"] = {"board_offer_id": (item.get("ref") or {}).get("board_offer_id")}
+    item.pop("hold_pending", None)
+
+
+def _adopt_live_fare(item: dict, live: dict) -> None:
+    """A fresh offer for the same itinerary replaces the stale one (same attempt reference)."""
+    item["ref"].update(live["ref"])
+    item.update({
+        "per_person_cents": live["per_person_cents"], "total_cents": live["per_person_cents"] * len(item["travelers"]),
+        "delta_cents": live["per_person_cents"] - item["estimate_cents"], "operated_by": live["operated_by"],
+        "refundable": bool(((live["ref"]["conditions"].get("refund_before_departure") or {}).get("allowed"))),
+        "verified_at": _now(),
+    })
+
+
+def _plan_flight(ctx: dict, item: dict) -> dict | None:
+    city = item["item_key"].split(":", 1)[1]
+    flights = (ctx.get("plan") or {}).get("flights") or {}
+    if city in flights:
+        return flights[city]
+    return next((f for c, f in flights.items() if c.strip().casefold() == city.strip().casefold()), None)
+
+
+def _find_hold_by_attempt(attempt_ref: str) -> dict | None:
+    """After a timeout on POST /air/orders: did the airline create our hold?
+    Recent orders are read back and matched on the attempt reference we sent."""
+    for order in duffel.list_recent_orders():
+        if (order.get("metadata") or {}).get("rovyn_attempt") == attempt_ref:
+            status = order.get("payment_status") or {}
+            return {"order_id": order.get("id"), "booking_reference": order.get("booking_reference"),
+                    "payment_required_by": status.get("payment_required_by"),
+                    "price_guarantee_expires_at": status.get("price_guarantee_expires_at"),
+                    "total_amount": order.get("total_amount"), "total_currency": order.get("total_currency"),
+                    "paid": not status.get("awaiting_payment", True), "signature": duffel.itinerary_signature(order),
+                    "conditions": order.get("conditions") or {}}
+    return None
+
+
 def _try_place_hold(ctx: dict, item: dict, settlement_id: str, deadline_terms: list) -> None:
     """Place the airline hold now, or mark it pending until every passenger
     on the flight has their details. A refused hold turns the flight into a
-    self-book item with the airline's reason."""
+    self-book item with the airline's reason; an unanswered one is parked —
+    never silently handed back to the traveler while an order may exist."""
     if not _passengers_complete(ctx, item):
         item["hold_pending"] = True
         item["note"] = "The airline hold is placed once every traveler on this flight adds their details"
         return
     try:
+        if duffel.offer_expired(item["ref"]):
+            # Offers live about 30 minutes: re-search the same itinerary for this group before holding it.
+            f = _plan_flight(ctx, item)
+            live = (_lock_flight(f, item["travelers"], ctx.get("money_mode") or money_mode_now(), _now_dt())
+                    if f else {"self": "This flight is no longer in the plan — book it yourself"})
+            if live.get("self"):
+                _self_book(item, live["self"])
+                return
+            _adopt_live_fare(item, live)
         hold = _place_hold(ctx, item, settlement_id)
-        item["ref"]["orders"] = [hold]
-        item.pop("hold_pending", None)
-        item["note"] = None
-        due = _parse_dt(hold.get("payment_required_by"))
-        if due:
-            deadline_terms.append((due - timedelta(hours=2)).isoformat(timespec="seconds"))
+    except duffel.DuffelError as exc:
+        if exc.code == "network":
+            found = None
+            try:
+                found = _find_hold_by_attempt(item["attempt_ref"])
+            except Exception:
+                found = None
+            if found is None:
+                item["hold_pending"] = True
+                item["note"] = "The airline did not answer — the hold will be retried"
+                with get_conn() as conn:
+                    _event(conn, settlement_id, "lock", f"{item['title']}: the airline did not answer while placing the hold — parked, not self-booked",
+                           item_key=item["item_key"], level="warn")
+                return
+            hold = found
+        else:
+            _self_book(item, f"The airline would not hold this fare ({exc}) — book it yourself")
+            return
     except Exception as exc:
-        item.update({"provider": "self", "mode": None, "charge": False, "estimate": True,
-                     "per_person_cents": item["estimate_cents"], "total_cents": item["estimate_cents"] * len(item["travelers"]),
-                     "note": f"The airline would not hold this fare ({exc}) — book it yourself"})
-        item.pop("hold_pending", None)
+        _self_book(item, f"The airline would not hold this fare ({exc}) — book it yourself")
+        return
+    item["ref"]["orders"] = [hold]
+    item.pop("hold_pending", None)
+    item["note"] = None
+    due = _parse_dt(hold.get("payment_required_by"))
+    if due:
+        deadline_terms.append((due - timedelta(hours=2)).isoformat(timespec="seconds"))
 
 
 def place_pending_holds(settlement_id: str) -> None:
     """Called when a traveler checks out: holds that were waiting for traveler
-    details are placed now. A hold that fails after others already paid changes
-    the shares, so the round restarts (reconfirm)."""
+    details (or for the airline to answer) are placed now. A hold that fails,
+    or a fare that rose by more than the tolerance, after others already paid
+    changes the shares, so the round restarts (reconfirm)."""
     with get_conn(readonly=True) as conn:
         row = _settlement(conn, settlement_id)
         if row is None or row["status"] not in OPEN_STATUSES:
@@ -737,15 +828,18 @@ def place_pending_holds(settlement_id: str) -> None:
     for item in pending:
         if not _passengers_complete(ctx, item):
             continue
+        before = item["per_person_cents"]
         _try_place_hold(ctx, item, settlement_id, terms)
         changed = True
         if item["provider"] != "duffel":
             broke.append(f"{item['title']}: {item['note']}")
+        elif not item.get("hold_pending") and item["per_person_cents"] > before + PRICE_RISE_TOLERANCE_CENTS:
+            broke.append(f"{item['title']}: the fare rose by ${dollars(item['per_person_cents'] - before)} per person")
     if not changed:
         return
     lock["deadline_terms"] = terms
     lock["members"] = member_checks(lock["items"], ctx["members"], ctx["cities"], lock["fee_percent"])
-    if broke and any(a["status"] == "authorized" for a in attempts.values()):
+    if broke and any(a["status"] in COMMITTED_STATUSES for a in attempts.values()):
         _go_reconfirm(settlement_id, lock, broke, row["status"])
         return
     with get_conn() as conn:
@@ -839,7 +933,13 @@ def ensure_settlement(trip_id: str) -> dict:
                    VALUES (?, ?, ?, 'collecting', ?, 'USD', ?, ?, NULL, NULL, ?, ?)""",
                 (settlement_id, trip_id, last + 1, money_mode, json.dumps(lock), ctx["plan_hash"], now, now))
         except IntegrityError:
-            return dict(active_settlement(conn, trip_id))
+            winner = dict(active_settlement(conn, trip_id))
+            lost = True
+        else:
+            lost = False
+        if lost:
+            _release_holds(lock)  # the other traveler's lock won the insert — our holds lapse
+            return winner
         _event(conn, settlement_id, "lock", "prices verified and locked",
                data={"items": [{"item_key": i["item_key"], "provider": i["provider"], "charge": i["charge"],
                                 "total_cents": i["total_cents"], "pre_capture_safe": i.get("pre_capture_safe"),
@@ -935,6 +1035,11 @@ def _create_pending_attempt(conn, settlement: dict, user_id: str, amount: int, p
             (attempt_id, settlement["trip_id"], user_id, settlement["id"], settlement["round"], provider, amount,
              _now(), _now()))
     except IntegrityError:
+        blocker = conn.execute(
+            "SELECT status FROM payment_attempts WHERE settlement_id = ? AND user_id = ? AND status = 'releasing'",
+            (settlement["id"], user_id)).fetchone()
+        if blocker:
+            raise BookingError("Your previous authorization is still being released — try again in a few minutes.", "releasing", 409)
         raise BookingError("You already have a payment in progress — refresh.", "conflict", 409)
     attempt = dict(conn.execute("SELECT * FROM payment_attempts WHERE id = ?", (attempt_id,)).fetchone())
     _sync_summary(conn, attempt)
@@ -958,7 +1063,8 @@ def _authorize_attempt(conn, ctx: dict, settlement: dict, attempt: dict, provide
 
 def start_session(trip_id: str, user: dict, acknowledge: bool = False) -> dict:
     """Create (or reuse) this traveler's Checkout Session — or, without a
-    Stripe key, record a simulated authorization straight away."""
+    Stripe key, record a simulated authorization straight away. A traveler
+    who owes nothing commits without any card, in every money mode."""
     expire_if_due(trip_id)
     settlement = ensure_settlement(trip_id)
     if settlement["status"] not in OPEN_STATUSES:
@@ -984,9 +1090,14 @@ def start_session(trip_id: str, user: dict, acknowledge: bool = False) -> dict:
     lock = json.loads(settlement["lock"])
     check = lock["members"].get(user["id"]) or check
 
-    with get_conn() as conn:
+    with get_conn(readonly=True) as conn:
         mine = next((a for a in _attempts(conn, settlement["id"]).values() if a["user_id"] == user["id"]), None)
-    if mine and mine["status"] in ("authorized", "captured", "refunded", "releasing"):
+        releasing = conn.execute(
+            "SELECT 1 FROM payment_attempts WHERE trip_id = ? AND user_id = ? AND status = 'releasing'",
+            (trip_id, user["id"])).fetchone()
+    if releasing:
+        raise BookingError("Your previous authorization is still being released — try again in a few minutes.", "releasing", 409)
+    if mine and mine["status"] in ("authorized", "nothing_due", "captured", "refunded"):
         raise BookingError("You've already paid your share — waiting on the others.", "already_authorized", 400)
     if mine and mine["status"] == "pending" and mine.get("checkout_session_id") and stripe.stripe_available():
         session = stripe.retrieve_session(mine["checkout_session_id"])
@@ -996,6 +1107,16 @@ def start_session(trip_id: str, user: dict, acknowledge: bool = False) -> dict:
         pi = stripe.payment_intent_of(session) if session.get("status") == "complete" else None
         if pi and pi.get("status") == "requires_capture":
             return _confirm_intent(trip_id, settlement, mine, pi, session["id"])
+        if session.get("status") == "open":
+            # Too close to its expiry to hand out again: close it at Stripe first, so it
+            # can never complete behind the fresh one (it may have completed just now).
+            try:
+                stripe.expire_session(session["id"])
+            except stripe.StripeError:
+                session = stripe.retrieve_session(session["id"])
+                pi = stripe.payment_intent_of(session) if session.get("status") == "complete" else None
+                if pi and pi.get("status") == "requires_capture":
+                    return _confirm_intent(trip_id, settlement, mine, pi, session["id"])
         with get_conn() as conn:
             mine = _update_attempt(conn, mine["id"], status="expired")
             _sync_summary(conn, mine)
@@ -1008,13 +1129,23 @@ def start_session(trip_id: str, user: dict, acknowledge: bool = False) -> dict:
         mine = None
 
     amount = check["charged_cents"]
-    if amount <= 0 or not stripe.stripe_available():
+    if amount <= 0:
+        # Nothing to charge: a commitment with no card and no provider, in every money mode.
+        with get_conn() as conn:
+            attempt = _create_pending_attempt(conn, settlement, user["id"], 0, "none")
+            attempt = _update_attempt(conn, attempt["id"], status="nothing_due")
+            _sync_summary(conn, attempt)
+            _event(conn, settlement["id"], "authorize", "nothing due — committed without a card",
+                   data={"user_id": user["id"], "amount_cents": 0})
+        _maybe_settle(settlement["id"])
+        return {"authorized": True, "nothing_to_charge": True, "simulated": False}
+    if not stripe.stripe_available():
         auth = stripe.simulated_authorization(user["id"])
         with get_conn() as conn:
             attempt = _create_pending_attempt(conn, settlement, user["id"], amount, "simulated")
             _authorize_attempt(conn, ctx, settlement, attempt, auth["id"], auth["capture_before"], None)
         _maybe_settle(settlement["id"])
-        return {"simulated": True, "authorized": True, "nothing_to_charge": amount <= 0}
+        return {"simulated": True, "authorized": True, "nothing_to_charge": False}
 
     with get_conn() as conn:
         attempt = _create_pending_attempt(conn, settlement, user["id"], amount, "stripe")
@@ -1063,9 +1194,22 @@ def _confirm_intent(trip_id: str, settlement: dict, attempt: dict, pi: dict, ses
     return {"state": "authorized"}
 
 
+def _release_stray(settlement_id: str, pi: dict, user_id: str) -> None:
+    """A requires_capture PaymentIntent that no live attempt owns (a replaced
+    or expired link completed late): cancel it so the card is not held."""
+    try:
+        stripe.cancel_payment_intent(pi["id"], "duplicate", idempotency_key=f"stray:{pi['id']}")
+        outcome, level = "stray authorization released", "warn"
+    except stripe.StripeError as exc:
+        outcome, level = f"stray authorization could NOT be released: {exc}", "error"
+    with get_conn() as conn:
+        _event(conn, settlement_id, "authorize", outcome, level=level, data={"user_id": user_id, "pi": pi["id"]})
+
+
 def confirm_session(trip_id: str, user: dict, session_id: str) -> dict:
     """Back from Stripe: find OUR attempt for that session, then trust only
-    what Stripe says about it."""
+    what Stripe says about it. The hold an attempt owns is never touched here —
+    the webhook may have recorded it first, and the page may be reloaded."""
     expire_if_due(trip_id)
     if not stripe.stripe_available():
         return {"state": "simulated"}
@@ -1085,46 +1229,102 @@ def confirm_session(trip_id: str, user: dict, session_id: str) -> dict:
         return {"state": "expired"}
     pi = stripe.payment_intent_of(session)
     if pi and pi.get("status") == "requires_capture":
-        if attempt["status"] != "pending" or settlement["status"] not in OPEN_STATUSES:
-            # A completed session that matches no active attempt: release the stray hold now.
-            try:
-                stripe.cancel_payment_intent(pi["id"], "duplicate", idempotency_key=f"stray:{pi['id']}")
-            except stripe.StripeError:
-                pass
-            with get_conn() as conn:
-                _event(conn, settlement["id"], "authorize", "stray authorization released", level="warn",
-                       data={"user_id": user["id"], "pi": pi["id"]})
-            return {"state": attempt["status"]}
-        return _confirm_intent(trip_id, settlement, attempt, pi, session_id)
+        if attempt.get("payment_intent_id") == pi["id"]:
+            return {"state": attempt["status"]}  # already recorded (webhook first, or a reload)
+        if attempt["status"] == "pending" and settlement["status"] in OPEN_STATUSES:
+            return _confirm_intent(trip_id, settlement, attempt, pi, session_id)
+        if attempt["status"] in ("expired", "failed", "released") and settlement["status"] not in SETTLING_STATUSES:
+            _release_stray(settlement["id"], pi, user["id"])
+        return {"state": attempt["status"]}
+    if attempt["status"] != "pending":
+        return {"state": attempt["status"]}  # e.g. captured: the hold is gone because the trip is booked
     return {"state": "pending", "payment_status": session.get("payment_status")}
 
 
+def _undo_at_stripe(attempt: dict, reason: str) -> None:
+    """Cancel the hold (authorized) or close the hosted link (pending). A link
+    that completed in the meantime leaves a hold, which is cancelled instead."""
+    if attempt.get("payment_intent_id"):
+        stripe.cancel_payment_intent(attempt["payment_intent_id"],
+                                     "abandoned" if reason == "abandoned" else "requested_by_customer",
+                                     idempotency_key=f"cancel:{attempt['payment_intent_id']}")
+        return
+    if not attempt.get("checkout_session_id"):
+        return
+    try:
+        stripe.expire_session(attempt["checkout_session_id"])
+    except stripe.StripeError as exc:
+        session = stripe.retrieve_session(attempt["checkout_session_id"])
+        pi = stripe.payment_intent_of(session) if session.get("status") == "complete" else None
+        if pi and pi.get("status") == "requires_capture":
+            stripe.cancel_payment_intent(pi["id"], "abandoned", idempotency_key=f"cancel:{pi['id']}")
+        elif session.get("status") == "open":
+            raise exc
+
+
 def _release_attempt(settlement_id: str, attempt: dict, reason: str) -> None:
-    """Undo one traveler's hold: CAS authorized→releasing, cancel at Stripe,
-    then released. The summary row disappears so nothing reads as paid."""
+    """Undo one traveler's hold: CAS →releasing, undo at Stripe, then released
+    (the summary row disappears so nothing reads as paid). If Stripe does not
+    confirm, the row STAYS releasing: no new attempt can start for that
+    traveler and the reconciler finishes it (resolve_releasing)."""
     with get_conn() as conn:
-        cur = conn.execute("UPDATE payment_attempts SET status = 'releasing', updated_at = ? WHERE id = ? AND status IN ('authorized', 'pending')",
+        cur = conn.execute("UPDATE payment_attempts SET status = 'releasing', updated_at = ? WHERE id = ? AND status IN ('authorized', 'pending', 'nothing_due')",
                            (_now(), attempt["id"]))
         if cur.rowcount != 1:
             return
-    if attempt["provider"] == "stripe" and attempt.get("payment_intent_id"):
+    if attempt["provider"] == "stripe":
         try:
-            stripe.cancel_payment_intent(attempt["payment_intent_id"],
-                                         "abandoned" if reason == "abandoned" else "requested_by_customer",
-                                         idempotency_key=f"cancel:{attempt['payment_intent_id']}")
+            _undo_at_stripe(attempt, reason)
         except stripe.StripeError as exc:
             with get_conn() as conn:
-                _event(conn, settlement_id, "release", f"cancel failed at Stripe: {exc}", level="error",
-                       data={"user_id": attempt["user_id"]})
-    elif attempt["provider"] == "stripe" and attempt.get("checkout_session_id"):
-        try:
-            stripe.expire_session(attempt["checkout_session_id"])
-        except stripe.StripeError:
-            pass
+                _event(conn, settlement_id, "release", f"release not confirmed by Stripe ({exc}) — the reconciler will finish it",
+                       level="error", data={"user_id": attempt["user_id"]})
+            return
     with get_conn() as conn:
         fresh = _update_attempt(conn, attempt["id"], status="released")
         _sync_summary(conn, fresh)
         _event(conn, settlement_id, "release", f"authorization released ({reason})", data={"user_id": attempt["user_id"]})
+
+
+def releasing_attempt_ids(stale_after_seconds: int) -> list[str]:
+    cutoff = (_now_dt() - timedelta(seconds=stale_after_seconds)).isoformat(timespec="seconds")
+    with get_conn(readonly=True) as conn:
+        rows = conn.execute("SELECT id FROM payment_attempts WHERE status = 'releasing' AND updated_at < ?", (cutoff,)).fetchall()
+    return [r["id"] for r in rows]
+
+
+def resolve_releasing(attempt_id: str) -> dict:
+    """Finish a release Stripe never confirmed, by reading the hold first:
+    canceled → released; still held → cancel again (same key); captured → a person."""
+    with get_conn(readonly=True) as conn:
+        row = conn.execute("SELECT * FROM payment_attempts WHERE id = ?", (attempt_id,)).fetchone()
+    if row is None or row["status"] != "releasing":
+        return {"attempt_id": attempt_id, "skipped": True}
+    a = dict(row)
+    if a["provider"] == "stripe":
+        try:
+            if a.get("payment_intent_id"):
+                pi = stripe.retrieve_payment_intent(a["payment_intent_id"])
+                if pi.get("status") == "succeeded":
+                    with get_conn() as conn:
+                        _event(conn, a["settlement_id"], "release", "the hold was CAPTURED while being released — needs a person",
+                               level="error", data={"user_id": a["user_id"], "pi": pi["id"]})
+                    _needs_attention(a["settlement_id"], "a traveler's card was charged while their authorization was being released", resumable=False)
+                    return {"attempt_id": attempt_id, "needs_attention": True}
+                if pi.get("status") == "requires_capture":
+                    stripe.cancel_payment_intent(pi["id"], "requested_by_customer", idempotency_key=f"cancel:{pi['id']}")
+            else:
+                _undo_at_stripe(a, "reconciled")
+        except stripe.StripeError as exc:
+            with get_conn() as conn:
+                _event(conn, a["settlement_id"], "release", f"release still not confirmed by Stripe ({exc})", level="error",
+                       data={"user_id": a["user_id"]})
+            return {"attempt_id": attempt_id, "retry": True}
+    with get_conn() as conn:
+        fresh = _update_attempt(conn, a["id"], status="released")
+        _sync_summary(conn, fresh)
+        _event(conn, a["settlement_id"], "release", "authorization released (reconciled)", data={"user_id": a["user_id"]})
+    return {"attempt_id": attempt_id, "released": True}
 
 
 def release_authorization(trip_id: str, user: dict) -> dict:
@@ -1151,7 +1351,7 @@ def abandon(trip_id: str, user: dict) -> dict:
         attempts = _attempts(conn, settlement["id"])
         lock = json.loads(settlement["lock"])
         _event(conn, settlement["id"], "abandon", "checkout abandoned by the leader", data={"user_id": user["id"]})
-        conn.execute("DELETE FROM payments WHERE trip_id = ? AND mode = 'full' AND status IN ('pending', 'released', 'failed', 'expired')",
+        conn.execute("DELETE FROM payments WHERE trip_id = ? AND mode = 'full' AND status IN ('pending', 'nothing_due', 'released', 'failed', 'expired')",
                      (trip_id,))
     for a in attempts.values():
         _release_attempt(settlement["id"], a, "abandoned")
@@ -1172,25 +1372,39 @@ def retry(trip_id: str, user: dict) -> dict:
 
 
 def on_members_changed(trip_id: str, reason: str) -> None:
-    """The group changed while collecting: every share changes, so the holds
-    are released and the round restarts with a fresh lock."""
-    with get_conn() as conn:
+    """The group changed while collecting: every share changes. The new lock
+    is built FIRST; only once it exists is the round moved to reconfirm and
+    every hold released. If the new group cannot be priced, the round fails
+    cleanly — a lock that still lists the old members is never left behind."""
+    with get_conn(readonly=True) as conn:
         row = active_settlement(conn, trip_id)
         if row is None or row["status"] not in OPEN_STATUSES:
             return
+    row = dict(row)
+    ctx = _trip_context(trip_id)
+    try:
+        lock = build_lock(ctx, row["id"], row["money_mode"])
+    except Exception as exc:
+        with get_conn() as conn:
+            _event(conn, row["id"], "reconfirm", f"group changed ({reason}) but the new prices could not be locked: {exc}", level="error")
+        _fail_settlement(row["id"], f"group changed ({reason}) — the round must restart", OPEN_STATUSES, json.loads(row["lock"]))
+        return
+    with get_conn() as conn:
         if not _cas(conn, row["id"], "reconfirm", OPEN_STATUSES):
-            return
-        attempts = _attempts(conn, row["id"])
-        old_lock = json.loads(row["lock"])
-        _event(conn, row["id"], "reconfirm", f"group changed: {reason}", level="warn")
+            moved = True
+        else:
+            moved = False
+            attempts = _attempts(conn, row["id"])
+            old_lock = json.loads(row["lock"])
+            _save_lock(conn, row["id"], lock)
+            conn.execute("UPDATE settlements SET deadline = NULL, plan_hash = ? WHERE id = ?", (ctx["plan_hash"], row["id"]))
+            _event(conn, row["id"], "reconfirm", f"group changed: {reason}", level="warn")
+    if moved:
+        _release_holds(lock)  # the round closed under us — the fresh holds lapse
+        return
     for a in attempts.values():
         _release_attempt(row["id"], a, "group_changed")
     _release_holds(old_lock)
-    ctx = _trip_context(trip_id)
-    lock = build_lock(ctx, row["id"], row["money_mode"])
-    with get_conn() as conn:
-        _save_lock(conn, row["id"], lock)
-        conn.execute("UPDATE settlements SET deadline = NULL, plan_hash = ? WHERE id = ?", (ctx["plan_hash"], row["id"]))
 
 
 # ---------------------------------------------------------------------------
@@ -1240,8 +1454,16 @@ def handle_stripe_event(event: dict) -> dict:
     if kind in ("checkout.session.completed", "checkout.session.async_payment_succeeded",
                 "payment_intent.amount_capturable_updated"):
         pi = stripe.retrieve_payment_intent(pi_id) if pi_id else stripe.payment_intent_of(obj)
-        if pi and pi.get("status") == "requires_capture" and attempt["status"] == "pending" and settlement["status"] in OPEN_STATUSES:
+        if not (pi and pi.get("status") == "requires_capture"):
+            result = {"state": attempt["status"], "ignored": "no hold to record"}
+        elif attempt["status"] == "pending" and settlement["status"] in OPEN_STATUSES:
             result = _confirm_intent(settlement["trip_id"], settlement, attempt, pi, session_id or attempt.get("checkout_session_id"))
+        elif attempt.get("payment_intent_id") == pi["id"]:
+            result = {"state": attempt["status"], "ignored": "already recorded"}
+        elif attempt["status"] in ("expired", "failed", "released") and settlement["status"] not in SETTLING_STATUSES:
+            # A replaced or expired link completed late: the hold belongs to nobody — release it.
+            _release_stray(settlement["id"], pi, attempt["user_id"])
+            result = {"state": attempt["status"], "stray_released": True}
         else:
             result = {"state": attempt["status"], "ignored": "not a current pending attempt"}
     elif kind == "checkout.session.expired":
@@ -1272,14 +1494,21 @@ def handle_liteapi_event(payload: dict) -> dict:
     """The hotel's confirmation code arrives after booking. We act only on
     what GET /bookings/{id} returns for a booking we made."""
     event_id, name = str(payload.get("event_id") or ""), payload.get("event_name") or ""
-    try:
-        response = json.loads(payload.get("response") or "{}") if isinstance(payload.get("response"), str) else (payload.get("response") or {})
-    except json.JSONDecodeError:
-        response = {}
+    # The envelope's request/response are JSON *strings*: parse them so the audit copy is
+    # redacted field by field (holder, guests, phone, email) instead of stored verbatim.
+    envelope = dict(payload)
+    for field in ("request", "response"):
+        value = payload.get(field)
+        if isinstance(value, str):
+            try:
+                envelope[field] = json.loads(value)
+            except json.JSONDecodeError:
+                envelope.pop(field, None)
+    response = envelope.get("response") if isinstance(envelope.get("response"), dict) else {}
     data = response.get("data") if isinstance(response.get("data"), dict) else response
     booking_id = (data or {}).get("bookingId") or (data or {}).get("booking_id")
     with get_conn() as conn:
-        if event_id and not _record_webhook(conn, "liteapi", event_id, name, payload):
+        if event_id and not _record_webhook(conn, "liteapi", event_id, name, envelope):
             return {"handled": True, "duplicate": True}
         row = conn.execute("SELECT * FROM bookings WHERE provider_booking_id = ? AND provider = 'liteapi'", (booking_id,)).fetchone() if booking_id else None
         if row is None:
@@ -1344,7 +1573,8 @@ def _maybe_settle(settlement_id: str) -> bool:
             return False
         total = conn.execute("SELECT COUNT(*) c FROM trip_members WHERE trip_id = ?", (row["trip_id"],)).fetchone()["c"]
         done = conn.execute(
-            "SELECT COUNT(*) c FROM payment_attempts WHERE settlement_id = ? AND status = 'authorized'", (settlement_id,)).fetchone()["c"]
+            "SELECT COUNT(*) c FROM payment_attempts WHERE settlement_id = ? AND status IN ('authorized', 'nothing_due')",
+            (settlement_id,)).fetchone()["c"]
         if total == 0 or done < total:
             return False
         if not _cas(conn, settlement_id, "verifying", OPEN_STATUSES):
@@ -1354,13 +1584,41 @@ def _maybe_settle(settlement_id: str) -> bool:
     return True
 
 
+_live_threads: set = set()
+
+
+def _run_settle(settlement_id: str) -> None:
+    """The thread boundary: an unexpected error is recorded and parks the
+    round in needs_attention instead of dying silently in a daemon thread."""
+    try:
+        settle(settlement_id)
+    except Exception as exc:
+        try:
+            with get_conn() as conn:
+                _event(conn, settlement_id, "error", f"settlement stopped on an error: {type(exc).__name__}: {str(exc)[:300]}", level="error")
+            _needs_attention(settlement_id, f"settlement stopped on an error: {str(exc)[:200]}")
+        except Exception:
+            pass
+    finally:
+        _live_threads.discard(threading.current_thread())
+
+
 def spawn_settle(settlement_id: str):
     if settle_inline():
-        settle(settlement_id)
+        _run_settle(settlement_id)
         return None
-    thread = threading.Thread(target=settle, args=(settlement_id,), daemon=True, name=f"settle-{settlement_id[:8]}")
+    thread = threading.Thread(target=_run_settle, args=(settlement_id,), daemon=False, name=f"settle-{settlement_id[:8]}")
+    _live_threads.add(thread)
     thread.start()
     return thread
+
+
+def join_live_settlements(timeout: float = 130.0) -> int:
+    """At shutdown: let in-flight settlements finish their current provider call."""
+    deadline = time.monotonic() + timeout
+    for thread in list(_live_threads):
+        thread.join(max(0.0, deadline - time.monotonic()))
+    return len(_live_threads)
 
 
 def _call(settlement_id: str, step: str, item_key: str | None, attempt_ref: str | None, fn, user_id: str | None = None,
@@ -1391,22 +1649,35 @@ def _fail_settlement(settlement_id: str, reason: str, from_states: tuple, lock: 
         trip_id = _settlement(conn, settlement_id)["trip_id"]
         _event(conn, settlement_id, "fail", reason, level="error")
     for a in attempts.values():
-        if a["status"] in ("authorized", "pending"):
+        if a["status"] in ("authorized", "pending", "nothing_due"):
             _release_attempt(settlement_id, a, "settlement_failed")
     with get_conn() as conn:
         # Nothing reads as paid after a failed round: refunded/released summaries go.
-        conn.execute("DELETE FROM payments WHERE trip_id = ? AND mode = 'full' AND status IN ('pending', 'released', 'failed', 'expired', 'refunded')",
+        conn.execute("DELETE FROM payments WHERE trip_id = ? AND mode = 'full' AND status IN ('pending', 'nothing_due', 'released', 'failed', 'expired', 'refunded')",
                      (trip_id,))
     if lock:
         _release_holds(lock)
 
 
-def _needs_attention(settlement_id: str, reason: str, ctx: dict | None = None) -> None:
+def _needs_attention(settlement_id: str, reason: str, ctx: dict | None = None, resume_to: str | None = None,
+                     resumable: bool = True) -> None:
+    """Park the round for a person, keeping the in-flight cursor. While the
+    cursor carries a ``resume_to`` phase the reconciler keeps trying to
+    resolve it by reading the providers (bounded by MAX_RECONCILE_ATTEMPTS);
+    without one the round waits for an operator (backend/scripts/settle_resolve.py)."""
     with get_conn() as conn:
         row = _settlement(conn, settlement_id)
         if row is None or row["status"] in TERMINAL_STATUSES or row["status"] == "needs_attention":
             return
-        conn.execute("UPDATE settlements SET status = 'needs_attention', updated_at = ? WHERE id = ?", (_now(), settlement_id))
+        cursor = json.loads(row["cursor"]) if row["cursor"] else {}
+        target = resume_to or cursor.get("resume_to") or row["status"]
+        if resumable and target in SETTLING_STATUSES + DONE_STATUSES and target != "reconciling":
+            cursor.setdefault("step", "paused")
+            cursor["resume_to"] = target
+        else:
+            cursor.pop("resume_to", None)
+        conn.execute("UPDATE settlements SET status = 'needs_attention', cursor = ?, updated_at = ? WHERE id = ?",
+                     (json.dumps(cursor) if cursor else None, _now(), settlement_id))
         _event(conn, settlement_id, "attention", reason, level="error")
         trip_id = row["trip_id"]
     try:
@@ -1441,8 +1712,12 @@ def _preflight(settlement: dict, lock: dict, ctx: dict, attempts: dict, stage: s
         return f"ledger mismatch: members {member_total} vs items {charged_items} + fees {fee_total}"
     for m in ctx["members"]:
         a = attempts.get(m["id"])
-        if a is None or a["status"] not in ("authorized", "captured"):
+        if a is None or a["status"] not in ("authorized", "captured", "nothing_due"):
             return f"{m['name']} has no authorization on file"
+        if a["status"] == "nothing_due" or (a["provider"] == "none" and a["amount_cents"] == 0):
+            if (lock["members"].get(m["id"]) or {}).get("charged_cents", 0) > 0:
+                return f"{m['name']} owes money but committed with nothing due"
+            continue
         if a["provider"] == "stripe" and a["status"] == "authorized":
             pi = stripe.retrieve_payment_intent(a["payment_intent_id"])
             stripe.assert_livemode(pi, settlement["money_mode"], "PaymentIntent")
@@ -1481,6 +1756,7 @@ def _reverify(ctx: dict, settlement: dict, lock: dict) -> tuple[dict, list[str]]
                     problems.append(f"{item['title']}: the price moved between search and prebook")
                     continue
                 _assert_sandbox_flag(pre, money_mode, "LiteAPI prebook")
+                _assert_usd(pre, offer)
                 total = pre["total_cents"] or offer["total_cents"]
                 ref.update({"offer_id": offer["offer_id"], "prebook_id": pre["prebook_id"]})
                 item["previous_cents"] = prev
@@ -1499,10 +1775,10 @@ def _reverify(ctx: dict, settlement: dict, lock: dict) -> tuple[dict, list[str]]
                         problems.append(f"{item['title']}: the fare conditions changed")
                         continue
                     status = fresh.get("payment_status") or {}
-                    guarantee = _parse_dt(status.get("price_guarantee_expires_at"))
+                    guarantee = _parse_dt(status.get("price_guarantee_expires_at"))  # null = no guarantee given, not expired
                     required = _parse_dt(status.get("payment_required_by"))
                     soon = _now_dt() + timedelta(minutes=15)
-                    if guarantee is None or guarantee < soon or (required and required < soon):
+                    if (guarantee is not None and guarantee < soon) or (required is not None and required < soon):
                         problems.append(f"{item['title']}: the airline's price guarantee ran out")
                         continue
                     new_total = cents(fresh.get("total_amount"))
@@ -1600,13 +1876,18 @@ def _dry_validate(ctx: dict, lock: dict) -> str | None:
 
 
 def _write_booking(conn, trip_id: str, item: dict, result: dict) -> bool:
-    """UPDATE the checklist row the sync created; never INSERT from here."""
+    """UPDATE the checklist row the sync created; never INSERT from here.
+    ``payer_id`` names the one traveler a single-passenger flight was bought
+    for; group items (and multi-passenger flights) leave it NULL — the lock's
+    traveler list decides who may cancel (see _may_cancel)."""
+    travelers = item.get("travelers") or []
+    payer = travelers[0] if item["category"] == "flight" and len(travelers) == 1 else None
     cur = conn.execute(
         """UPDATE bookings SET status = ?, provider = ?, confirmation = ?, provider_booking_id = ?, documents = ?, raw = ?,
-           amount_cents = ?, booked_at = ?, booked_by = NULL, note = NULL, stale = 0, cancelled_at = NULL
+           amount_cents = ?, payer_id = ?, booked_at = ?, booked_by = NULL, note = NULL, stale = 0, cancelled_at = NULL
            WHERE trip_id = ? AND item_key = ?""",
         (result.get("status", "booked"), item["provider"], result.get("confirmation"), result.get("provider_booking_id"),
-         json.dumps(result.get("documents") or {}), redacted_json(result.get("raw") or {}), item["total_cents"],
+         json.dumps(result.get("documents") or {}), redacted_json(result.get("raw") or {}), item["total_cents"], payer,
          _now(), trip_id, item["item_key"]))
     return cur.rowcount == 1
 
@@ -1657,11 +1938,13 @@ def _resolve_hotel_booking(ctx: dict, item: dict) -> dict | None:
     return _hotel_result(hotel_get(bid), ctx.get("money_mode") or money_mode_now())
 
 
-def _refund_item(settlement_id: str, ctx: dict, lock: dict, item: dict, attempts: dict, reason: str,
-                 refund_cents: int | None = None) -> int:
-    """Refund an item's charge from the ledger: floor(refund × line / Σ lines),
-    remainder cents to the lowest user ids, capped at captured − refunded.
-    Each refund row is persisted BEFORE Stripe is called; its id is the key."""
+def _plan_refunds(conn, settlement_id: str, lock: dict, item: dict, reason: str,
+                  refund_cents: int | None = None) -> list[dict]:
+    """Insert the PENDING refund rows for one item from the ledger: floor(refund ×
+    line / Σ lines), remainder cents to the lowest user ids, each capped at that
+    traveler's captured − refunded − already-pending (re-read here, inside the
+    caller's write transaction, so two cancellations can never pay out twice).
+    Nothing leaves for Stripe until the rows exist."""
     lines = {}
     for uid, check in lock["members"].items():
         own = sum(l["cents"] for l in check["lines"] if l["item_key"] == item["item_key"] and l["charged"])
@@ -1672,8 +1955,8 @@ def _refund_item(settlement_id: str, ctx: dict, lock: dict, item: dict, attempts
             lines[uid] = own
     total_lines = sum(lines.values())
     if not total_lines:
-        return 0
-    pool = total_lines if refund_cents is None else min(int(refund_cents), total_lines)
+        return []
+    pool = total_lines if refund_cents is None else max(0, min(int(refund_cents), total_lines))
     shares = {uid: pool * amt // total_lines for uid, amt in lines.items()}
     remainder = pool - sum(shares.values())
     for uid in sorted(lines):
@@ -1681,56 +1964,135 @@ def _refund_item(settlement_id: str, ctx: dict, lock: dict, item: dict, attempts
             break
         shares[uid] += 1
         remainder -= 1
-    refunded = 0
+    planned = []
     for uid in sorted(shares):
-        a = attempts.get(uid)
-        if a is None or a["status"] not in ("captured", "refunded"):
+        a = conn.execute(
+            "SELECT * FROM payment_attempts WHERE settlement_id = ? AND user_id = ? AND status IN ('captured', 'refunded')",
+            (settlement_id, uid)).fetchone()
+        if a is None:
             continue
-        cap = max(0, int(a.get("captured_cents") or 0) - int(a.get("refunded_cents") or 0))
+        pending = conn.execute("SELECT COALESCE(SUM(amount_cents), 0) s FROM refunds WHERE attempt_id = ? AND status = 'pending'",
+                               (a["id"],)).fetchone()["s"]
+        cap = max(0, int(a["captured_cents"] or 0) - int(a["refunded_cents"] or 0) - int(pending or 0))
         amount = min(shares[uid], cap)
         if amount <= 0:
             continue
         refund_id = uuid.uuid4().hex
+        conn.execute(
+            "INSERT INTO refunds (id, settlement_id, item_key, user_id, attempt_id, reason, amount_cents, idempotency_key, status, provider_ref, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?)",
+            (refund_id, settlement_id, item["item_key"], uid, a["id"], reason, amount, refund_id, _now()))
+        planned.append({"id": refund_id, "user_id": uid, "amount_cents": amount})
+    return planned
+
+
+def _update_receipt_lines(conn, attempt: dict, item_key: str | None, amount: int) -> None:
+    """A partial refund marks the refunded line on the stored receipt instead of wiping it."""
+    row = conn.execute("SELECT receipt FROM payments WHERE trip_id = ? AND user_id = ?", (attempt["trip_id"], attempt["user_id"])).fetchone()
+    if row is None or not row["receipt"] or row["receipt"] == "{}":
+        return
+    try:
+        receipt = json.loads(row["receipt"])
+    except json.JSONDecodeError:
+        return
+    for line in receipt.get("items") or []:
+        if item_key and line.get("item_key") == item_key:
+            line["refunded"] = round(float(line.get("refunded") or 0) + amount / 100, 2)
+    receipt["refunded_total"] = round(int(attempt.get("refunded_cents") or 0) / 100, 2)
+    receipt["status"] = "refunded" if attempt["status"] == "refunded" else "partially_refunded"
+    conn.execute("UPDATE payments SET receipt = ? WHERE trip_id = ? AND user_id = ?",
+                 (json.dumps(receipt), attempt["trip_id"], attempt["user_id"]))
+
+
+def _apply_refund(settlement_id: str, refund_id: str, provider_ref: str | None) -> None:
+    """The refund went through: row, ledger, summary and receipt in one transaction."""
+    with get_conn() as conn:
+        ref = conn.execute("SELECT * FROM refunds WHERE id = ?", (refund_id,)).fetchone()
+        if ref is None or ref["status"] == "succeeded":
+            return
+        conn.execute("UPDATE refunds SET status = 'succeeded', provider_ref = ? WHERE id = ?", (provider_ref, refund_id))
+        conn.execute("UPDATE payment_attempts SET refunded_cents = refunded_cents + ?, updated_at = ? WHERE id = ?",
+                     (ref["amount_cents"], _now(), ref["attempt_id"]))
+        a = dict(conn.execute("SELECT * FROM payment_attempts WHERE id = ?", (ref["attempt_id"],)).fetchone())
+        if int(a["refunded_cents"] or 0) >= int(a["captured_cents"] or 0):
+            a = _update_attempt(conn, a["id"], status="refunded")
+        _sync_summary(conn, a)
+        _update_receipt_lines(conn, a, ref["item_key"], ref["amount_cents"])
+        _event(conn, settlement_id, "refund", f"refunded ({ref['reason']})", item_key=ref["item_key"],
+               data={"user_id": ref["user_id"], "amount_cents": ref["amount_cents"], "refund_id": refund_id, "provider_ref": provider_ref})
+
+
+def _issue_refunds(settlement_id: str, refund_ids: list[str]) -> int:
+    """POST each pending refund row — its id is the idempotency key — and apply
+    it to the ledger. The cursor stays on the refund step until the last one
+    is applied, so a crash in between is resumed by the reconciler (it re-POSTs
+    every row still pending with the same keys). A refund Stripe did not
+    confirm parks the round in needs_attention; an explicit refusal too, with
+    the row marked failed for a person."""
+    refunded = 0
+    for refund_id in refund_ids:
         with get_conn() as conn:
-            conn.execute(
-                "INSERT INTO refunds (id, settlement_id, item_key, user_id, attempt_id, reason, amount_cents, idempotency_key, status, provider_ref, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?)",
-                (refund_id, settlement_id, item["item_key"], uid, a["id"], reason, amount, refund_id, _now()))
-            _set_cursor(conn, settlement_id, {"step": "refund", "item_key": item["item_key"], "user_id": uid,
+            ref = conn.execute("SELECT * FROM refunds WHERE id = ?", (refund_id,)).fetchone()
+            if ref is None or ref["status"] != "pending":
+                continue
+            a = dict(conn.execute("SELECT * FROM payment_attempts WHERE id = ?", (ref["attempt_id"],)).fetchone())
+            _set_cursor(conn, settlement_id, {"step": "refund", "item_key": ref["item_key"], "user_id": ref["user_id"],
                                               "idempotency_key": refund_id, "started_at": _now()})
-        provider_ref, error = None, None
+        provider_ref = None
         if a["provider"] == "stripe":
             try:
-                provider_ref = stripe.refund_payment_intent(a["payment_intent_id"], amount, idempotency_key=refund_id).get("id")
+                provider_ref = stripe.refund_payment_intent(a["payment_intent_id"], ref["amount_cents"], idempotency_key=refund_id).get("id")
             except stripe.StripeError as exc:
-                error = str(exc)
-        with get_conn() as conn:
-            conn.execute("UPDATE refunds SET status = ?, provider_ref = ? WHERE id = ?",
-                         ("failed" if error else "succeeded", provider_ref, refund_id))
-            _set_cursor(conn, settlement_id, None)
-            if error:
-                _event(conn, settlement_id, "refund", f"refund failed: {error}", item_key=item["item_key"], level="error",
-                       data={"user_id": uid, "amount_cents": amount})
-                continue
-            a = _update_attempt(conn, a["id"], refunded_cents=int(a.get("refunded_cents") or 0) + amount)
-            if a["refunded_cents"] >= int(a.get("captured_cents") or 0):
-                a = _update_attempt(conn, a["id"], status="refunded")
-            attempts[uid] = a
-            _sync_summary(conn, a, receipt=None if a["status"] != "captured" else None)
-            conn.execute("UPDATE payments SET refunded_cents = ? WHERE trip_id = ? AND user_id = ?",
-                         (a["refunded_cents"], a["trip_id"], uid))
-            _event(conn, settlement_id, "refund", f"refunded {reason}", item_key=item["item_key"],
-                   data={"user_id": uid, "amount_cents": amount, "refund_id": refund_id})
-        refunded += amount
+                if exc.status is None:
+                    with get_conn() as conn:  # unknown outcome: row stays pending, cursor stays → reconciler re-POSTs the same key
+                        _event(conn, settlement_id, "refund", f"refund not confirmed by Stripe: {exc}", item_key=ref["item_key"],
+                               level="error", data={"user_id": ref["user_id"], "amount_cents": ref["amount_cents"], "refund_id": refund_id})
+                    _needs_attention(settlement_id, f"a refund of ${dollars(ref['amount_cents'])} could not be confirmed with Stripe — retrying")
+                    raise RefundUnresolved(str(exc))
+                with get_conn() as conn:
+                    conn.execute("UPDATE refunds SET status = 'failed' WHERE id = ?", (refund_id,))
+                    _event(conn, settlement_id, "refund", f"refund refused by Stripe: {exc}", item_key=ref["item_key"],
+                           level="error", data={"user_id": ref["user_id"], "amount_cents": ref["amount_cents"], "refund_id": refund_id})
+                _needs_attention(settlement_id, f"Stripe refused a refund of ${dollars(ref['amount_cents'])}: {exc}")
+                raise RefundUnresolved(str(exc))
+        _apply_refund(settlement_id, refund_id, provider_ref)
+        refunded += ref["amount_cents"]
+    with get_conn() as conn:
+        _set_cursor(conn, settlement_id, None)
     return refunded
 
 
-def _mark_failed_item(settlement_id: str, trip_id: str, item: dict, reason: str) -> None:
+def _reissue_pending_refunds(settlement_id: str) -> int:
+    """Every refund row still pending for this settlement, re-POSTed with its own key."""
+    with get_conn(readonly=True) as conn:
+        ids = [r["id"] for r in conn.execute(
+            "SELECT id FROM refunds WHERE settlement_id = ? AND status = 'pending' ORDER BY created_at, id", (settlement_id,)).fetchall()]
+    return _issue_refunds(settlement_id, ids) if ids else 0
+
+
+def _refund_item(settlement_id: str, ctx: dict, lock: dict, item: dict, attempts: dict, reason: str,
+                 refund_cents: int | None = None) -> int:
+    """Refund an item's charge from the ledger (see _plan_refunds), rows first,
+    Stripe second. Raises RefundUnresolved when a refund could not be confirmed."""
+    with get_conn() as conn:
+        planned = _plan_refunds(conn, settlement_id, lock, item, reason, refund_cents)
+    try:
+        return _issue_refunds(settlement_id, [p["id"] for p in planned])
+    finally:
+        with get_conn(readonly=True) as conn:
+            attempts.clear()
+            attempts.update(_attempts(conn, settlement_id))
+
+
+def _mark_failed_item(settlement_id: str, trip_id: str, lock: dict, item: dict, reason: str) -> None:
+    """Persist the failure BEFORE any refund: a crash between the two then
+    re-runs the refund (idempotent rows), never the booking."""
     item["failed"] = reason
     item["charge"] = False
     with get_conn() as conn:
         conn.execute("UPDATE bookings SET status = 'to_book', provider = 'self', booked_at = NULL, note = ? WHERE trip_id = ? AND item_key = ?",
                      (reason[:400], trip_id, item["item_key"]))
+        _save_lock(conn, settlement_id, lock)
         _event(conn, settlement_id, "item", reason, item_key=item["item_key"], level="warn")
 
 
@@ -1739,7 +2101,7 @@ def settle(settlement_id: str) -> None:
     a crash once the reconciler resolved the in-flight cursor."""
     with get_conn(readonly=True) as conn:
         row = _settlement(conn, settlement_id)
-        if row is None or row["status"] not in ("verifying", "booking", "capturing", "paying"):
+        if row is None or row["status"] not in ("verifying", "booking", "capturing", "unwinding", "paying"):
             return
     settlement = dict(row)
     trip_id = settlement["trip_id"]
@@ -1749,6 +2111,14 @@ def settle(settlement_id: str) -> None:
         # The checklist rows are the bookings ledger: make sure every plan item
         # has one before anything is written against it (never INSERT here).
         sync_checklist(conn, ctx["trip"])
+
+    # ---- unwinding (resumed after a crash or a parked refund) --------------------
+    if settlement["status"] == "unwinding":
+        lock = json.loads(settlement["lock"])
+        with get_conn(readonly=True) as conn:
+            attempts = _attempts(conn, settlement_id)
+        _unwind_captures(settlement_id, ctx, lock, attempts, lock.get("unwinding") or "resuming an interrupted unwind")
+        return
 
     # ---- verifying ----------------------------------------------------------
     if settlement["status"] == "verifying":
@@ -1796,7 +2166,8 @@ def settle(settlement_id: str) -> None:
             if err is not None:
                 # Hotels are all-or-nothing: undo any hotel already booked, release everyone.
                 for done in [i for i in lock["items"] if i.get("booking") and i["category"] == "stay"]:
-                    _unbook_hotel(settlement_id, ctx, done)
+                    if not _unbook_hotel(settlement_id, ctx, lock, done):
+                        return
                 _fail_settlement(settlement_id, f"{item['title']}: hotel booking failed ({err})", ("booking",), lock)
                 return
             item["booking"] = result
@@ -1818,12 +2189,17 @@ def settle(settlement_id: str) -> None:
         lock = json.loads(settlement["lock"])
         with get_conn(readonly=True) as conn:
             attempts = _attempts(conn, settlement_id)
+        if lock.get("unwinding") or any(a["status"] == "refunded" for a in attempts.values()):
+            # An unwind was interrupted: finish it — a capture is never retried past that point.
+            _unwind_captures(settlement_id, ctx, lock, attempts, lock.get("unwinding") or "resuming an interrupted unwind")
+            return
         pending = [m for m in ctx["members"] if attempts.get(m["id"], {}).get("status") == "authorized"]
         if pending and not any(a["status"] == "captured" for a in attempts.values()):
             problem = _preflight(settlement, lock, ctx, attempts, "before capture")
             if problem:
                 for done in [i for i in lock["items"] if i.get("booking") and i["category"] == "stay"]:
-                    _unbook_hotel(settlement_id, ctx, done)
+                    if not _unbook_hotel(settlement_id, ctx, lock, done):
+                        return
                 _fail_settlement(settlement_id, f"capture preflight failed: {problem}", ("capturing",), lock)
                 return
         for member in pending:
@@ -1839,19 +2215,30 @@ def settle(settlement_id: str) -> None:
                 return stripe.cancel_payment_intent(a["payment_intent_id"], "requested_by_customer", idempotency_key=f"cancel:{a['payment_intent_id']}")
 
             result, err = _call(settlement_id, "capture", None, None, do_capture, user_id=member["id"], idempotency_key=key)
-            if err is not None and isinstance(err, stripe.StripeError) and err.status is None and a["provider"] == "stripe":
-                # Transport failure: the capture may or may not have happened — read the PI.
-                try:
-                    pi = stripe.retrieve_payment_intent(a["payment_intent_id"])
-                except stripe.StripeError:
-                    pi = None
-                if pi and pi.get("status") == "succeeded":
-                    result, err, amount = pi, None, int(pi.get("amount_received") or amount)
-                elif not (pi and pi.get("status") == "requires_capture"):
-                    _needs_attention(settlement_id, f"capture outcome unknown for {member['name']}: {err}", ctx)
+            if a["provider"] == "stripe":
+                for _ in range(CAPTURE_RETRIES):
+                    if not (isinstance(err, stripe.StripeError) and err.status is None):
+                        break
+                    # Transport failure: the capture may or may not have happened — read the PI, never guess.
+                    try:
+                        pi = stripe.retrieve_payment_intent(a["payment_intent_id"])
+                    except stripe.StripeError as exc:
+                        err = exc
+                        continue
+                    if pi.get("status") == "succeeded":
+                        result, err, amount = pi, None, int(pi.get("amount_received") or amount)
+                    elif pi.get("status") == "requires_capture":
+                        result, err = _call(settlement_id, "capture", None, None, do_capture, user_id=member["id"], idempotency_key=key)
+                    elif pi.get("status") == "canceled":
+                        err = BookingError("the card hold is canceled", "canceled", 402)  # explicit: nothing to capture
+                    else:
+                        _needs_attention(settlement_id, f"capture outcome unknown for {member['name']}: the hold is {pi.get('status')}", ctx)
+                        return
+                if isinstance(err, stripe.StripeError) and err.status is None:
+                    _needs_attention(settlement_id, f"capture outcome unknown for {member['name']} after {CAPTURE_RETRIES} attempts: {err}", ctx)
                     return
             if err is not None:
-                # An explicit refusal (card declined …): unwind what moved, release the rest.
+                # An explicit refusal (card declined, hold gone): unwind what moved, release the rest.
                 _unwind_captures(settlement_id, ctx, lock, attempts, f"capture failed for {member['name']}: {err}")
                 return
             with get_conn() as conn:
@@ -1860,6 +2247,14 @@ def settle(settlement_id: str) -> None:
                 _sync_summary(conn, a, receipt=_receipt(ctx, member, lock["members"][member["id"]], "captured", amount))
                 _set_cursor(conn, settlement_id, None)
                 _event(conn, settlement_id, "capture", "share captured", data={"user_id": member["id"], "amount_cents": amount})
+        for member in ctx["members"]:  # travelers who owed nothing are settled at $0, no provider involved
+            a = attempts.get(member["id"])
+            if a and a["status"] == "nothing_due":
+                with get_conn() as conn:
+                    a = _update_attempt(conn, a["id"], status="captured", captured_cents=0)
+                    attempts[member["id"]] = a
+                    _sync_summary(conn, a, receipt=_receipt(ctx, member, lock["members"][member["id"]], "captured", 0))
+                    _event(conn, settlement_id, "capture", "nothing due — settled at $0", data={"user_id": member["id"], "amount_cents": 0})
         with get_conn() as conn:
             if not _cas(conn, settlement_id, "paying", ("capturing",)):
                 return
@@ -1870,6 +2265,10 @@ def settle(settlement_id: str) -> None:
         lock = json.loads(settlement["lock"])
         with get_conn(readonly=True) as conn:
             attempts = _attempts(conn, settlement_id)
+        try:
+            _reissue_pending_refunds(settlement_id)  # a refund interrupted earlier in this phase
+        except RefundUnresolved:
+            return
         for item in [i for i in lock["items"] if i["charge"] and i["category"] == "stay" and not i.get("pre_capture_safe")
                      and not i.get("booking") and not i.get("failed")]:
             if item["provider"] == "liteapi":
@@ -1884,8 +2283,11 @@ def settle(settlement_id: str) -> None:
                 result, err = {"provider_booking_id": f"sim_{uuid.uuid4().hex[:10]}", "confirmation": sim_confirmation(),
                                "status": "booked", "documents": {"simulated": True}, "raw": {"simulated": True}}, None
             if err is not None:
-                _refund_item(settlement_id, ctx, lock, item, attempts, "hotel_failed")
-                _mark_failed_item(settlement_id, trip_id, item, f"Hotel booking failed: {err}")
+                _mark_failed_item(settlement_id, trip_id, lock, item, f"Hotel booking failed: {err}")
+                try:
+                    _refund_item(settlement_id, ctx, lock, item, attempts, "hotel_failed")
+                except RefundUnresolved:
+                    return
             else:
                 item["booking"] = result
                 with get_conn() as conn:
@@ -1937,8 +2339,11 @@ def settle(settlement_id: str) -> None:
                     _save_lock(conn, settlement_id, lock)
                     _set_cursor(conn, settlement_id, None)
             if failure:
-                _refund_item(settlement_id, ctx, lock, item, attempts, "flight_failed")
-                _mark_failed_item(settlement_id, trip_id, item, f"Flight booking failed: {failure}")
+                _mark_failed_item(settlement_id, trip_id, lock, item, f"Flight booking failed: {failure}")
+                try:
+                    _refund_item(settlement_id, ctx, lock, item, attempts, "flight_failed")
+                except RefundUnresolved:
+                    return
             else:
                 docs = [o["documents"] for o in item["ref"]["orders"]]
                 item["booking"] = {"provider_booking_id": ",".join(o["order_id"] for o in item["ref"]["orders"]),
@@ -1954,6 +2359,12 @@ def settle(settlement_id: str) -> None:
                 _set_cursor(conn, settlement_id, None)
 
         # ---- confirm ------------------------------------------------------------
+        with get_conn(readonly=True) as conn:
+            unresolved = conn.execute("SELECT COUNT(*) c FROM refunds WHERE settlement_id = ? AND status IN ('pending', 'failed')",
+                                      (settlement_id,)).fetchone()["c"]
+        if unresolved:
+            _needs_attention(settlement_id, f"{unresolved} refund(s) are unresolved — no receipts until they are", ctx)
+            return
         failed = [i for i in lock["items"] if i.get("failed")]
         final = "partially_booked" if failed else "booked"
         with get_conn() as conn:
@@ -1980,55 +2391,61 @@ def _pay_hold(ctx: dict, order: dict) -> dict:
 
 
 def _unwind_captures(settlement_id: str, ctx: dict, lock: dict, attempts: dict, reason: str) -> None:
-    """A capture was refused after others succeeded: refund every captured
-    share in full, cancel the hotels booked ahead of capture, release the
-    remaining holds and mark the round failed."""
+    """A capture was refused after others succeeded: the round moves to
+    ``unwinding`` FIRST (so a crash resumes here, never into another capture),
+    then every captured share is refunded in full, the hotels booked ahead of
+    capture are cancelled, the remaining holds released and the round failed."""
+    with get_conn() as conn:
+        if not _cas(conn, settlement_id, "unwinding", ("capturing", "unwinding")):
+            return
+        if not lock.get("unwinding"):
+            lock["unwinding"] = reason
+            _save_lock(conn, settlement_id, lock)
+            _event(conn, settlement_id, "unwind", reason, level="error")
+        _set_cursor(conn, settlement_id, None)
     for done in [i for i in lock["items"] if i.get("booking") and i["category"] == "stay"]:
-        _unbook_hotel(settlement_id, ctx, done)
-    for uid, a in list(attempts.items()):
-        if a["status"] != "captured":
-            continue
-        amount = int(a.get("captured_cents") or 0) - int(a.get("refunded_cents") or 0)
-        if amount <= 0:
-            continue
-        refund_id = uuid.uuid4().hex
-        with get_conn() as conn:
+        if not _unbook_hotel(settlement_id, ctx, lock, done):
+            return
+    with get_conn() as conn:
+        for uid, a in sorted(_attempts(conn, settlement_id).items()):
+            if a["status"] != "captured":
+                continue
+            pending = conn.execute("SELECT COALESCE(SUM(amount_cents), 0) s FROM refunds WHERE attempt_id = ? AND status = 'pending'",
+                                   (a["id"],)).fetchone()["s"]
+            amount = int(a.get("captured_cents") or 0) - int(a.get("refunded_cents") or 0) - int(pending or 0)
+            if amount <= 0:
+                continue
+            refund_id = uuid.uuid4().hex
             conn.execute(
                 "INSERT INTO refunds (id, settlement_id, item_key, user_id, attempt_id, reason, amount_cents, idempotency_key, status, provider_ref, created_at) "
                 "VALUES (?, ?, NULL, ?, ?, 'unwind', ?, ?, 'pending', NULL, ?)", (refund_id, settlement_id, uid, a["id"], amount, refund_id, _now()))
-            _set_cursor(conn, settlement_id, {"step": "refund", "user_id": uid, "idempotency_key": refund_id, "started_at": _now()})
-        provider_ref, error = None, None
-        if a["provider"] == "stripe":
-            try:
-                provider_ref = stripe.refund_payment_intent(a["payment_intent_id"], amount, idempotency_key=refund_id).get("id")
-            except stripe.StripeError as exc:
-                error = str(exc)
-        with get_conn() as conn:
-            conn.execute("UPDATE refunds SET status = ?, provider_ref = ? WHERE id = ?", ("failed" if error else "succeeded", provider_ref, refund_id))
-            _set_cursor(conn, settlement_id, None)
-            if error:
-                _event(conn, settlement_id, "refund", f"unwind refund failed: {error}", level="error", data={"user_id": uid})
-                continue
-            a = _update_attempt(conn, a["id"], status="refunded", refunded_cents=int(a.get("refunded_cents") or 0) + amount)
-            attempts[uid] = a
-            _sync_summary(conn, a)
-            _event(conn, settlement_id, "refund", "share refunded while unwinding", data={"user_id": uid, "amount_cents": amount})
-    _fail_settlement(settlement_id, reason, ("capturing",), lock)
+    try:
+        _reissue_pending_refunds(settlement_id)
+    except RefundUnresolved:
+        return
+    with get_conn(readonly=True) as conn:
+        attempts.clear()
+        attempts.update(_attempts(conn, settlement_id))
+    _fail_settlement(settlement_id, lock.get("unwinding") or reason, ("unwinding",), lock)
 
 
-def _unbook_hotel(settlement_id: str, ctx: dict, item: dict) -> None:
+def _unbook_hotel(settlement_id: str, ctx: dict, lock: dict, item: dict) -> bool:
+    """Cancel a hotel booked ahead of capture. False = the supplier did not
+    confirm; the round is parked with a cancel_hotel cursor for the reconciler."""
     if item["provider"] == "liteapi":
         result, err = _call(settlement_id, "cancel_hotel", item["item_key"], item["attempt_ref"],
                             lambda: hotel_cancel(item["booking"]["provider_booking_id"]))
         if err is not None:
             _needs_attention(settlement_id, f"{item['title']}: booked but could not be cancelled while unwinding ({err})", ctx)
-            return
+            return False
+    item.pop("booking", None)
     with get_conn() as conn:
         conn.execute("UPDATE bookings SET status = 'to_book', provider = 'self', confirmation = NULL, booked_at = NULL, cancelled_at = ? WHERE trip_id = ? AND item_key = ?",
                      (_now(), ctx["trip"]["id"], item["item_key"]))
+        _save_lock(conn, settlement_id, lock)
         _set_cursor(conn, settlement_id, None)
         _event(conn, settlement_id, "unwind", "hotel booking cancelled while unwinding", item_key=item["item_key"], level="warn")
-    item.pop("booking", None)
+    return True
 
 
 def _send_receipts(ctx: dict, lock: dict, attempts: dict, confirmations: list[dict]) -> None:
@@ -2055,40 +2472,76 @@ def _send_receipts(ctx: dict, lock: dict, attempts: dict, confirmations: list[di
 # ---------------------------------------------------------------------------
 
 def stuck_settlement_ids(stale_after_seconds: int) -> list[str]:
+    """Rounds the reconciler owns: in flight and quiet for a while, finished
+    rounds with a cancellation/refund cursor still set, and parked rounds that
+    carry a resume_to phase (needs_attention with something resolvable)."""
     cutoff = (_now_dt() - timedelta(seconds=stale_after_seconds)).isoformat(timespec="seconds")
     with get_conn(readonly=True) as conn:
         rows = conn.execute(
-            "SELECT id FROM settlements WHERE status IN ('verifying', 'booking', 'capturing', 'paying', 'reconciling') AND updated_at < ?",
-            (cutoff,)).fetchall()
+            """SELECT id FROM settlements WHERE updated_at < ? AND (
+                   status IN ('verifying', 'booking', 'capturing', 'unwinding', 'paying', 'reconciling')
+                   OR (status IN ('booked', 'partially_booked') AND cursor IS NOT NULL)
+                   OR (status = 'needs_attention' AND cursor LIKE '%resume_to%'))
+               ORDER BY updated_at""", (cutoff,)).fetchall()
     return [r["id"] for r in rows]
 
 
+def overdue_open_trip_ids() -> list[str]:
+    """Open rounds whose group deadline passed with nobody acting."""
+    with get_conn(readonly=True) as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT trip_id FROM settlements WHERE status IN ('collecting', 'reconfirm') AND deadline IS NOT NULL AND deadline < ?",
+            (_now(),)).fetchall()
+    return [r["trip_id"] for r in rows]
+
+
 def reconcile(settlement_id: str) -> dict:
-    """Resolve the in-flight provider call by reading the provider, then let
-    the settlement continue. Unknowable → needs_attention, nothing issued."""
+    """Resolve the in-flight provider call by READING the provider, then let
+    the settlement continue. Unknowable → needs_attention (kept resumable up
+    to MAX_RECONCILE_ATTEMPTS times), nothing money-moving issued on a guess."""
     with get_conn() as conn:
         row = _settlement(conn, settlement_id)
-        if row is None or row["status"] not in ("verifying", "booking", "capturing", "paying", "reconciling"):
+        if row is None:
             return {"settlement_id": settlement_id, "skipped": True}
-        original = row["status"] if row["status"] != "reconciling" else None
-        if not _cas(conn, settlement_id, "reconciling", ("verifying", "booking", "capturing", "paying", "reconciling")):
-            return {"settlement_id": settlement_id, "skipped": True}
+        status = row["status"]
         cursor = json.loads(row["cursor"]) if row["cursor"] else None
-        lock = json.loads(row["lock"])
-        trip_id = row["trip_id"]
-        _event(conn, settlement_id, "reconcile", f"reconciling from {original or 'reconciling'}", data=cursor)
-    expire_if_due(trip_id)
+        if status in SETTLING_STATUSES:
+            original = status if status != "reconciling" else None
+        elif status in DONE_STATUSES and cursor:
+            original = status
+        elif status == "needs_attention" and cursor and cursor.get("resume_to"):
+            original = cursor["resume_to"]
+        else:
+            return {"settlement_id": settlement_id, "skipped": True}
+        tries = conn.execute(
+            "SELECT COUNT(*) c FROM settlement_events WHERE settlement_id = ? AND step = 'reconcile' AND message LIKE 'reconciling from%'",
+            (settlement_id,)).fetchone()["c"]
+        if tries >= MAX_RECONCILE_ATTEMPTS:
+            if status == "needs_attention":
+                cursor.pop("resume_to", None)
+                _set_cursor(conn, settlement_id, cursor or None)
+                _event(conn, settlement_id, "reconcile", f"giving up after {tries} reconcile attempts — needs an operator", level="error")
+                return {"settlement_id": settlement_id, "gave_up": True}
+        else:
+            if not _cas(conn, settlement_id, "reconciling", (status,)):
+                return {"settlement_id": settlement_id, "skipped": True}
+            lock = json.loads(row["lock"])
+            trip_id = row["trip_id"]
+            _event(conn, settlement_id, "reconcile", f"reconciling from {original or 'reconciling'}", data=cursor)
+    if tries >= MAX_RECONCILE_ATTEMPTS:
+        _needs_attention(settlement_id, f"could not finish after {tries} reconcile attempts", resumable=False)
+        return {"settlement_id": settlement_id, "needs_attention": True}
     ctx = _trip_context(trip_id)
     ctx["money_mode"] = row["money_mode"]
     resume_to = original or _infer_phase(lock, settlement_id)
-    if cursor:
+    if cursor and cursor.get("step") not in (None, "paused"):
         step, item_key = cursor.get("step"), cursor.get("item_key")
         item = next((i for i in lock["items"] if i["item_key"] == item_key), None)
         try:
-            if step == "book_hotel" and item:
+            if step == "book_hotel" and item and not item.get("booking"):
                 result = _resolve_hotel_booking(ctx, item)
                 if result is None:
-                    _needs_attention(settlement_id, f"{item['title']}: booking state unknown after a timeout", ctx)
+                    _needs_attention(settlement_id, f"{item['title']}: booking state unknown after a timeout", ctx, resume_to=resume_to)
                     return {"settlement_id": settlement_id, "needs_attention": True}
                 item["booking"] = result
                 with get_conn() as conn:
@@ -2096,45 +2549,68 @@ def reconcile(settlement_id: str) -> dict:
             elif step == "capture" and cursor.get("user_id"):
                 with get_conn(readonly=True) as conn:
                     a = next((x for x in _attempts(conn, settlement_id).values() if x["user_id"] == cursor["user_id"]), None)
-                if a and a["provider"] == "stripe":
+                if a and a["provider"] == "stripe" and a["status"] == "authorized":
                     pi = stripe.retrieve_payment_intent(a["payment_intent_id"])
                     if pi.get("status") == "succeeded":
+                        member = next((m for m in ctx["members"] if m["id"] == a["user_id"]), None)
+                        captured = int(pi.get("amount_received") or a["amount_cents"])
                         with get_conn() as conn:
-                            a = _update_attempt(conn, a["id"], status="captured", captured_cents=int(pi.get("amount_received") or a["amount_cents"]))
-                            _sync_summary(conn, a, receipt={})
+                            a = _update_attempt(conn, a["id"], status="captured", captured_cents=captured)
+                            check = lock["members"].get(a["user_id"])
+                            _sync_summary(conn, a, receipt=_receipt(ctx, member, check, "captured", captured) if member and check else {})
+                            _event(conn, settlement_id, "capture", "share captured (found while reconciling)",
+                                   data={"user_id": a["user_id"], "amount_cents": captured})
                     elif pi.get("status") != "requires_capture":
-                        _needs_attention(settlement_id, f"{cursor['user_id']}: card hold is {pi.get('status')} mid-capture", ctx)
+                        _needs_attention(settlement_id, f"{cursor['user_id']}: card hold is {pi.get('status')} mid-capture", ctx, resume_to=resume_to)
                         return {"settlement_id": settlement_id, "needs_attention": True}
             elif step == "pay_flight" and item:
-                orders = duffel._duffel_request("GET", "/air/orders", params={"limit": 50}) or []
-                mine = [o for o in orders if (o.get("metadata") or {}).get("rovyn_attempt") == item["attempt_ref"]]
                 for order in item["ref"].get("orders") or []:
-                    match = next((o for o in mine if o.get("id") == order["order_id"]), None)
-                    if match is None:
-                        _needs_attention(settlement_id, f"{item['title']}: airline order not found while reconciling", ctx)
-                        return {"settlement_id": settlement_id, "needs_attention": True}
+                    try:
+                        match = duffel.get_order(order["order_id"])
+                    except duffel.DuffelError as exc:
+                        if exc.status == 404:
+                            _needs_attention(settlement_id, f"{item['title']}: airline order {order['order_id']} not found while reconciling", ctx, resume_to=resume_to)
+                            return {"settlement_id": settlement_id, "needs_attention": True}
+                        raise
                     if not (match.get("payment_status") or {}).get("awaiting_payment", True):
                         order["paid"] = True
                         order["documents"] = duffel.order_documents(match)
-            elif step == "cancel_hotel" and item:
+            elif step == "cancel_hotel" and item and item.get("booking"):
                 body = hotel_get(item["booking"]["provider_booking_id"]).get("data") or {}
-                if (body.get("status") or "").upper().startswith("CANCEL"):
-                    item.pop("booking", None)
-                else:
+                if not (body.get("status") or "").upper().startswith("CANCEL"):
                     hotel_cancel(item["booking"]["provider_booking_id"])
-                    item.pop("booking", None)
-            elif step == "refund" and cursor.get("idempotency_key"):
                 with get_conn() as conn:
-                    ref = conn.execute("SELECT * FROM refunds WHERE id = ?", (cursor["idempotency_key"],)).fetchone()
-                    a = conn.execute("SELECT * FROM payment_attempts WHERE id = ?", (ref["attempt_id"],)).fetchone() if ref else None
-                if ref and ref["status"] == "pending" and a and a["provider"] == "stripe":
-                    res = stripe.refund_payment_intent(a["payment_intent_id"], ref["amount_cents"], idempotency_key=ref["id"])
-                    with get_conn() as conn:
-                        conn.execute("UPDATE refunds SET status = 'succeeded', provider_ref = ? WHERE id = ?", (res.get("id"), ref["id"]))
-                        fresh = _update_attempt(conn, a["id"], refunded_cents=int(a["refunded_cents"] or 0) + ref["amount_cents"])
-                        _sync_summary(conn, fresh)
+                    conn.execute("UPDATE bookings SET status = 'to_book', provider = 'self', confirmation = NULL, booked_at = NULL, cancelled_at = ? WHERE trip_id = ? AND item_key = ?",
+                                 (_now(), trip_id, item["item_key"]))
+                item.pop("booking", None)
+            elif step == "cancel_booking" and item:
+                with get_conn(readonly=True) as conn:
+                    brow = conn.execute("SELECT * FROM bookings WHERE trip_id = ? AND item_key = ?", (trip_id, item_key)).fetchone()
+                if brow is not None and brow["status"] == "cancelling":
+                    outcome = _read_cancellation(dict(brow), item)
+                    if outcome is None:
+                        _needs_attention(settlement_id, f"{item['title']}: cancellation state unknown", ctx, resume_to=resume_to)
+                        return {"settlement_id": settlement_id, "needs_attention": True}
+                    if outcome["cancelled"]:
+                        _finish_cancellation(settlement_id, lock, item, dict(brow), outcome["refund_cents"], outcome["note"],
+                                             cursor.get("user_id"), outcome.get("fee_cents", 0))
+                        resume_to = "partially_booked"
+                    else:
+                        with get_conn() as conn:
+                            conn.execute("UPDATE bookings SET status = ? WHERE trip_id = ? AND item_key = ? AND status = 'cancelling'",
+                                         (cursor.get("prior_status") or "booked", trip_id, item_key))
+                            _event(conn, settlement_id, "cancel", "the supplier never received the cancellation — booking kept", item_key=item_key, level="warn")
+            # Any refund row still pending (this cursor's or an earlier one) is re-POSTed with its own key.
+            try:
+                _reissue_pending_refunds(settlement_id)
+            except RefundUnresolved:
+                with get_conn() as conn:
+                    _save_lock(conn, settlement_id, lock)
+                return {"settlement_id": settlement_id, "needs_attention": True}
         except Exception as exc:
-            _needs_attention(settlement_id, f"could not resolve the in-flight step {step}: {exc}", ctx)
+            with get_conn() as conn:
+                _save_lock(conn, settlement_id, lock)
+            _needs_attention(settlement_id, f"could not resolve the in-flight step {step}: {exc}", ctx, resume_to=resume_to)
             return {"settlement_id": settlement_id, "needs_attention": True}
     with get_conn() as conn:
         _save_lock(conn, settlement_id, lock)
@@ -2149,6 +2625,8 @@ def reconcile(settlement_id: str) -> dict:
 def _infer_phase(lock: dict, settlement_id: str) -> str:
     with get_conn(readonly=True) as conn:
         attempts = _attempts(conn, settlement_id)
+    if lock.get("unwinding") or any(a["status"] == "refunded" for a in attempts.values()):
+        return "unwinding"
     if any(a["status"] == "captured" for a in attempts.values()):
         return "paying" if all(a["status"] != "authorized" for a in attempts.values()) else "capturing"
     if any(i.get("booking") for i in lock["items"]):
@@ -2160,7 +2638,67 @@ def _infer_phase(lock: dict, settlement_id: str) -> str:
 # Cancelling a Rovyn-made booking after the fact
 # ---------------------------------------------------------------------------
 
+def _may_cancel(leader_id: str, item: dict, row: dict, user_id: str) -> bool:
+    """The leader, the traveler a single-passenger flight was bought for, or
+    any traveler on a city-scoped flight."""
+    if user_id == leader_id or (row.get("payer_id") and user_id == row["payer_id"]):
+        return True
+    return item.get("category") == "flight" and user_id in (item.get("travelers") or [])
+
+
+def _read_cancellation(row: dict, item: dict) -> dict | None:
+    """After the supplier call's outcome was lost: is the booking cancelled?
+    None = still unknown."""
+    if row["provider"] == "liteapi":
+        body = hotel_get(row["provider_booking_id"]).get("data") or {}
+        status = (body.get("status") or "").upper()
+        if not status:
+            return None
+        if not status.startswith("CANCEL"):
+            return {"cancelled": False}
+        refund = cents(body.get("refund_amount")) or (int(row["amount_cents"] or item["total_cents"] or 0)
+                                                      if (body.get("refundType") or "").lower() == "full" else 0)
+        return {"cancelled": True, "refund_cents": refund, "fee_cents": cents(body.get("cancellation_fee")),
+                "note": f"cancelled with the hotel ({status})"}
+    if row["provider"] == "duffel":
+        refund, cancelled = 0, True
+        for order_id in (row["provider_booking_id"] or "").split(","):
+            if not order_id.strip():
+                continue
+            order = duffel.get_order(order_id.strip())
+            if not order.get("cancelled_at") and not order.get("cancellation"):
+                cancelled = False
+            refund += cents((order.get("cancellation") or {}).get("refund_amount"))
+        return {"cancelled": cancelled, "refund_cents": refund, "note": "cancelled with the airline (refund to balance)"}
+    return {"cancelled": True, "refund_cents": int(row["amount_cents"] or item["total_cents"] or 0), "note": "cancelled (simulated)"}
+
+
+def _finish_cancellation(settlement_id: str, lock: dict, item: dict, row: dict, refund_cents: int, note: str,
+                         user_id: str | None, fee_cents: int = 0) -> list[str]:
+    """The supplier confirmed: persist the cancelled row and the lock, then plan
+    the refunds (rows only — _issue_refunds sends them). Returns the refund ids."""
+    with get_conn() as conn:
+        conn.execute(
+            """UPDATE bookings SET status = 'to_book', provider = 'self', confirmation = NULL, booked_at = NULL,
+               cancelled_at = ?, note = ? WHERE trip_id = ? AND item_key = ? AND status = 'cancelling'""",
+            (_now(), note, row["trip_id"], item["item_key"]))
+        item["failed"] = "cancelled after booking"
+        item["charge"] = False
+        _save_lock(conn, settlement_id, lock)
+        _event(conn, settlement_id, "cancel", note, item_key=item["item_key"], data={"user_id": user_id, "refund_cents": refund_cents})
+        if fee_cents:
+            _event(conn, settlement_id, "loss", f"supplier cancellation fee absorbed by Rovyn: {dollars(fee_cents)}",
+                   item_key=item["item_key"], level="warn", data={"fee_cents": fee_cents})
+        planned = _plan_refunds(conn, settlement_id, lock, item, "cancelled", refund_cents)
+        _set_cursor(conn, settlement_id, {"step": "refund", "item_key": item["item_key"], "started_at": _now()} if planned else None)
+    return [p["id"] for p in planned]
+
+
 def cancel_booking(trip_id: str, item_key: str, user: dict) -> dict:
+    """Cancel a Rovyn-made booking after the fact. The row is claimed
+    (booked → cancelling) and a cursor persisted BEFORE the supplier is told,
+    so a second click, a second canceller or a crash can never cancel or
+    refund twice; refunds are planned from the ledger inside one transaction."""
     ctx = _trip_context(trip_id)
     with get_conn(readonly=True) as conn:
         row = conn.execute("SELECT * FROM bookings WHERE trip_id = ? AND item_key = ?", (trip_id, item_key)).fetchone()
@@ -2169,54 +2707,85 @@ def cancel_booking(trip_id: str, item_key: str, user: dict) -> dict:
             (trip_id,)).fetchone()
     if row is None or row["provider"] not in ("liteapi", "duffel", "simulated"):
         raise BookingError("That item wasn't booked by Rovyn.", "not_rovyn", 400)
+    if row["status"] == "cancelling":
+        raise BookingError("That booking is already being cancelled.", "busy", 409)
     if row["status"] not in ("booked", "pending_confirmation"):
         raise BookingError("That booking isn't active.", "not_active", 400)
-    if user["id"] != ctx["trip"]["leader_id"] and user["id"] != row["payer_id"]:
-        raise BookingError("Only the trip leader (or the traveler who paid for it) can cancel this.", "forbidden", 403)
     if settlement is None:
         raise BookingError("No completed settlement for this trip.", "not_in_lock", 400)
-    settlement = dict(settlement)
+    row, settlement = dict(row), dict(settlement)
     ctx["money_mode"] = settlement["money_mode"]
     lock = json.loads(settlement["lock"])
     item = next((i for i in lock["items"] if i["item_key"] == item_key), None)
     if item is None:
         raise BookingError("That item is not part of the settlement.", "not_in_lock", 400)
-    with get_conn(readonly=True) as conn:
-        attempts = _attempts(conn, settlement["id"])
+    if not _may_cancel(ctx["trip"]["leader_id"], item, row, user["id"]):
+        raise BookingError("Only the trip leader (or a traveler this was booked for) can cancel this.", "forbidden", 403)
 
-    loss = 0
-    if row["provider"] == "liteapi":
-        result = hotel_cancel(row["provider_booking_id"])
-        _assert_sandbox_flag(result, settlement["money_mode"], "LiteAPI cancel")
-        refund_cents, note = result["refund_cents"], f"cancelled with the hotel ({result['status']})"
-        if result["status"] == "CANCELLED_WITH_CHARGES":
-            loss = result["fee_cents"]
-    elif row["provider"] == "duffel":
-        refund_cents, parts = 0, []
-        for order_id in (row["provider_booking_id"] or "").split(","):
-            if order_id.strip():
-                res = duffel.cancel_order(order_id.strip())
-                refund_cents += cents(res.get("refund_amount"))
-                parts.append(res.get("refund_to") or "")
-        note = f"cancelled with the airline (refund to {', '.join(p for p in parts if p) or 'balance'})"
-    else:
-        refund_cents, note = int(row["amount_cents"] or item["total_cents"] or 0), "cancelled (simulated)"
-
-    refunded = _refund_item(settlement["id"], ctx, lock, item, attempts, "cancelled", refund_cents=refund_cents)
+    # 1. Claim the row and persist the cursor — before anything leaves for the supplier.
     with get_conn() as conn:
-        conn.execute(
-            """UPDATE bookings SET status = 'to_book', provider = 'self', confirmation = NULL, booked_at = NULL,
-               cancelled_at = ?, note = ? WHERE trip_id = ? AND item_key = ?""",
-            (_now(), note, trip_id, item_key))
-        item["failed"] = f"cancelled by {user['name']}"
-        item["charge"] = False
-        _save_lock(conn, settlement["id"], lock)
+        current = _settlement(conn, settlement["id"])
+        if current["status"] not in DONE_STATUSES or current["cursor"]:
+            raise BookingError("Another cancellation or refund is still being settled — try again in a minute.", "busy", 409)
+        cur = conn.execute("UPDATE bookings SET status = 'cancelling' WHERE trip_id = ? AND item_key = ? AND status IN ('booked', 'pending_confirmation')",
+                           (trip_id, item_key))
+        if cur.rowcount != 1:
+            raise BookingError("That booking is already being cancelled.", "busy", 409)
+        _set_cursor(conn, settlement["id"], {"step": "cancel_booking", "item_key": item_key, "user_id": user["id"],
+                                             "prior_status": row["status"], "started_at": _now()})
+        _event(conn, settlement["id"], "cancel", "cancellation requested", item_key=item_key, data={"user_id": user["id"]})
+
+    # 2. Tell the supplier. A lost answer is read back; a refusal restores the row.
+    fee_cents = 0
+    try:
+        if row["provider"] == "liteapi":
+            try:
+                result = hotel_cancel(row["provider_booking_id"])
+            except BookingError as exc:
+                if exc.code != "network":
+                    raise
+                outcome = _read_cancellation(row, item)
+                if not outcome or not outcome["cancelled"]:
+                    raise
+                result = {"status": "CANCELLED", "refund_cents": outcome["refund_cents"], "fee_cents": outcome.get("fee_cents", 0), "sandbox": None}
+            _assert_sandbox_flag(result, settlement["money_mode"], "LiteAPI cancel")
+            refund_cents, note = result["refund_cents"], f"cancelled with the hotel ({result['status']})"
+            if result["status"] == "CANCELLED_WITH_CHARGES":
+                fee_cents = result["fee_cents"]
+        elif row["provider"] == "duffel":
+            refund_cents, parts = 0, []
+            for order_id in (row["provider_booking_id"] or "").split(","):
+                if order_id.strip():
+                    res = duffel.cancel_order(order_id.strip())
+                    refund_cents += cents(res.get("refund_amount"))
+                    parts.append(res.get("refund_to") or "")
+            note = f"cancelled with the airline (refund to {', '.join(p for p in parts if p) or 'balance'})"
+        else:
+            refund_cents, note = int(row["amount_cents"] or item["total_cents"] or 0), "cancelled (simulated)"
+    except Exception as exc:
+        refused = (isinstance(exc, BookingError) and exc.code != "network" and exc.status is not None and exc.status < 500) \
+            or (isinstance(exc, duffel.DuffelError) and exc.status is not None and exc.status < 500)
+        with get_conn() as conn:
+            if refused:
+                conn.execute("UPDATE bookings SET status = ? WHERE trip_id = ? AND item_key = ? AND status = 'cancelling'",
+                             (row["status"], trip_id, item_key))
+                _set_cursor(conn, settlement["id"], None)
+                _event(conn, settlement["id"], "cancel", f"the supplier refused the cancellation: {exc}", item_key=item_key, level="error")
+            else:
+                _event(conn, settlement["id"], "cancel", f"the supplier did not answer the cancellation: {exc}", item_key=item_key, level="error")
+        if not refused:
+            _needs_attention(settlement["id"], f"{row['title']}: cancellation state unknown", ctx)
+        raise
+
+    # 3. Persist the cancellation, then refund from the ledger.
+    refund_ids = _finish_cancellation(settlement["id"], lock, item, row, refund_cents, note, user["id"], fee_cents)
+    with get_conn() as conn:
         _cas(conn, settlement["id"], "partially_booked", DONE_STATUSES)
-        _event(conn, settlement["id"], "cancel", note, item_key=item_key,
-               data={"user_id": user["id"], "refund_cents": refund_cents, "refunded_cents": refunded})
-        if loss:
-            _event(conn, settlement["id"], "loss", f"supplier cancellation fee absorbed by Rovyn: {dollars(loss)}",
-                   item_key=item_key, level="warn", data={"fee_cents": loss})
+    try:
+        refunded = _issue_refunds(settlement["id"], refund_ids)
+    except RefundUnresolved:
+        return {"cancelled": True, "refund_cents": refund_cents, "refunded_cents": 0, "refund_pending": True,
+                "note": note + " — the refunds are being retried"}
     for member in ctx["members"]:
         email_service.send_email(member["email"], f"Booking cancelled — {ctx['trip']['name']}",
                                  email_service.cancellation_html(ctx["trip"]["name"], row["title"], user["name"], refunded / 100))
@@ -2236,9 +2805,11 @@ def checkout_summary(conn, trip, user_id: str) -> dict | None:
         return {"status": None, "transient": False}
     attempts = _attempts(conn, row["id"])
     mine = attempts.get(user_id)
+    due = _parse_dt(row["deadline"])
     return {
         "status": row["status"], "round": row["round"], "money_mode": row["money_mode"], "deadline": row["deadline"],
-        "authorized_count": sum(1 for a in attempts.values() if a["status"] in ("authorized", "captured", "refunded")),
+        "deadline_passed": bool(due and due < _now_dt() and row["status"] in OPEN_STATUSES),
+        "authorized_count": sum(1 for a in attempts.values() if a["status"] in ("authorized", "nothing_due", "captured", "refunded")),
         "my_status": mine["status"] if mine else None,
         "transient": row["status"] in SETTLING_STATUSES,
     }
@@ -2315,9 +2886,17 @@ def checkout_state(trip, user: dict) -> dict:
 
     timeline = [{"at": e["at"], "step": e["step"], "item_key": e["item_key"], "level": e["level"], "message": e["message"]}
                 for e in events if visible(e)][:25]
+    if row["status"] in DONE_STATUSES:
+        by_key = {i["item_key"]: i for i in lock["items"]}
+        for c in out["confirmations"]:
+            it = by_key.get(c["item_key"])
+            c["can_cancel"] = bool(it) and c["status"] in ("booked", "pending_confirmation") \
+                and _may_cancel(trip["leader_id"], it, c, user["id"])
+    due = _parse_dt(row["deadline"])
     out["settlement"] = {
         "id": row["id"], "round": row["round"], "status": row["status"], "money_mode": row["money_mode"],
-        "deadline": row["deadline"], "verified_at": lock.get("verified_at"), "fee_percent": lock.get("fee_percent", 0),
+        "deadline": row["deadline"], "deadline_passed": bool(due and due < _now_dt() and row["status"] in OPEN_STATUSES),
+        "verified_at": lock.get("verified_at"), "fee_percent": lock.get("fee_percent", 0),
         "currency": lock.get("currency", "USD"), "needs_ack": bool(lock.get("needs_ack")),
         "items": [_public_item(i) for i in lock["items"]],
         "members": [{"user_id": m["id"], "name": m["name"],
@@ -2329,3 +2908,58 @@ def checkout_state(trip, user: dict) -> dict:
         "transient": row["status"] in SETTLING_STATUSES,
     }
     return out
+
+
+# ---------------------------------------------------------------------------
+# Guards the trip routers call
+# ---------------------------------------------------------------------------
+
+def assert_profile_change_allowed(trip_id: str, user: dict, profile: dict) -> None:
+    """Once a traveler's share is in, the fields the booking needs cannot be
+    blanked (the airline hold already carries them)."""
+    with get_conn(readonly=True) as conn:
+        row = active_settlement(conn, trip_id)
+        if row is None:
+            return
+        mine = next((a for a in _attempts(conn, row["id"]).values() if a["user_id"] == user["id"]), None)
+    if mine is None or mine["status"] not in ("authorized", "nothing_due", "captured", "releasing"):
+        return
+    reqs = profile_requirements(json.loads(row["lock"]), user["id"], profile, user.get("email"))
+    if reqs["missing"]:
+        raise BookingError("Your payment is in — these details are needed for the booking and can't be removed now: "
+                           + ", ".join(reqs["missing"]), "profile_locked", 409)
+
+
+def before_trip_delete(trip_id: str) -> None:
+    """A trip with money in motion cannot be deleted; an idle round is closed
+    and its airline holds released so the rows can go."""
+    with get_conn(readonly=True) as conn:
+        busy = conn.execute(
+            "SELECT 1 FROM payment_attempts WHERE trip_id = ? AND status IN ('pending', 'authorized', 'captured', 'releasing')",
+            (trip_id,)).fetchone()
+        row = active_settlement(conn, trip_id)
+    if busy:
+        raise BookingError("Money is still in motion for this trip — abandon the group checkout or cancel its bookings first.",
+                           "locked", 400)
+    if row is not None:
+        lock = json.loads(row["lock"])
+        with get_conn() as conn:
+            _cas(conn, row["id"], "cancelled", (row["status"],))
+        _release_holds(lock)
+
+
+def delete_trip_rows(conn, trip_id: str) -> None:
+    """The settlement tables, in foreign-key order, before the trip row goes.
+    (webhook_events and traveler_profiles are not trip-scoped and stay.)"""
+    conn.execute("DELETE FROM refunds WHERE settlement_id IN (SELECT id FROM settlements WHERE trip_id = ?)", (trip_id,))
+    conn.execute("DELETE FROM settlement_events WHERE settlement_id IN (SELECT id FROM settlements WHERE trip_id = ?)", (trip_id,))
+    conn.execute("DELETE FROM payment_attempts WHERE trip_id = ?", (trip_id,))
+    conn.execute("DELETE FROM settlements WHERE trip_id = ?", (trip_id,))
+
+
+def pending_attempt_for(conn, trip_id: str, user_id: str) -> dict | None:
+    """The traveler's open (pending) attempt, for leave_trip to close properly."""
+    row = conn.execute(
+        "SELECT * FROM payment_attempts WHERE trip_id = ? AND user_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
+        (trip_id, user_id)).fetchone()
+    return dict(row) if row else None

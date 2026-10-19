@@ -152,7 +152,7 @@ CREATE TABLE IF NOT EXISTS settlements (
     id            TEXT PRIMARY KEY,
     trip_id       TEXT NOT NULL REFERENCES trips(id),
     round         INTEGER NOT NULL DEFAULT 1,
-    status        TEXT NOT NULL DEFAULT 'collecting',  -- collecting | reconfirm | verifying | booking | capturing | paying | reconciling | booked | partially_booked | needs_attention | failed | cancelled | resolved
+    status        TEXT NOT NULL DEFAULT 'collecting',  -- collecting | reconfirm | verifying | booking | capturing | unwinding | paying | reconciling | booked | partially_booked | needs_attention | failed | cancelled | resolved
     money_mode    TEXT NOT NULL DEFAULT 'simulated',   -- simulated | test | live, decided at lock time
     currency      TEXT NOT NULL DEFAULT 'USD',
     lock          TEXT NOT NULL,                        -- JSON: provider-verified items + per-member checks + progress
@@ -185,7 +185,7 @@ CREATE TABLE IF NOT EXISTS payment_attempts (
     provider            TEXT NOT NULL DEFAULT 'simulated',  -- stripe | simulated
     checkout_session_id TEXT UNIQUE,
     payment_intent_id   TEXT UNIQUE,
-    status              TEXT NOT NULL DEFAULT 'pending',    -- pending | authorized | releasing | captured | released | refunded | failed | expired
+    status              TEXT NOT NULL DEFAULT 'pending',    -- pending | authorized | nothing_due | releasing | captured | released | refunded | failed | expired
     amount_cents        INTEGER NOT NULL,
     capture_before      TEXT,
     captured_cents      INTEGER,
@@ -193,8 +193,8 @@ CREATE TABLE IF NOT EXISTS payment_attempts (
     created_at          TEXT NOT NULL,
     updated_at          TEXT NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS payment_attempts_active_idx ON payment_attempts(trip_id, user_id)
-    WHERE status IN ('pending', 'authorized', 'releasing', 'captured', 'refunded');
+CREATE UNIQUE INDEX IF NOT EXISTS payment_attempts_active_idx ON payment_attempts(settlement_id, user_id)
+    WHERE status IN ('pending', 'authorized', 'nothing_due', 'releasing', 'captured');
 
 CREATE TABLE IF NOT EXISTS refunds (
     id              TEXT PRIMARY KEY,               -- doubles as the Stripe Idempotency-Key

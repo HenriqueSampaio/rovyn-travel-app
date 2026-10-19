@@ -211,6 +211,12 @@ def get_order(order_id: str) -> dict:
     return _duffel_request("GET", f"/air/orders/{order_id}")
 
 
+def list_recent_orders(limit: int = 200) -> list[dict]:
+    """The account's most recent orders (newest first) — used to find a hold
+    whose creation call timed out, by the metadata Rovyn sent with it."""
+    return _duffel_request("GET", "/air/orders", params={"limit": limit, "sort": "-created_at"}) or []
+
+
 def cancel_order(order_id: str) -> dict:
     """Two-step: create the pending cancellation, then confirm it. The refund
     goes to Rovyn's balance — the traveler is refunded on Stripe by us."""

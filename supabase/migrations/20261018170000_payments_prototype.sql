@@ -47,8 +47,8 @@ CREATE TABLE IF NOT EXISTS payment_attempts (
     created_at          TEXT NOT NULL,
     updated_at          TEXT NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS payment_attempts_active_idx ON payment_attempts(trip_id, user_id)
-    WHERE status IN ('pending', 'authorized', 'releasing', 'captured', 'refunded');
+CREATE UNIQUE INDEX IF NOT EXISTS payment_attempts_active_idx ON payment_attempts(settlement_id, user_id)
+    WHERE status IN ('pending', 'authorized', 'nothing_due', 'releasing', 'captured');
 
 CREATE TABLE IF NOT EXISTS refunds (
     id              TEXT PRIMARY KEY,
